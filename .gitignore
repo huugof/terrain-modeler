@@ -8,3 +8,4 @@ out/
 *.obj
 *.mtl
 *.png
+src/*.egg-info/
