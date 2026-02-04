@@ -1,2 +1,0 @@
-[console_scripts]
-va-lidar-context = va_lidar_context.cli:main
