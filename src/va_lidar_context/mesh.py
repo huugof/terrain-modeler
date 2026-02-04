@@ -56,6 +56,13 @@ def export_mesh(mesh: trimesh.Trimesh, path: str) -> None:
     mesh.export(path)
 
 
+def combine_meshes(meshes: List[trimesh.Trimesh]) -> Optional[trimesh.Trimesh]:
+    valid = [m for m in meshes if m is not None]
+    if not valid:
+        return None
+    return trimesh.util.concatenate(valid)
+
+
 def terrain_mesh_from_raster(
     raster_path: str,
     xy_scale: float = 1.0,
@@ -143,6 +150,52 @@ def export_obj_with_uv(
         m.write("Kd 1.000 1.000 1.000\n")
         m.write("Ks 0.000 0.000 0.000\n")
         m.write(f"map_Kd {texture_filename}\n")
+
+
+def export_scene_with_terrain_texture(
+    terrain_mesh: trimesh.Trimesh,
+    terrain_uv: "list[list[float]]",
+    buildings_mesh: Optional[trimesh.Trimesh],
+    obj_path: str,
+    mtl_path: str,
+    texture_filename: str,
+) -> None:
+    t_verts = terrain_mesh.vertices
+    t_faces = terrain_mesh.faces
+    b_verts = buildings_mesh.vertices if buildings_mesh is not None else []
+    b_faces = buildings_mesh.faces if buildings_mesh is not None else []
+    t_count = len(t_verts)
+
+    with open(obj_path, "w") as f:
+        f.write(f"mtllib {Path(mtl_path).name}\n")
+        f.write("o terrain\n")
+        for v in t_verts:
+            f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+        for v in b_verts:
+            f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+        for t in terrain_uv:
+            f.write(f"vt {t[0]} {t[1]}\n")
+        f.write("usemtl terrain\n")
+        for face in t_faces:
+            v1, v2, v3 = face
+            f.write(f"f {v1 + 1}/{v1 + 1} {v2 + 1}/{v2 + 1} {v3 + 1}/{v3 + 1}\n")
+        if len(b_faces):
+            f.write("o buildings\n")
+            f.write("usemtl buildings\n")
+            for face in b_faces:
+                v1, v2, v3 = face
+                f.write(f"f {v1 + 1 + t_count} {v2 + 1 + t_count} {v3 + 1 + t_count}\n")
+
+    with open(mtl_path, "w") as m:
+        m.write("newmtl terrain\n")
+        m.write("Ka 1.000 1.000 1.000\n")
+        m.write("Kd 1.000 1.000 1.000\n")
+        m.write("Ks 0.000 0.000 0.000\n")
+        m.write(f"map_Kd {texture_filename}\n")
+        m.write("newmtl buildings\n")
+        m.write("Ka 0.800 0.800 0.800\n")
+        m.write("Kd 0.800 0.800 0.800\n")
+        m.write("Ks 0.000 0.000 0.000\n")
 
 
 def tree_mesh_from_canopy(

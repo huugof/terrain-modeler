@@ -6,11 +6,11 @@ CLI to build context building meshes from Virginia LiDAR and building footprints
 ```bash
 va-lidar-context build S13_4899_20 \
   --out ./out \
-  --terrain-sample 4 \
+  --terrain-sample 10 \
   --random-heights 15 40 \
   --fill-dtm --fill-hard \
   --naip-texture --naip-flip-v \
-  --trees
+  --combine-output
 ```
 
 ## Requirements
@@ -32,11 +32,11 @@ pip install -e .
 ```bash
 va-lidar-context build S13_4899_20 \
   --out ./out \
-  --terrain-sample 4 \
+  --terrain-sample 10 \
   --random-heights 15 40 \
   --fill-dtm --fill-hard \
   --naip-texture --naip-flip-v \
-  --trees
+  --combine-output
 ```
 
 ## Outputs
@@ -46,6 +46,8 @@ Per tile in `./out/<tile_name>/`:
 - `footprints.geojson`
 - `buildings.obj`
 - `terrain.obj`, `terrain.mtl`, `terrain.png`
+- `scene.obj` (if `--combine-output`)
+- `scene.mtl` (if `--combine-output` and `--naip-texture`)
 - `trees.obj`
 - `report.json`
 - `dtm.tif`, `dsm.tif`, `ndsm.tif` (only if `--keep-rasters`)

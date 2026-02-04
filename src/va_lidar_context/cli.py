@@ -18,6 +18,7 @@ from .heights import (
     reproject_features,
 )
 from .mesh import (
+    combine_meshes,
     export_mesh,
     export_obj_with_uv,
     extrude_footprints,
@@ -55,6 +56,8 @@ def build_command(cfg: BuildConfig) -> int:
     terrain_mtl_path = tile_dir / "terrain.mtl"
     terrain_tex_path = tile_dir / "terrain.png"
     trees_path = tile_dir / "trees.obj"
+    combined_path = tile_dir / "scene.obj"
+    combined_mtl_path = tile_dir / "scene.mtl"
     report_path = tile_dir / "report.json"
 
     logger.info("Stage 1/6: tile lookup")
@@ -198,8 +201,29 @@ def build_command(cfg: BuildConfig) -> int:
                 str(terrain_mtl_path),
                 terrain_tex_path.name,
             )
+            if cfg.combine_output:
+                from .mesh import export_scene_with_terrain_texture
+
+                export_scene_with_terrain_texture(
+                    terrain_mesh,
+                    uv,
+                    mesh,
+                    str(combined_path),
+                    str(combined_mtl_path),
+                    terrain_tex_path.name,
+                )
         else:
             export_mesh(terrain_mesh, str(terrain_path))
+
+    if cfg.combine_output:
+        if not cfg.naip_texture:
+            combined = combine_meshes([terrain_mesh, mesh])
+            if combined is None:
+                logger.warning(
+                    "No combined mesh produced (missing terrain or buildings)"
+                )
+            else:
+                export_mesh(combined, str(combined_path))
 
     if cfg.trees:
         logger.info("Stage 7/7: tree blobs")
@@ -321,6 +345,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--naip-max-size", type=int, default=4000)
     build.add_argument("--naip-flip-u", action="store_true")
     build.add_argument("--naip-flip-v", action="store_true")
+    build.add_argument(
+        "--combine-output",
+        action="store_true",
+        help="Export a combined OBJ containing terrain + buildings (untextured).",
+    )
     build.add_argument("--trees", action="store_true")
     build.add_argument("--trees-resolution", type=float, default=2.0)
     build.add_argument("--trees-sample", type=int, default=2)
@@ -361,6 +390,7 @@ def main() -> int:
             naip_max_size=args.naip_max_size,
             naip_flip_u=args.naip_flip_u,
             naip_flip_v=args.naip_flip_v,
+            combine_output=args.combine_output,
             trees=args.trees,
             trees_resolution=args.trees_resolution,
             trees_sample=args.trees_sample,

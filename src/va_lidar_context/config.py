@@ -22,6 +22,7 @@ DEFAULT_NAIP_PIXEL_SIZE = 1.0
 DEFAULT_NAIP_MAX_SIZE = 4000
 DEFAULT_NAIP_FLIP_U = False
 DEFAULT_NAIP_FLIP_V = False
+DEFAULT_COMBINE_OUTPUT = False
 DEFAULT_TREES_ENABLED = False
 DEFAULT_TREES_RESOLUTION = 2.0
 DEFAULT_TREES_SAMPLE = 2
@@ -56,6 +57,7 @@ class BuildConfig:
     naip_max_size: int = DEFAULT_NAIP_MAX_SIZE
     naip_flip_u: bool = DEFAULT_NAIP_FLIP_U
     naip_flip_v: bool = DEFAULT_NAIP_FLIP_V
+    combine_output: bool = DEFAULT_COMBINE_OUTPUT
     trees: bool = DEFAULT_TREES_ENABLED
     trees_resolution: float = DEFAULT_TREES_RESOLUTION
     trees_sample: int = DEFAULT_TREES_SAMPLE
