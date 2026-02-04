@@ -8,6 +8,8 @@ from statistics import mean, median
 from typing import Any, Dict, List
 
 from pyproj import CRS, Transformer
+from shapely.geometry import box
+from shapely.ops import transform as shp_transform
 
 from .config import BuildConfig
 from .heights import (
@@ -18,6 +20,7 @@ from .heights import (
     reproject_features,
 )
 from .mesh import (
+    apply_scene_transform,
     combine_meshes,
     export_mesh,
     export_obj_with_uv,
@@ -27,6 +30,7 @@ from .mesh import (
 )
 from .naip import download_naip_image
 from .pdal_surfaces import (
+    clip_raster,
     fill_nodata_raster,
     make_canopy_dsm,
     make_chm,
@@ -58,6 +62,7 @@ def build_command(cfg: BuildConfig) -> int:
     trees_path = tile_dir / "trees.obj"
     combined_path = tile_dir / "scene.obj"
     combined_mtl_path = tile_dir / "scene.mtl"
+    dtm_clip_path = tile_dir / "dtm_clip.tif"
     report_path = tile_dir / "report.json"
 
     logger.info("Stage 1/6: tile lookup")
@@ -71,14 +76,81 @@ def build_command(cfg: BuildConfig) -> int:
     laz_url = tile_info["laz_url"]
     download_file(laz_url, laz_path, force=cfg.force)
 
-    logger.info("Stage 3/6: fetch footprints")
+    # Read LAZ CRS early for clipping and units
+    laz_wkt = get_laz_crs_wkt(str(laz_path))
+    laz_crs = CRS.from_wkt(laz_wkt)
+    unit_scale = get_unit_scale(laz_crs, cfg.units)
+
+    clip_poly = None
+    clip_bbox_wgs84 = None
+    has_center = any(
+        v is not None
+        for v in (cfg.clip_center_lonlat, cfg.clip_center_latlon, cfg.clip_center_xy)
+    )
+    if cfg.clip_size is not None and not has_center:
+        raise ValueError(
+            "Provide a clip center with --center-lonlat, --center-latlon, or --center-xy"
+        )
+    if has_center and cfg.clip_size is None:
+        raise ValueError("Provide --size when using a clip center")
+    if has_center:
+        if (
+            sum(
+                1
+                for v in (
+                    cfg.clip_center_lonlat,
+                    cfg.clip_center_latlon,
+                    cfg.clip_center_xy,
+                )
+                if v is not None
+            )
+            > 1
+        ):
+            raise ValueError(
+                "Use only one of --center-lonlat, --center-latlon, or --center-xy"
+            )
+        size_laz = cfg.clip_size / unit_scale
+        half = size_laz / 2.0
+        if cfg.clip_center_lonlat or cfg.clip_center_latlon:
+            if cfg.clip_center_lonlat:
+                lon, lat = cfg.clip_center_lonlat
+            else:
+                lat, lon = cfg.clip_center_latlon
+            bbox = tile_info["bbox_wgs84"]
+            if not (
+                bbox["xmin"] <= lon <= bbox["xmax"]
+                and bbox["ymin"] <= lat <= bbox["ymax"]
+            ):
+                raise ValueError(
+                    "Clip center is outside the tile bbox. If you used lat/lon order, try --center-latlon; "
+                    "for lon/lat use --center-lonlat."
+                )
+            to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
+            cx, cy = to_laz.transform(lon, lat)
+        else:
+            cx = cfg.clip_center_xy[0] / unit_scale
+            cy = cfg.clip_center_xy[1] / unit_scale
+        clip_poly = box(cx - half, cy - half, cx + half, cy + half)
+
+        to_wgs84 = Transformer.from_crs(laz_crs, "EPSG:4326", always_xy=True)
+        clip_poly_wgs84 = shp_transform(to_wgs84.transform, clip_poly)
+        minx, miny, maxx, maxy = clip_poly_wgs84.bounds
+        clip_bbox_wgs84 = (minx, miny, maxx, maxy)
+
+    logger.info("Stage 3/7: fetch footprints")
     if footprints_path.exists() and not cfg.force:
         footprints = json.loads(footprints_path.read_text())
     else:
         bbox = tile_info["bbox_wgs84"]
-        footprints = fetch_footprints_geojson(
-            (bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"])
+        bbox_tuple = (
+            bbox["xmin"],
+            bbox["ymin"],
+            bbox["xmax"],
+            bbox["ymax"],
         )
+        if clip_bbox_wgs84:
+            bbox_tuple = clip_bbox_wgs84
+        footprints = fetch_footprints_geojson(bbox_tuple)
         footprints_path.write_text(json.dumps(footprints))
 
     logger.info("Stage 4/7: generate rasters")
@@ -104,16 +176,21 @@ def build_command(cfg: BuildConfig) -> int:
         if cfg.force or not ndsm_path.exists():
             make_ndsm(dsm_path, dtm_use_path, ndsm_path)
 
+    terrain_source_path = dtm_use_path
+    if clip_poly is not None:
+        if cfg.force or not dtm_clip_path.exists():
+            clip_raster(dtm_use_path, dtm_clip_path, clip_poly)
+        terrain_source_path = dtm_clip_path
+
     logger.info("Stage 5/7: compute heights")
-    laz_wkt = get_laz_crs_wkt(str(laz_path))
-    laz_crs = CRS.from_wkt(laz_wkt)
-    unit_scale = get_unit_scale(laz_crs, cfg.units)
 
     min_height_laz = cfg.min_height / unit_scale
     max_height_laz = cfg.max_height / unit_scale
     floor_to_floor_laz = cfg.floor_to_floor / unit_scale
 
     reprojected = reproject_features(footprints, laz_crs)
+    if clip_poly is not None:
+        reprojected = [f for f in reprojected if f["geometry"].within(clip_poly)]
 
     override_range = None
     rng = None
@@ -142,61 +219,95 @@ def build_command(cfg: BuildConfig) -> int:
     mesh = extrude_footprints(heights, xy_scale=unit_scale, z_scale=unit_scale)
     if mesh is None:
         logger.warning("No mesh produced (empty footprints or extrusion failures)")
-    else:
-        export_mesh(mesh, str(mesh_path))
 
     terrain_mesh = terrain_mesh_from_raster(
-        str(dtm_use_path),
+        str(terrain_source_path),
         xy_scale=unit_scale,
         z_scale=unit_scale,
         sample=cfg.terrain_sample,
     )
     if terrain_mesh is None:
         logger.warning("No terrain mesh produced (empty or invalid DTM)")
-    else:
-        if cfg.naip_texture:
-            import rasterio
 
-            with rasterio.open(dtm_use_path) as ds:
-                left, bottom, right, top = ds.bounds
-                bbox_laz = [
-                    (left, bottom),
-                    (left, top),
-                    (right, top),
-                    (right, bottom),
-                ]
+    terrain_uv = None
+    if terrain_mesh is not None and cfg.naip_texture:
+        import rasterio
 
-            to_3857_from_laz = Transformer.from_crs(
-                laz_crs, "EPSG:3857", always_xy=True
-            )
-            xs, ys = to_3857_from_laz.transform(
-                [p[0] for p in bbox_laz], [p[1] for p in bbox_laz]
-            )
-            xmin, xmax = min(xs), max(xs)
-            ymin, ymax = min(ys), max(ys)
+        with rasterio.open(terrain_source_path) as ds:
+            left, bottom, right, top = ds.bounds
+            bbox_laz = [
+                (left, bottom),
+                (left, top),
+                (right, top),
+                (right, bottom),
+            ]
 
-            download_naip_image(
-                (xmin, ymin, xmax, ymax),
-                terrain_tex_path,
-                pixel_size=cfg.naip_pixel_size,
-                max_size=cfg.naip_max_size,
-            )
+        to_3857_from_laz = Transformer.from_crs(laz_crs, "EPSG:3857", always_xy=True)
+        xs, ys = to_3857_from_laz.transform(
+            [p[0] for p in bbox_laz], [p[1] for p in bbox_laz]
+        )
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
 
-            verts = terrain_mesh.vertices
-            x_laz = verts[:, 0] / unit_scale
-            y_laz = verts[:, 1] / unit_scale
-            x3857, y3857 = to_3857_from_laz.transform(x_laz, y_laz)
-            u = (x3857 - xmin) / (xmax - xmin)
-            v = (y3857 - ymin) / (ymax - ymin)
+        download_naip_image(
+            (xmin, ymin, xmax, ymax),
+            terrain_tex_path,
+            pixel_size=cfg.naip_pixel_size,
+            max_size=cfg.naip_max_size,
+        )
+
+        verts = terrain_mesh.vertices
+        x_laz = verts[:, 0] / unit_scale
+        y_laz = verts[:, 1] / unit_scale
+        x3857, y3857 = to_3857_from_laz.transform(x_laz, y_laz)
+        u = (x3857 - xmin) / (xmax - xmin)
+        v = (y3857 - ymin) / (ymax - ymin)
+        v = 1.0 - v
+        if cfg.naip_flip_u:
+            u = 1.0 - u
+        if cfg.naip_flip_v:
             v = 1.0 - v
-            if cfg.naip_flip_u:
-                u = 1.0 - u
-            if cfg.naip_flip_v:
-                v = 1.0 - v
-            uv = list(zip(u, v))
+        terrain_uv = list(zip(u, v))
+
+    center_x = None
+    center_y = None
+    if cfg.flip_x or cfg.flip_y or cfg.rotate_z:
+        if terrain_mesh is not None:
+            bounds = terrain_mesh.bounds
+            center_x = (bounds[0][0] + bounds[1][0]) / 2.0
+            center_y = (bounds[0][1] + bounds[1][1]) / 2.0
+        elif mesh is not None:
+            bounds = mesh.bounds
+            center_x = (bounds[0][0] + bounds[1][0]) / 2.0
+            center_y = (bounds[0][1] + bounds[1][1]) / 2.0
+        else:
+            center_x = 0.0
+            center_y = 0.0
+        apply_scene_transform(
+            terrain_mesh,
+            center_x,
+            center_y,
+            flip_x=cfg.flip_x,
+            flip_y=cfg.flip_y,
+            rotate_deg=cfg.rotate_z,
+        )
+        apply_scene_transform(
+            mesh,
+            center_x,
+            center_y,
+            flip_x=cfg.flip_x,
+            flip_y=cfg.flip_y,
+            rotate_deg=cfg.rotate_z,
+        )
+
+    if mesh is not None:
+        export_mesh(mesh, str(mesh_path))
+
+    if terrain_mesh is not None:
+        if cfg.naip_texture and terrain_uv is not None:
             export_obj_with_uv(
                 terrain_mesh,
-                uv,
+                terrain_uv,
                 str(terrain_path),
                 str(terrain_mtl_path),
                 terrain_tex_path.name,
@@ -206,7 +317,7 @@ def build_command(cfg: BuildConfig) -> int:
 
                 export_scene_with_terrain_texture(
                     terrain_mesh,
-                    uv,
+                    terrain_uv,
                     mesh,
                     str(combined_path),
                     str(combined_mtl_path),
@@ -229,14 +340,20 @@ def build_command(cfg: BuildConfig) -> int:
         logger.info("Stage 7/7: tree blobs")
         canopy_path = tile_dir / "canopy_dsm.tif"
         chm_path = tile_dir / "canopy_height.tif"
+        chm_clip_path = tile_dir / "canopy_height_clip.tif"
         if cfg.force or not canopy_path.exists():
             make_canopy_dsm(laz_path, canopy_path, cfg.trees_resolution)
         if cfg.force or not chm_path.exists():
             make_chm(canopy_path, dtm_use_path, chm_path)
+        chm_use_path = chm_path
+        if clip_poly is not None:
+            if cfg.force or not chm_clip_path.exists():
+                clip_raster(chm_path, chm_clip_path, clip_poly)
+            chm_use_path = chm_clip_path
 
         trees_mesh = tree_mesh_from_canopy(
-            str(chm_path),
-            str(dtm_use_path),
+            str(chm_use_path),
+            str(terrain_source_path),
             xy_scale=unit_scale,
             z_scale=unit_scale,
             sample=cfg.trees_sample,
@@ -249,16 +366,27 @@ def build_command(cfg: BuildConfig) -> int:
         if trees_mesh is None:
             logger.warning("No tree mesh produced (empty canopy or filters)")
         else:
+            if (cfg.flip_x or cfg.flip_y or cfg.rotate_z) and center_x is not None:
+                apply_scene_transform(
+                    trees_mesh,
+                    center_x,
+                    center_y,
+                    flip_x=cfg.flip_x,
+                    flip_y=cfg.flip_y,
+                    rotate_deg=cfg.rotate_z,
+                )
             export_mesh(trees_mesh, str(trees_path))
 
     if not cfg.keep_rasters:
         for path in (
             dtm_path,
             dtm_filled_path,
+            dtm_clip_path,
             dsm_path,
             ndsm_path,
             tile_dir / "canopy_dsm.tif",
             tile_dir / "canopy_height.tif",
+            tile_dir / "canopy_height_clip.tif",
         ):
             if path.exists():
                 path.unlink()
@@ -270,6 +398,17 @@ def build_command(cfg: BuildConfig) -> int:
         "unit_scale": unit_scale,
         "footprints_total": len(footprints.get("features", [])),
         "footprints_extruded": len(heights),
+        "clip": {
+            "enabled": clip_poly is not None,
+            "center_lonlat": cfg.clip_center_lonlat,
+            "center_xy": cfg.clip_center_xy,
+            "size": cfg.clip_size,
+        },
+        "transform": {
+            "flip_x": cfg.flip_x,
+            "flip_y": cfg.flip_y,
+            "rotate_z": cfg.rotate_z,
+        },
         "percentile": cfg.percentile,
         "random_heights": {
             "enabled": override_heights,
@@ -356,6 +495,49 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--trees-min-height", type=float, default=10.0)
     build.add_argument("--trees-max-height", type=float, default=None)
     build.add_argument("--trees-radius", type=float, default=6.0)
+    build.add_argument(
+        "--flip-y",
+        action="store_true",
+        help="Mirror all meshes across the Y axis (useful if geometry appears flipped north/south).",
+    )
+    build.add_argument(
+        "--flip-x",
+        action="store_true",
+        help="Mirror all meshes across the X axis (useful if geometry appears flipped east/west).",
+    )
+    build.add_argument(
+        "--rotate-z",
+        type=float,
+        default=0.0,
+        help="Rotate all meshes around Z by degrees (counter-clockwise).",
+    )
+    build.add_argument(
+        "--center-lonlat",
+        nargs=2,
+        type=float,
+        metavar=("LON", "LAT"),
+        help="Center of clip region in lon/lat (WGS84). Requires --size.",
+    )
+    build.add_argument(
+        "--center-latlon",
+        nargs=2,
+        type=float,
+        metavar=("LAT", "LON"),
+        help="Center of clip region in lat/lon (WGS84). Requires --size.",
+    )
+    build.add_argument(
+        "--center-xy",
+        nargs=2,
+        type=float,
+        metavar=("X", "Y"),
+        help="Center of clip region in output units (feet/meters). Requires --size.",
+    )
+    build.add_argument(
+        "--size",
+        type=float,
+        default=None,
+        help="Clip size (square) in output units. Used with --center-lonlat, --center-latlon, or --center-xy.",
+    )
 
     return parser
 
@@ -397,6 +579,17 @@ def main() -> int:
             trees_min_height=args.trees_min_height,
             trees_max_height=args.trees_max_height,
             trees_radius=args.trees_radius,
+            clip_center_lonlat=tuple(args.center_lonlat)
+            if args.center_lonlat
+            else None,
+            clip_center_latlon=tuple(args.center_latlon)
+            if args.center_latlon
+            else None,
+            clip_center_xy=tuple(args.center_xy) if args.center_xy else None,
+            clip_size=args.size,
+            flip_y=args.flip_y,
+            flip_x=args.flip_x,
+            rotate_z=args.rotate_z,
         )
         return build_command(cfg)
 

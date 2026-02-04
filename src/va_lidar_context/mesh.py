@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
+import numpy as np
 import trimesh
 from shapely.affinity import scale as scale_geom
 from shapely.validation import make_valid
@@ -61,6 +62,66 @@ def combine_meshes(meshes: List[trimesh.Trimesh]) -> Optional[trimesh.Trimesh]:
     if not valid:
         return None
     return trimesh.util.concatenate(valid)
+
+
+def apply_scene_transform(
+    mesh: Optional[trimesh.Trimesh],
+    center_x: float,
+    center_y: float,
+    flip_x: bool = False,
+    flip_y: bool = False,
+    rotate_deg: float = 0.0,
+) -> None:
+    if mesh is None:
+        return
+
+    to_origin = np.array(
+        [
+            [1.0, 0.0, 0.0, -center_x],
+            [0.0, 1.0, 0.0, -center_y],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    sx = -1.0 if flip_x else 1.0
+    sy = -1.0 if flip_y else 1.0
+    scale = np.array(
+        [
+            [sx, 0.0, 0.0, 0.0],
+            [0.0, sy, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    theta = np.deg2rad(rotate_deg)
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    rot = np.array(
+        [
+            [c, -s, 0.0, 0.0],
+            [s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    from_origin = np.array(
+        [
+            [1.0, 0.0, 0.0, center_x],
+            [0.0, 1.0, 0.0, center_y],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    transform = from_origin @ rot @ scale @ to_origin
+    mesh.apply_transform(transform)
 
 
 def terrain_mesh_from_raster(

@@ -1,0 +1,4 @@
+- [ ] ability to create and export contour curves
+- [ ] look at the tree mesh again
+- [ ] overlay naib on buildings too?
+- [ ] figure out how to import this into a model effectively

@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.fill import fillnodata
+from rasterio.mask import mask as rio_mask
 from rasterio.warp import Resampling, reproject
 
 
@@ -182,4 +183,34 @@ def fill_nodata_raster(
                 with rasterio.open(out_path, "w", **profile) as dst:
                     dst.write(filled2.astype("float32"), 1)
 
+    return out_path
+
+
+def clip_raster(
+    in_path: Path,
+    out_path: Path,
+    polygon,
+) -> Path:
+    with rasterio.open(in_path) as src:
+        nodata = src.nodata if src.nodata is not None else -9999
+        try:
+            out_image, out_transform = rio_mask(
+                src,
+                [polygon],
+                crop=True,
+                all_touched=False,
+                nodata=nodata,
+            )
+        except ValueError as exc:
+            raise ValueError("Clip polygon does not overlap raster bounds") from exc
+        profile = src.profile
+        profile.update(
+            height=out_image.shape[1],
+            width=out_image.shape[2],
+            transform=out_transform,
+            nodata=nodata,
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(out_path, "w", **profile) as dst:
+            dst.write(out_image)
     return out_path
