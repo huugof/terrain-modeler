@@ -24,16 +24,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11-distutils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
+# Create an isolated venv to avoid system Python package conflicts
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip
 
 WORKDIR /app
 
 COPY pyproject.toml README.md /app/
 COPY src /app/src
 
-RUN python3.11 -m pip install --upgrade pip && \
-    python3.11 -m pip install -e . && \
-    python3.11 -m pip install gunicorn
+RUN pip install -e . && \
+    pip install gunicorn
 
 EXPOSE 8000
 
