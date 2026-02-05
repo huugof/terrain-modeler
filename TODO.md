@@ -2,3 +2,7 @@
 - [ ] look at the tree mesh again
 - [ ] overlay naib on buildings too?
 - [ ] figure out how to import this into a model effectively
+- [ ] how to run on windows
+- [ ] package in a way that doesn't need cli
+- [ ] user to input coordinates and size only and script to select correct tile programmatically
+- [ ] enable selecting more than one tile and tiling them correctly
