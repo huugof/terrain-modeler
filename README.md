@@ -61,6 +61,46 @@ va-lidar-context build S13_4899_20 \
   --combine-output
 ```
 
+
+## Web UI (Local)
+Run a small local web app with a form UI for all CLI arguments:
+```bash
+va-lidar-context-web
+```
+Or:
+```bash
+python3 -m va_lidar_context.webapp
+```
+Then open `http://127.0.0.1:5000` in your browser.
+
+
+## Deploy (DigitalOcean)
+**Recommended**: Docker on a small Ubuntu droplet.
+
+### Setup
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin
+sudo usermod -aG docker $USER
+```
+Log out/in so Docker works without sudo.
+
+### Run
+```bash
+mkdir -p /data/out
+# from your repo
+sudo docker compose up -d --build
+```
+App is on `http://<droplet-ip>:8000`.
+
+### Output retention
+Outputs are stored in `/data/out` and cleaned automatically.
+Default retention: **7 days**.
+Override with env vars:
+- `VA_OUT_DIR=/data/out`
+- `VA_RETENTION_DAYS=7`
+- `VA_CLEANUP_INTERVAL=3600`
+
 ## Outputs
 Per tile in `./out/<tile_name>/`:
 - `tile.json`

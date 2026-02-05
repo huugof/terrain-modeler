@@ -22,10 +22,12 @@ dependencies = [
   "mapbox-earcut>=1.0.1",
   "matplotlib>=3.8",
   "ezdxf>=1.1",
+  "flask>=3.0",
 ]
 
 [project.scripts]
 va-lidar-context = "va_lidar_context.cli:main"
+va-lidar-context-web = "va_lidar_context.webapp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

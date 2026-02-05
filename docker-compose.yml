@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  va-lidar:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      VA_OUT_DIR: /data/out
+      VA_RETENTION_DAYS: "7"
+      VA_CLEANUP_INTERVAL: "3600"
+    volumes:
+      - /data/out:/data/out
+    restart: unless-stopped

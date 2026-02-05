@@ -35,6 +35,7 @@ DEFAULT_TREES_MIN_HEIGHT = 10.0
 DEFAULT_TREES_MAX_HEIGHT = None
 DEFAULT_TREES_RADIUS = 6.0
 DEFAULT_ALLOW_MULTI_TILE = False
+DEFAULT_EXPORT_BUILDINGS = True
 
 
 @dataclass(frozen=True)
@@ -82,3 +83,4 @@ class BuildConfig:
     contour_interval: float | None = None
     parcels: bool = False
     allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE
+    export_buildings: bool = DEFAULT_EXPORT_BUILDINGS

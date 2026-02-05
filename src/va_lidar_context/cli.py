@@ -318,9 +318,11 @@ def build_command(cfg: BuildConfig) -> int:
     )
 
     logger.info("Stage 6/7: mesh export")
-    mesh = extrude_footprints(heights, xy_scale=unit_scale, z_scale=unit_scale)
-    if mesh is None:
-        logger.warning("No mesh produced (empty footprints or extrusion failures)")
+    mesh = None
+    if cfg.export_buildings:
+        mesh = extrude_footprints(heights, xy_scale=unit_scale, z_scale=unit_scale)
+        if mesh is None:
+            logger.warning("No mesh produced (empty footprints or extrusion failures)")
 
     terrain_mesh = terrain_mesh_from_raster(
         str(terrain_source_path),
@@ -696,6 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="INTERVAL",
         help="Generate contour lines at this interval (in output units). Exports to DXF.",
     )
+    build.add_argument("--no-buildings", action="store_true", help="Skip exporting buildings mesh.")
     build.add_argument(
         "--parcels",
         action="store_true",
@@ -815,6 +818,7 @@ def main() -> int:
             clip_center_xy=tuple(args.center_xy) if args.center_xy else None,
             clip_size=args.size,
             allow_multi_tile=args.allow_multi_tile,
+            export_buildings=not args.no_buildings,
             flip_y=args.flip_y,
             flip_x=args.flip_x,
             terrain_flip_y=args.terrain_flip_y,

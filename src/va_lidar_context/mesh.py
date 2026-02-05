@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import trimesh
 from shapely.affinity import scale as scale_geom
 from shapely.validation import make_valid
@@ -280,7 +283,6 @@ def generate_contours_from_raster(
     Returns a list of (elevation, [polylines]) tuples where each polyline
     is an Nx2 or Nx3 numpy array of coordinates.
     """
-    import matplotlib.pyplot as plt
     import rasterio
 
     with rasterio.open(raster_path) as ds:
