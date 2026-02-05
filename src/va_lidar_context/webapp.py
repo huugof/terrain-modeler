@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import os
-import shutil
-import re
 import logging
+import os
+import re
+import shutil
 import threading
 import time
 import uuid
@@ -48,7 +48,7 @@ from .config import (
     DEFAULT_UNITS,
     BuildConfig,
 )
-from .util import get_logger
+from .util import ensure_dir, get_logger
 
 app = Flask(__name__)
 
@@ -289,7 +289,7 @@ INDEX_TEMPLATE = """
       <p class="sub">Generate site, building footprints, and contour models.</p>
     </header>
     <main>
-      
+
       <form class="card" method="post" action="{{ url_for('run_job') }}">
         <div class="section-title">Outputs</div>
         <div class="check-row">
@@ -660,7 +660,9 @@ def index():
     defaults = snapshot_defaults()
     with JOBS_LOCK:
         jobs = list(JOBS.values())[-8:][::-1]
-    return render_template_string(INDEX_TEMPLATE, defaults=defaults, jobs=jobs, retention_days=RETENTION_DAYS)
+    return render_template_string(
+        INDEX_TEMPLATE, defaults=defaults, jobs=jobs, retention_days=RETENTION_DAYS
+    )
 
 
 @app.route("/run", methods=["POST"])
@@ -672,7 +674,7 @@ def run_job():
     units = form.get("units") or DEFAULT_UNITS
     center_mode = "auto"
     coords = form.get("coords") or ""
-    parts = [p for p in re.split(r'[ ,]+', coords.strip()) if p]
+    parts = [p for p in re.split(r"[ ,]+", coords.strip()) if p]
     center1 = parse_float(parts[0]) if len(parts) > 0 else None
     center2 = parse_float(parts[1]) if len(parts) > 1 else None
     clip_size = parse_float(form.get("size"))
@@ -722,7 +724,9 @@ def run_job():
     combine_output = parse_bool(form.get("combine_output"))
     export_buildings = parse_bool(form.get("out_buildings"))
     contours_enabled = parse_bool(form.get("contours"))
-    contour_interval = (parse_float(form.get("contour_interval")) or 2.0) if contours_enabled else None
+    contour_interval = (
+        (parse_float(form.get("contour_interval")) or 2.0) if contours_enabled else None
+    )
     parcels = False
     trees = parse_bool(form.get("trees"))
     keep_rasters = False
