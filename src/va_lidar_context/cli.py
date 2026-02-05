@@ -371,6 +371,17 @@ def build_command(cfg: BuildConfig) -> int:
             v = 1.0 - v
         terrain_uv = list(zip(u, v))
 
+    if cfg.terrain_flip_y and terrain_mesh is not None:
+        bounds = terrain_mesh.bounds
+        center_x = (bounds[0][0] + bounds[1][0]) / 2.0
+        center_y = (bounds[0][1] + bounds[1][1]) / 2.0
+        apply_scene_transform(
+            terrain_mesh,
+            center_x,
+            center_y,
+            flip_y=True,
+        )
+
     center_x = None
     center_y = None
     if cfg.flip_x or cfg.flip_y or cfg.rotate_z:
@@ -579,6 +590,9 @@ def build_command(cfg: BuildConfig) -> int:
             "flip_y": cfg.flip_y,
             "rotate_z": cfg.rotate_z,
         },
+        "terrain_transform": {
+            "flip_y": cfg.terrain_flip_y,
+        },
         "percentile": cfg.percentile,
         "random_heights": {
             "enabled": override_heights,
@@ -686,6 +700,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--parcels",
         action="store_true",
         help="Export parcel/plot boundaries to DXF.",
+    )
+    build.add_argument(
+        "--terrain-flip-y",
+        action="store_true",
+        help="Mirror only the terrain mesh across the Y axis (keeps buildings unchanged).",
     )
     build.add_argument(
         "--flip-y",
@@ -798,6 +817,7 @@ def main() -> int:
             allow_multi_tile=args.allow_multi_tile,
             flip_y=args.flip_y,
             flip_x=args.flip_x,
+            terrain_flip_y=args.terrain_flip_y,
             rotate_z=args.rotate_z,
         )
         return build_command(cfg)

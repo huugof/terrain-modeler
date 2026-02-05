@@ -26,6 +26,7 @@ DEFAULT_COMBINE_OUTPUT = False
 DEFAULT_CLIP_SIZE = None
 DEFAULT_FLIP_Y = False
 DEFAULT_FLIP_X = False
+DEFAULT_TERRAIN_FLIP_Y = False
 DEFAULT_ROTATE_Z = 0.0
 DEFAULT_TREES_ENABLED = False
 DEFAULT_TREES_RESOLUTION = 2.0
@@ -70,6 +71,7 @@ class BuildConfig:
     clip_size: float | None = DEFAULT_CLIP_SIZE
     flip_y: bool = DEFAULT_FLIP_Y
     flip_x: bool = DEFAULT_FLIP_X
+    terrain_flip_y: bool = DEFAULT_TERRAIN_FLIP_Y
     rotate_z: float = DEFAULT_ROTATE_Z
     trees: bool = DEFAULT_TREES_ENABLED
     trees_resolution: float = DEFAULT_TREES_RESOLUTION
