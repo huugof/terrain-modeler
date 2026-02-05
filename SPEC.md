@@ -102,6 +102,19 @@ f=geojson
 
 Paginate using resultRecordCount=2000 and resultOffset=0,2000,4000,... until 0 features returned.
 
+Edge case: clip spillover across tile boundaries
+
+If a clip bbox extends beyond the selected tile bbox, current behavior still uses one tile only.
+Rasters are clipped to the tile extent; footprints outside may have no raster samples and are dropped
+or use fallback heights (warnings recorded in report.json).
+
+Proposed multi-tile spillover handling (optional):
+Detect spillover by comparing clip bbox to tile bbox.
+Query tile grid by bbox (esriGeometryEnvelope, intersects) to get all intersecting tiles.
+Download all LAZ files and merge with PDAL (filters.merge; reproject to a common CRS if needed).
+Run DTM/DSM/nDSM on merged LAZ, then clip to requested size as usual.
+Optionally gate behind --allow-multi-tile and record tiles used in report.json.
+
 Height model (trees + buildings are class 1 in LAZ)
 
 Use LiDAR only for surface height, not classification separation:
