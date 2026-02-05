@@ -20,11 +20,15 @@ from .heights import (
     reproject_features,
 )
 from .mesh import (
+    DxfExporter,
     apply_scene_transform,
     combine_meshes,
+    export_contours_dxf,
     export_mesh,
     export_obj_with_uv,
+    export_parcels_dxf,
     extrude_footprints,
+    generate_contours_from_raster,
     terrain_mesh_from_raster,
     tree_mesh_from_canopy,
 )
@@ -37,15 +41,62 @@ from .pdal_surfaces import (
     make_dsm,
     make_dtm,
     make_ndsm,
+    merge_lazs,
 )
 from .util import download_file, ensure_dir, get_logger, read_json, write_json
 from .vgin_footprints import fetch_footprints_geojson
-from .vgin_tile import tile_lookup
+from .vgin_parcels import fetch_parcels_geojson
+from .vgin_tile import (
+    normalize_coordinates,
+    tile_lookup,
+    tiles_for_bbox,
+    tiles_for_point,
+)
+
+
+def _bbox_contains(
+    outer_bbox: Dict[str, float],
+    inner_bbox: tuple[float, float, float, float],
+) -> bool:
+    xmin, ymin, xmax, ymax = inner_bbox
+    return (
+        outer_bbox["xmin"] <= xmin <= outer_bbox["xmax"]
+        and outer_bbox["xmin"] <= xmax <= outer_bbox["xmax"]
+        and outer_bbox["ymin"] <= ymin <= outer_bbox["ymax"]
+        and outer_bbox["ymin"] <= ymax <= outer_bbox["ymax"]
+    )
 
 
 def build_command(cfg: BuildConfig) -> int:
     logger = get_logger()
-    tile_dir = cfg.out_dir / cfg.tile_name
+
+    # Resolve tile_name from coordinates if not provided
+    tile_name = cfg.tile_name
+    lon, lat = None, None
+    tile_info = None
+
+    if cfg.center_coords is not None:
+        # Auto-detect coordinate order
+        lon, lat = normalize_coordinates(cfg.center_coords[0], cfg.center_coords[1])
+        logger.info(f"Interpreted coordinates as lon={lon}, lat={lat}")
+
+        if tile_name is None:
+            # Look up tile from coordinates
+            logger.info("Looking up tile from coordinates...")
+            tiles = tiles_for_point(lon, lat)
+            if len(tiles) > 1:
+                logger.warning(
+                    f"Multiple tiles found at this location: {[t['tile_name'] for t in tiles]}. "
+                    f"Using first: {tiles[0]['tile_name']}"
+                )
+            tile_info = tiles[0]
+            tile_name = tile_info["tile_name"]
+            logger.info(f"Found tile: {tile_name}")
+
+    if tile_name is None:
+        raise ValueError("Either tile_name or --center coordinates must be provided")
+
+    tile_dir = cfg.out_dir / tile_name
     ensure_dir(tile_dir)
 
     tile_json = tile_dir / "tile.json"
@@ -64,12 +115,14 @@ def build_command(cfg: BuildConfig) -> int:
     combined_mtl_path = tile_dir / "scene.mtl"
     dtm_clip_path = tile_dir / "dtm_clip.tif"
     report_path = tile_dir / "report.json"
+    merged_laz_path = tile_dir / "tiles_merged.laz"
 
     logger.info("Stage 1/6: tile lookup")
     if tile_json.exists() and not cfg.force:
         tile_info = read_json(tile_json)
     else:
-        tile_info = tile_lookup(cfg.tile_name)
+        if tile_info is None:
+            tile_info = tile_lookup(tile_name)
         write_json(tile_json, tile_info)
 
     logger.info("Stage 2/6: download LAZ")
@@ -83,59 +136,108 @@ def build_command(cfg: BuildConfig) -> int:
 
     clip_poly = None
     clip_bbox_wgs84 = None
-    has_center = any(
-        v is not None
-        for v in (cfg.clip_center_lonlat, cfg.clip_center_latlon, cfg.clip_center_xy)
+    tile_infos = [tile_info]
+    laz_paths = [laz_path]
+    laz_processing_path = laz_path
+    multi_tile_used = False
+
+    # Determine clip center: prefer center_coords (new), fall back to legacy options
+    has_center = (
+        lon is not None
+        or cfg.clip_center_lonlat is not None
+        or cfg.clip_center_latlon is not None
+        or cfg.clip_center_xy is not None
     )
+
     if cfg.clip_size is not None and not has_center:
-        raise ValueError(
-            "Provide a clip center with --center-lonlat, --center-latlon, or --center-xy"
-        )
+        raise ValueError("Provide a clip center with --center or --center-xy")
     if has_center and cfg.clip_size is None:
         raise ValueError("Provide --size when using a clip center")
-    if has_center:
-        if (
-            sum(
-                1
-                for v in (
-                    cfg.clip_center_lonlat,
-                    cfg.clip_center_latlon,
-                    cfg.clip_center_xy,
-                )
-                if v is not None
-            )
-            > 1
-        ):
-            raise ValueError(
-                "Use only one of --center-lonlat, --center-latlon, or --center-xy"
-            )
+
+    if has_center and cfg.clip_size is not None:
         size_laz = cfg.clip_size / unit_scale
         half = size_laz / 2.0
-        if cfg.clip_center_lonlat or cfg.clip_center_latlon:
-            if cfg.clip_center_lonlat:
-                lon, lat = cfg.clip_center_lonlat
-            else:
-                lat, lon = cfg.clip_center_latlon
+
+        # Use already-parsed lon/lat from center_coords, or fall back to legacy options
+        if lon is not None and lat is not None:
+            # Already parsed from center_coords
+            pass
+        elif cfg.clip_center_lonlat:
+            lon, lat = cfg.clip_center_lonlat
+        elif cfg.clip_center_latlon:
+            lat, lon = cfg.clip_center_latlon
+
+        if lon is not None and lat is not None:
             bbox = tile_info["bbox_wgs84"]
             if not (
                 bbox["xmin"] <= lon <= bbox["xmax"]
                 and bbox["ymin"] <= lat <= bbox["ymax"]
             ):
                 raise ValueError(
-                    "Clip center is outside the tile bbox. If you used lat/lon order, try --center-latlon; "
-                    "for lon/lat use --center-lonlat."
+                    f"Clip center ({lon}, {lat}) is outside the tile bbox."
                 )
             to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
             cx, cy = to_laz.transform(lon, lat)
-        else:
+        elif cfg.clip_center_xy:
             cx = cfg.clip_center_xy[0] / unit_scale
             cy = cfg.clip_center_xy[1] / unit_scale
+        else:
+            raise ValueError("No valid clip center provided")
+
         clip_poly = box(cx - half, cy - half, cx + half, cy + half)
 
         to_wgs84 = Transformer.from_crs(laz_crs, "EPSG:4326", always_xy=True)
         clip_poly_wgs84 = shp_transform(to_wgs84.transform, clip_poly)
         minx, miny, maxx, maxy = clip_poly_wgs84.bounds
         clip_bbox_wgs84 = (minx, miny, maxx, maxy)
+
+    if clip_bbox_wgs84 is not None:
+        bbox = tile_info["bbox_wgs84"]
+        spillover = not _bbox_contains(bbox, clip_bbox_wgs84)
+        if spillover and cfg.allow_multi_tile:
+            logger.info("Clip extends beyond base tile; fetching intersecting tiles...")
+            tile_infos = tiles_for_bbox(clip_bbox_wgs84)
+            if not tile_infos:
+                raise ValueError("No tiles found for clip bbox")
+
+            tile_infos = sorted(
+                tile_infos,
+                key=lambda t: (t.get("tile_name") != tile_name, t.get("tile_name", "")),
+            )
+
+            tiles_dir = tile_dir / "tiles"
+            ensure_dir(tiles_dir)
+            laz_paths = []
+            for info in tile_infos:
+                name = info["tile_name"]
+                path = laz_path if name == tile_name else tiles_dir / f"{name}.laz"
+                download_file(info["laz_url"], path, force=cfg.force)
+                laz_paths.append(path)
+
+            if len(laz_paths) > 1:
+                base_crs = laz_crs
+                needs_reproj = False
+                for path in laz_paths:
+                    if path == laz_path:
+                        continue
+                    other_wkt = get_laz_crs_wkt(str(path))
+                    try:
+                        if not CRS.from_wkt(other_wkt).equals(base_crs):
+                            needs_reproj = True
+                            break
+                    except Exception:
+                        if other_wkt != laz_wkt:
+                            needs_reproj = True
+                            break
+                target_srs = laz_wkt if needs_reproj else None
+                if cfg.force or not merged_laz_path.exists():
+                    merge_lazs(laz_paths, merged_laz_path, target_srs=target_srs)
+                laz_processing_path = merged_laz_path
+                multi_tile_used = True
+        elif spillover:
+            logger.warning(
+                "Clip extends beyond tile bounds; use --allow-multi-tile to merge adjacent tiles."
+            )
 
     logger.info("Stage 3/7: fetch footprints")
     if footprints_path.exists() and not cfg.force:
@@ -156,7 +258,7 @@ def build_command(cfg: BuildConfig) -> int:
     logger.info("Stage 4/7: generate rasters")
     dtm_use_path = dtm_path
     if cfg.force or not dtm_path.exists():
-        make_dtm(laz_path, dtm_path, cfg.resolution)
+        make_dtm(laz_processing_path, dtm_path, cfg.resolution)
     if cfg.fill_dtm:
         if cfg.force or not dtm_filled_path.exists():
             fill_nodata_raster(
@@ -172,7 +274,7 @@ def build_command(cfg: BuildConfig) -> int:
     )
     if not override_heights:
         if cfg.force or not dsm_path.exists():
-            make_dsm(laz_path, dsm_path, cfg.resolution)
+            make_dsm(laz_processing_path, dsm_path, cfg.resolution)
         if cfg.force or not ndsm_path.exists():
             make_ndsm(dsm_path, dtm_use_path, ndsm_path)
 
@@ -342,7 +444,7 @@ def build_command(cfg: BuildConfig) -> int:
         chm_path = tile_dir / "canopy_height.tif"
         chm_clip_path = tile_dir / "canopy_height_clip.tif"
         if cfg.force or not canopy_path.exists():
-            make_canopy_dsm(laz_path, canopy_path, cfg.trees_resolution)
+            make_canopy_dsm(laz_processing_path, canopy_path, cfg.trees_resolution)
         if cfg.force or not chm_path.exists():
             make_chm(canopy_path, dtm_use_path, chm_path)
         chm_use_path = chm_path
@@ -377,6 +479,64 @@ def build_command(cfg: BuildConfig) -> int:
                 )
             export_mesh(trees_mesh, str(trees_path))
 
+    # Export DXF with contours, parcels, and/or building footprints
+    export_dxf = cfg.contour_interval is not None or cfg.parcels
+    if export_dxf:
+        logger.info("Generating DXF export")
+        dxf_path = tile_dir / "site.dxf"
+        dxf = DxfExporter()
+
+        # Transform function from WGS84 to LAZ CRS
+        to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
+
+        # Add contours
+        if cfg.contour_interval is not None:
+            interval_laz = cfg.contour_interval / unit_scale
+            contours = generate_contours_from_raster(
+                str(terrain_source_path),
+                interval=interval_laz,
+                xy_scale=unit_scale,
+                z_scale=unit_scale,
+                sample=1,
+            )
+            if contours:
+                # Use 5x interval for major contours
+                major_interval = cfg.contour_interval * 5
+                contour_count = dxf.add_contours(
+                    contours, major_interval=major_interval
+                )
+                logger.info(f"  Added {contour_count} contour polylines")
+
+        # Add parcels
+        if cfg.parcels:
+            bbox = tile_info["bbox_wgs84"]
+            parcels_bbox = (bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"])
+            if clip_bbox_wgs84:
+                parcels_bbox = clip_bbox_wgs84
+
+            parcels = fetch_parcels_geojson(parcels_bbox)
+            parcel_count = dxf.add_polygons_from_geojson(
+                parcels,
+                layer_name="PARCELS",
+                xy_scale=unit_scale,
+                transform_func=to_laz.transform,
+                color=3,  # Green
+            )
+            logger.info(f"  Added {parcel_count} parcel boundaries")
+
+        # Always add building footprints when exporting DXF
+        building_count = dxf.add_polygons_from_geojson(
+            footprints,
+            layer_name="BUILDINGS",
+            xy_scale=unit_scale,
+            transform_func=to_laz.transform,
+            color=5,  # Blue
+        )
+        logger.info(f"  Added {building_count} building footprints")
+
+        dxf.save(str(dxf_path))
+        logger.info(f"Exported DXF to {dxf_path}")
+
     if not cfg.keep_rasters:
         for path in (
             dtm_path,
@@ -393,7 +553,17 @@ def build_command(cfg: BuildConfig) -> int:
 
     height_values = [h.height * unit_scale for h in heights]
     report: Dict[str, Any] = {
-        "tile": cfg.tile_name,
+        "tile": tile_name,
+        "tiles": {
+            "primary": tile_name,
+            "count": len(tile_infos),
+            "names": [t["tile_name"] for t in tile_infos],
+            "merged_laz": merged_laz_path.name if multi_tile_used else None,
+        },
+        "multi_tile": {
+            "enabled": cfg.allow_multi_tile,
+            "used": multi_tile_used,
+        },
         "units": cfg.units,
         "unit_scale": unit_scale,
         "footprints_total": len(footprints.get("features", [])),
@@ -437,6 +607,10 @@ def build_command(cfg: BuildConfig) -> int:
             "mean": mean(height_values) if height_values else None,
             "median": median(height_values) if height_values else None,
         },
+        "contours": {
+            "enabled": cfg.contour_interval is not None,
+            "interval": cfg.contour_interval,
+        },
         "warnings": warnings,
     }
     write_json(report_path, report)
@@ -450,7 +624,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build = subparsers.add_parser("build", help="Build context mesh for a tile")
-    build.add_argument("tile_name", type=str)
+    build.add_argument(
+        "tile_name",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Tile name (e.g., S13_4899_20). Optional if --center is provided.",
+    )
     build.add_argument("--out", type=Path, default=Path("./out"))
     build.add_argument("--force", action="store_true")
     build.add_argument("--format", dest="fmt", default="obj", choices=["obj"])
@@ -496,6 +676,18 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--trees-max-height", type=float, default=None)
     build.add_argument("--trees-radius", type=float, default=6.0)
     build.add_argument(
+        "--contours",
+        type=float,
+        default=None,
+        metavar="INTERVAL",
+        help="Generate contour lines at this interval (in output units). Exports to DXF.",
+    )
+    build.add_argument(
+        "--parcels",
+        action="store_true",
+        help="Export parcel/plot boundaries to DXF.",
+    )
+    build.add_argument(
         "--flip-y",
         action="store_true",
         help="Mirror all meshes across the Y axis (useful if geometry appears flipped north/south).",
@@ -512,18 +704,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rotate all meshes around Z by degrees (counter-clockwise).",
     )
     build.add_argument(
+        "--center",
+        nargs=2,
+        type=float,
+        metavar=("COORD1", "COORD2"),
+        help="Center point coordinates. Order is auto-detected (lat/lon or lon/lat). "
+        "If tile_name is omitted, the correct tile is found automatically. Requires --size.",
+    )
+    build.add_argument(
         "--center-lonlat",
         nargs=2,
         type=float,
         metavar=("LON", "LAT"),
-        help="Center of clip region in lon/lat (WGS84). Requires --size.",
+        help="(Legacy) Center of clip region in lon/lat (WGS84). Requires --size.",
     )
     build.add_argument(
         "--center-latlon",
         nargs=2,
         type=float,
         metavar=("LAT", "LON"),
-        help="Center of clip region in lat/lon (WGS84). Requires --size.",
+        help="(Legacy) Center of clip region in lat/lon (WGS84). Requires --size.",
     )
     build.add_argument(
         "--center-xy",
@@ -536,7 +736,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         type=float,
         default=None,
-        help="Clip size (square) in output units. Used with --center-lonlat, --center-latlon, or --center-xy.",
+        help="Clip size (square) in output units. Required with --center.",
+    )
+    build.add_argument(
+        "--allow-multi-tile",
+        action="store_true",
+        help="Allow merging adjacent tiles when the clip extends beyond the base tile.",
     )
 
     return parser
@@ -549,6 +754,7 @@ def main() -> int:
     if args.command == "build":
         cfg = BuildConfig(
             tile_name=args.tile_name,
+            center_coords=tuple(args.center) if args.center else None,
             out_dir=args.out,
             force=args.force,
             fmt=args.fmt,
@@ -579,6 +785,8 @@ def main() -> int:
             trees_min_height=args.trees_min_height,
             trees_max_height=args.trees_max_height,
             trees_radius=args.trees_radius,
+            contour_interval=args.contours,
+            parcels=args.parcels,
             clip_center_lonlat=tuple(args.center_lonlat)
             if args.center_lonlat
             else None,
@@ -587,6 +795,7 @@ def main() -> int:
             else None,
             clip_center_xy=tuple(args.center_xy) if args.center_xy else None,
             clip_size=args.size,
+            allow_multi_tile=args.allow_multi_tile,
             flip_y=args.flip_y,
             flip_x=args.flip_x,
             rotate_z=args.rotate_z,

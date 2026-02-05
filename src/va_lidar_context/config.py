@@ -33,11 +33,13 @@ DEFAULT_TREES_SAMPLE = 2
 DEFAULT_TREES_MIN_HEIGHT = 10.0
 DEFAULT_TREES_MAX_HEIGHT = None
 DEFAULT_TREES_RADIUS = 6.0
+DEFAULT_ALLOW_MULTI_TILE = False
 
 
 @dataclass(frozen=True)
 class BuildConfig:
-    tile_name: str
+    tile_name: str | None = None
+    center_coords: tuple[float, float] | None = None  # Raw user input (auto-detected)
     out_dir: Path = DEFAULT_OUT_DIR
     force: bool = False
     fmt: str = DEFAULT_FORMAT
@@ -75,3 +77,6 @@ class BuildConfig:
     trees_min_height: float = DEFAULT_TREES_MIN_HEIGHT
     trees_max_height: float | None = DEFAULT_TREES_MAX_HEIGHT
     trees_radius: float = DEFAULT_TREES_RADIUS
+    contour_interval: float | None = None
+    parcels: bool = False
+    allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE

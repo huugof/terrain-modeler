@@ -1,0 +1,1 @@
+- Note: `--naip-flip-u` / `--naip-flip-v` only affect OBJ UVs. The `terrain.png` file itself will not rotate, so if you open the PNG directly it will look unchanged.

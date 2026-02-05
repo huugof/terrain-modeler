@@ -12,4 +12,11 @@ VGIN_FOOTPRINTS_LAYER = (
 
 VGIN_FOOTPRINTS_QUERY = f"{VGIN_FOOTPRINTS_LAYER}/query"
 
+VGIN_PARCELS_LAYER = (
+    "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/"
+    "VA_Parcels/FeatureServer/0"
+)
+
+VGIN_PARCELS_QUERY = f"{VGIN_PARCELS_LAYER}/query"
+
 MAX_RECORD_COUNT = 2000

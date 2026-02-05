@@ -236,6 +236,10 @@ def export_scene_with_terrain_texture(
             f.write(f"v {v[0]} {v[1]} {v[2]}\n")
         for t in terrain_uv:
             f.write(f"vt {t[0]} {t[1]}\n")
+        if len(b_verts):
+            # Provide dummy UVs for buildings to keep face formats consistent
+            for _ in b_verts:
+                f.write("vt 0.0 0.0\n")
         f.write("usemtl terrain\n")
         for face in t_faces:
             v1, v2, v3 = face
@@ -245,7 +249,11 @@ def export_scene_with_terrain_texture(
             f.write("usemtl buildings\n")
             for face in b_faces:
                 v1, v2, v3 = face
-                f.write(f"f {v1 + 1 + t_count} {v2 + 1 + t_count} {v3 + 1 + t_count}\n")
+                f.write(
+                    f"f {v1 + 1 + t_count}/{v1 + 1 + t_count} "
+                    f"{v2 + 1 + t_count}/{v2 + 1 + t_count} "
+                    f"{v3 + 1 + t_count}/{v3 + 1 + t_count}\n"
+                )
 
     with open(mtl_path, "w") as m:
         m.write("newmtl terrain\n")
@@ -257,6 +265,281 @@ def export_scene_with_terrain_texture(
         m.write("Ka 0.800 0.800 0.800\n")
         m.write("Kd 0.800 0.800 0.800\n")
         m.write("Ks 0.000 0.000 0.000\n")
+
+
+def generate_contours_from_raster(
+    raster_path: str,
+    interval: float,
+    xy_scale: float = 1.0,
+    z_scale: float = 1.0,
+    sample: int = 1,
+) -> List[Tuple[float, List[np.ndarray]]]:
+    """
+    Generate contour polylines from a raster at the given interval.
+
+    Returns a list of (elevation, [polylines]) tuples where each polyline
+    is an Nx2 or Nx3 numpy array of coordinates.
+    """
+    import matplotlib.pyplot as plt
+    import rasterio
+
+    with rasterio.open(raster_path) as ds:
+        data = ds.read(1)
+        nodata = ds.nodata if ds.nodata is not None else -9999
+        transform = ds.transform
+
+    if sample > 1:
+        data = data[::sample, ::sample]
+        transform = transform * rasterio.Affine.scale(sample, sample)
+
+    # Mask nodata
+    data = np.where((data == nodata) | ~np.isfinite(data), np.nan, data)
+
+    rows, cols = data.shape
+    if rows < 2 or cols < 2:
+        return []
+
+    # Create coordinate grids
+    col_indices = np.arange(cols)
+    row_indices = np.arange(rows)
+    col_grid, row_grid = np.meshgrid(col_indices, row_indices)
+
+    # Transform to world coordinates
+    x_grid = (
+        transform.a * (col_grid + 0.5) + transform.b * (row_grid + 0.5) + transform.c
+    )
+    y_grid = (
+        transform.d * (col_grid + 0.5) + transform.e * (row_grid + 0.5) + transform.f
+    )
+
+    # Determine contour levels
+    valid_data = data[np.isfinite(data)]
+    if valid_data.size == 0:
+        return []
+
+    z_min = float(np.floor(valid_data.min() / interval) * interval)
+    z_max = float(np.ceil(valid_data.max() / interval) * interval)
+    levels = np.arange(z_min, z_max + interval, interval)
+
+    # Generate contours using matplotlib (non-display mode)
+    fig, ax = plt.subplots()
+    cs = ax.contour(x_grid, y_grid, data, levels=levels)
+    plt.close(fig)
+
+    results: List[Tuple[float, List[np.ndarray]]] = []
+    for level_idx, level in enumerate(cs.levels):
+        polylines: List[np.ndarray] = []
+        for path in cs.allsegs[level_idx]:
+            if len(path) < 2:
+                continue
+            # Scale coordinates and add Z
+            scaled = np.zeros((len(path), 3))
+            scaled[:, 0] = path[:, 0] * xy_scale
+            scaled[:, 1] = path[:, 1] * xy_scale
+            scaled[:, 2] = level * z_scale
+            polylines.append(scaled)
+        if polylines:
+            results.append((level * z_scale, polylines))
+
+    return results
+
+
+def export_contours_dxf(
+    contours: List[Tuple[float, List[np.ndarray]]],
+    output_path: str,
+    layer_prefix: str = "CONTOUR",
+) -> None:
+    """
+    Export contours to a DXF file.
+
+    Each elevation gets its own layer named {layer_prefix}_{elevation}.
+    """
+    import ezdxf
+
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+
+    for elevation, polylines in contours:
+        layer_name = f"{layer_prefix}_{elevation:.1f}"
+        if layer_name not in doc.layers:
+            doc.layers.new(name=layer_name)
+
+        for polyline in polylines:
+            points = [(p[0], p[1], p[2]) for p in polyline]
+            msp.add_polyline3d(points, dxfattribs={"layer": layer_name})
+
+    doc.saveas(output_path)
+
+
+def export_parcels_dxf(
+    parcels_geojson: dict,
+    output_path: str,
+    xy_scale: float = 1.0,
+    transform_func=None,
+    layer_name: str = "PARCELS",
+) -> int:
+    """
+    Export parcel boundaries to a DXF file.
+
+    Args:
+        parcels_geojson: GeoJSON FeatureCollection with parcel polygons
+        output_path: Path to output DXF file
+        xy_scale: Scale factor for coordinates
+        transform_func: Optional function to transform (lon, lat) -> (x, y)
+        layer_name: DXF layer name
+
+    Returns:
+        Number of parcels exported
+    """
+    import ezdxf
+    from shapely.geometry import shape
+
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.new(name=layer_name)
+
+    count = 0
+    for feature in parcels_geojson.get("features", []):
+        geom = shape(feature["geometry"])
+
+        if geom.geom_type == "Polygon":
+            polygons = [geom]
+        elif geom.geom_type == "MultiPolygon":
+            polygons = list(geom.geoms)
+        else:
+            continue
+
+        for poly in polygons:
+            # Get exterior ring
+            coords = list(poly.exterior.coords)
+            if transform_func:
+                coords = [transform_func(c[0], c[1]) for c in coords]
+            points = [(c[0] * xy_scale, c[1] * xy_scale, 0) for c in coords]
+            if len(points) >= 3:
+                msp.add_polyline3d(points, close=True, dxfattribs={"layer": layer_name})
+                count += 1
+
+    doc.saveas(output_path)
+    return count
+
+
+class DxfExporter:
+    """
+    Unified DXF exporter that combines multiple layers into a single file.
+    """
+
+    def __init__(self):
+        import ezdxf
+
+        self.doc = ezdxf.new("R2010")
+        self.msp = self.doc.modelspace()
+        self._layer_colors = {
+            "CONTOURS": 8,  # Gray
+            "PARCELS": 3,  # Green
+            "BUILDINGS": 5,  # Blue
+        }
+
+    def _ensure_layer(self, name: str, color: int = None) -> None:
+        if name not in self.doc.layers:
+            layer_color = color or self._layer_colors.get(name, 7)
+            self.doc.layers.new(name=name, dxfattribs={"color": layer_color})
+
+    def add_contours(
+        self,
+        contours: List[Tuple[float, List[np.ndarray]]],
+        layer_prefix: str = "CONTOUR",
+        major_interval: float = None,
+    ) -> int:
+        """
+        Add contour lines to the DXF.
+
+        Args:
+            contours: List of (elevation, [polylines]) tuples
+            layer_prefix: Prefix for layer names
+            major_interval: If set, contours at this interval get a different layer
+
+        Returns:
+            Total number of contour polylines added
+        """
+        count = 0
+        for elevation, polylines in contours:
+            if major_interval and abs(elevation % major_interval) < 0.01:
+                layer_name = f"{layer_prefix}_MAJOR"
+                color = 7  # White for major contours
+            else:
+                layer_name = f"{layer_prefix}_MINOR"
+                color = 8  # Gray for minor contours
+
+            self._ensure_layer(layer_name, color)
+
+            for polyline in polylines:
+                points = [(p[0], p[1], p[2]) for p in polyline]
+                self.msp.add_polyline3d(points, dxfattribs={"layer": layer_name})
+                count += 1
+
+        return count
+
+    def add_polygons_from_geojson(
+        self,
+        geojson: dict,
+        layer_name: str,
+        xy_scale: float = 1.0,
+        transform_func=None,
+        z_value: float = 0.0,
+        color: int = None,
+    ) -> int:
+        """
+        Add polygons from a GeoJSON FeatureCollection.
+
+        Args:
+            geojson: GeoJSON FeatureCollection
+            layer_name: DXF layer name
+            xy_scale: Scale factor for coordinates
+            transform_func: Optional function to transform (lon, lat) -> (x, y)
+            z_value: Z coordinate for all points
+            color: Layer color (uses default if None)
+
+        Returns:
+            Number of polygons added
+        """
+        from shapely.geometry import shape
+
+        self._ensure_layer(layer_name, color)
+
+        count = 0
+        for feature in geojson.get("features", []):
+            try:
+                geom = shape(feature["geometry"])
+            except Exception:
+                continue
+
+            if geom.geom_type == "Polygon":
+                polygons = [geom]
+            elif geom.geom_type == "MultiPolygon":
+                polygons = list(geom.geoms)
+            else:
+                continue
+
+            for poly in polygons:
+                # Get exterior ring
+                coords = list(poly.exterior.coords)
+                if transform_func:
+                    try:
+                        coords = [transform_func(c[0], c[1]) for c in coords]
+                    except Exception:
+                        continue
+                points = [(c[0] * xy_scale, c[1] * xy_scale, z_value) for c in coords]
+                if len(points) >= 3:
+                    self.msp.add_polyline3d(
+                        points, close=True, dxfattribs={"layer": layer_name}
+                    )
+                    count += 1
+
+        return count
+
+    def save(self, output_path: str) -> None:
+        """Save the DXF file."""
+        self.doc.saveas(output_path)
 
 
 def tree_mesh_from_canopy(

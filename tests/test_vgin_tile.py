@@ -7,7 +7,36 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from va_lidar_context.vgin_tile import parse_laz_url, _geometry_to_bbox
+from va_lidar_context.vgin_tile import (
+    _geometry_to_bbox,
+    normalize_coordinates,
+    parse_laz_url,
+)
+
+
+class TestNormalizeCoordinates(unittest.TestCase):
+    def test_lat_lon_order(self):
+        # Google Maps style: lat, lon (37.538, -77.436)
+        lon, lat = normalize_coordinates(37.538, -77.436)
+        self.assertEqual(lon, -77.436)
+        self.assertEqual(lat, 37.538)
+
+    def test_lon_lat_order(self):
+        # GeoJSON style: lon, lat (-77.436, 37.538)
+        lon, lat = normalize_coordinates(-77.436, 37.538)
+        self.assertEqual(lon, -77.436)
+        self.assertEqual(lat, 37.538)
+
+    def test_invalid_coordinates(self):
+        # Both outside valid latitude range
+        with self.assertRaises(ValueError):
+            normalize_coordinates(-100, -150)
+
+    def test_both_positive_assumes_lat_lon(self):
+        # Both positive and valid as lat - assume lat, lon (Google style)
+        lon, lat = normalize_coordinates(37.5, 38.5)
+        self.assertEqual(lat, 37.5)
+        self.assertEqual(lon, 38.5)
 
 
 class TestVginTile(unittest.TestCase):

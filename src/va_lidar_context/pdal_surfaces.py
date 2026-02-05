@@ -23,6 +23,43 @@ def run_pdal_pipeline(pipeline: dict) -> None:
         raise RuntimeError(proc.stderr.decode("utf-8"))
 
 
+def merge_lazs(
+    laz_paths: list[Path],
+    merged_path: Path,
+    target_srs: str | None = None,
+) -> Path:
+    if not laz_paths:
+        raise ValueError("No LAZ files provided for merge")
+    if len(laz_paths) == 1:
+        return laz_paths[0]
+
+    pipeline = []
+    merge_inputs = []
+    for idx, laz_path in enumerate(laz_paths):
+        reader_tag = f"r{idx}"
+        pipeline.append(
+            {"type": "readers.las", "filename": str(laz_path), "tag": reader_tag}
+        )
+        if target_srs:
+            reproj_tag = f"rp{idx}"
+            pipeline.append(
+                {
+                    "type": "filters.reprojection",
+                    "out_srs": target_srs,
+                    "inputs": [reader_tag],
+                    "tag": reproj_tag,
+                }
+            )
+            merge_inputs.append(reproj_tag)
+        else:
+            merge_inputs.append(reader_tag)
+
+    pipeline.append({"type": "filters.merge", "inputs": merge_inputs})
+    pipeline.append({"type": "writers.las", "filename": str(merged_path)})
+    run_pdal_pipeline({"pipeline": pipeline})
+    return merged_path
+
+
 def make_dtm(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
     pipeline = {
         "pipeline": [

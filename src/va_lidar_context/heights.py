@@ -107,7 +107,11 @@ def sample_raster_values(raster_path: str, polygon) -> np.ndarray:
         raise RuntimeError("rasterio is required for raster sampling")
     with rasterio.open(raster_path) as ds:
         nodata = ds.nodata if ds.nodata is not None else -9999
-        out_image, _ = mask(ds, [polygon], crop=True, all_touched=False)
+        try:
+            out_image, _ = mask(ds, [polygon], crop=True, all_touched=False)
+        except ValueError:
+            # Polygon doesn't overlap raster (e.g., building outside clip region)
+            return np.array([])
         data = out_image[0]
         values = data[(data != nodata) & np.isfinite(data)]
         return values
