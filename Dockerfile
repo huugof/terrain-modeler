@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     curl \
     ca-certificates \
+    gnupg \
+    dirmngr \
     && add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
