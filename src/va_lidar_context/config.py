@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Tuple
 
 DEFAULT_OUT_DIR = Path("./out")
 DEFAULT_FORMAT = "obj"
@@ -20,6 +21,7 @@ DEFAULT_FILL_HARD = False
 DEFAULT_RANDOM_SEED = None
 DEFAULT_NAIP_PIXEL_SIZE = 1.0
 DEFAULT_NAIP_MAX_SIZE = 4000
+DEFAULT_NAIP_TILED = False
 DEFAULT_NAIP_FLIP_U = False
 DEFAULT_NAIP_FLIP_V = False
 DEFAULT_COMBINE_OUTPUT = False
@@ -28,20 +30,22 @@ DEFAULT_FLIP_Y = False
 DEFAULT_FLIP_X = False
 DEFAULT_TERRAIN_FLIP_Y = False
 DEFAULT_ROTATE_Z = 0.0
-DEFAULT_TREES_ENABLED = False
-DEFAULT_TREES_RESOLUTION = 2.0
-DEFAULT_TREES_SAMPLE = 2
-DEFAULT_TREES_MIN_HEIGHT = 10.0
-DEFAULT_TREES_MAX_HEIGHT = None
-DEFAULT_TREES_RADIUS = 6.0
 DEFAULT_ALLOW_MULTI_TILE = False
-DEFAULT_EXPORT_BUILDINGS = True
+DEFAULT_PREFER_EPT = True
+DEFAULT_PROVIDER = "va"
+DEFAULT_EPT_ONLY = False
+DEFAULT_CLEANUP_INTERMEDIATES = False
+DEFAULT_OUTPUTS: Tuple[str, ...] = ("buildings", "terrain")
 
 
 @dataclass(frozen=True)
 class BuildConfig:
+    """User-configurable build inputs for the pipeline."""
+
     tile_name: str | None = None
-    center_coords: tuple[float, float] | None = None  # Raw user input (auto-detected)
+    job_id: str | None = None
+    center: tuple[float, float] | None = None  # (lat, lon)
+    size: float | None = DEFAULT_CLIP_SIZE
     out_dir: Path = DEFAULT_OUT_DIR
     force: bool = False
     fmt: str = DEFAULT_FORMAT
@@ -60,27 +64,20 @@ class BuildConfig:
     random_heights_min: float | None = None
     random_heights_max: float | None = None
     random_seed: int | None = DEFAULT_RANDOM_SEED
-    naip_texture: bool = False
     naip_pixel_size: float = DEFAULT_NAIP_PIXEL_SIZE
     naip_max_size: int = DEFAULT_NAIP_MAX_SIZE
+    naip_tiled: bool = DEFAULT_NAIP_TILED
     naip_flip_u: bool = DEFAULT_NAIP_FLIP_U
     naip_flip_v: bool = DEFAULT_NAIP_FLIP_V
     combine_output: bool = DEFAULT_COMBINE_OUTPUT
-    clip_center_lonlat: tuple[float, float] | None = None
-    clip_center_latlon: tuple[float, float] | None = None
-    clip_center_xy: tuple[float, float] | None = None
-    clip_size: float | None = DEFAULT_CLIP_SIZE
+    outputs: Tuple[str, ...] = DEFAULT_OUTPUTS
     flip_y: bool = DEFAULT_FLIP_Y
     flip_x: bool = DEFAULT_FLIP_X
     terrain_flip_y: bool = DEFAULT_TERRAIN_FLIP_Y
     rotate_z: float = DEFAULT_ROTATE_Z
-    trees: bool = DEFAULT_TREES_ENABLED
-    trees_resolution: float = DEFAULT_TREES_RESOLUTION
-    trees_sample: int = DEFAULT_TREES_SAMPLE
-    trees_min_height: float = DEFAULT_TREES_MIN_HEIGHT
-    trees_max_height: float | None = DEFAULT_TREES_MAX_HEIGHT
-    trees_radius: float = DEFAULT_TREES_RADIUS
     contour_interval: float | None = None
-    parcels: bool = False
     allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE
-    export_buildings: bool = DEFAULT_EXPORT_BUILDINGS
+    prefer_ept: bool = DEFAULT_PREFER_EPT
+    provider: str = DEFAULT_PROVIDER
+    ept_only: bool = DEFAULT_EPT_ONLY
+    cleanup_intermediates: bool = DEFAULT_CLEANUP_INTERMEDIATES

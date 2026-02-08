@@ -44,6 +44,7 @@ class FootprintHeight:
 
 
 def get_laz_crs_wkt(laz_path: str) -> str:
+    """Read LAZ CRS WKT from PDAL metadata."""
     proc = subprocess.run(
         ["pdal", "info", "--metadata", laz_path],
         check=True,
@@ -64,6 +65,7 @@ def get_laz_crs_wkt(laz_path: str) -> str:
 
 
 def get_unit_scale(crs: CRS, output_units: str) -> float:
+    """Return a multiplier to convert CRS units to desired output units."""
     axis = crs.axis_info[0] if crs.axis_info else None
     to_meters = (
         axis.unit_conversion_factor if axis and axis.unit_conversion_factor else 1.0
@@ -80,6 +82,7 @@ def reproject_features(
     dst_crs: CRS,
     src_crs: CRS | str = "EPSG:4326",
 ) -> List[Dict[str, Any]]:
+    """Reproject GeoJSON features into the target CRS."""
     if Transformer is None or shape is None or transform is None:
         raise RuntimeError("pyproj and shapely are required for reprojection")
     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
@@ -103,6 +106,7 @@ def reproject_features(
 
 
 def sample_raster_values(raster_path: str, polygon) -> np.ndarray:
+    """Sample raster values within a polygon footprint."""
     if rasterio is None or mask is None:
         raise RuntimeError("rasterio is required for raster sampling")
     with rasterio.open(raster_path) as ds:
@@ -123,6 +127,7 @@ def compute_height(
     min_height: float,
     max_height: float,
 ) -> Optional[float]:
+    """Compute a clamped percentile height from raster samples."""
     if np is None:
         raise RuntimeError("numpy is required for height computation")
     if values.size == 0:
@@ -132,6 +137,7 @@ def compute_height(
 
 
 def compute_base(values: np.ndarray) -> Optional[float]:
+    """Compute a base elevation using the median of raster samples."""
     if np is None:
         raise RuntimeError("numpy is required for base height computation")
     if values.size == 0:
@@ -142,6 +148,7 @@ def compute_base(values: np.ndarray) -> Optional[float]:
 def fallback_height(
     properties: Dict[str, Any], floor_to_floor: float
 ) -> Optional[Tuple[float, str]]:
+    """Fallback to attribute-derived heights when raster samples are missing."""
     if properties.get("BLDGHEIGHT") is not None:
         try:
             return float(properties["BLDGHEIGHT"]), "BLDGHEIGHT"
@@ -166,6 +173,7 @@ def derive_heights(
     override_height_range: Tuple[float, float] | None = None,
     rng: random.Random | None = None,
 ) -> Tuple[List[FootprintHeight], List[str]]:
+    """Derive per-footprint heights and return any warnings."""
     results: List[FootprintHeight] = []
     warnings: List[str] = []
 

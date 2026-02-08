@@ -31,3 +31,11 @@ va-lidar-context-web = "va_lidar_context.webapp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+va_lidar_context = [
+  "templates/*.html",
+  "static/*.css",
+  "parcels/sources.json",
+  "py.typed",
+]

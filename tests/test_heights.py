@@ -12,7 +12,7 @@ try:
 except Exception:  # pragma: no cover
     np = None
 
-from va_lidar_context.heights import compute_height, fallback_height
+from va_lidar_context.core.heights import compute_height, fallback_height
 
 
 @unittest.skipIf(np is None, "numpy not installed")

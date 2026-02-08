@@ -68,3 +68,4 @@ def iter_offsets(total: int, step: int) -> Iterable[int]:
         offset += step
         if offset >= total:
             break
+

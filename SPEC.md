@@ -63,6 +63,24 @@ BLDGHEIGHT, NUMSTORIES, BUILDINGCLASS, MUNICIPALITY, etc.
 
 MaxRecordCount=2000 (requires pagination)
 
+C) National mode (USGS 3DEP + Microsoft Building Footprints)
+
+USGS 3DEP LiDAR Index (workunit coverage + LPC links):
+
+https://index.nationalmap.gov/arcgis/rest/services/3DEPElevationIndex/MapServer/8
+
+USGS LiDAR public EPT bucket (workunit → ept.json + boundary.json):
+
+https://usgs-lidar-public.s3.amazonaws.com/<workunit>/ept.json
+
+Fallback LAZ download list (per workunit):
+
+https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/<project>/<workunit>/0_file_download_links.txt
+
+Microsoft US Building Footprints (Esri hosted FeatureServer):
+
+https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0
+
 Coordinate systems
 
 Both VGIN services report native spatial reference in Web Mercator (WKID 102100 / EPSG:3857).
@@ -115,13 +133,13 @@ Download all LAZ files and merge with PDAL (filters.merge; reproject to a common
 Run DTM/DSM/nDSM on merged LAZ, then clip to requested size as usual.
 Optionally gate behind --allow-multi-tile and record tiles used in report.json.
 
-Height model (trees + buildings are class 1 in LAZ)
+Height model (buildings from LiDAR surface sampling)
 
 Use LiDAR only for surface height, not classification separation:
 
 DTM: Classification==2 (ground)
 
-DSM: Classification!=2 (everything above ground: trees+buildings)
+DSM: Classification!=2 (everything above ground)
 
 nDSM = DSM − DTM
 
@@ -155,11 +173,11 @@ optional GLB (if you add a GLTF exporter path)
 
 Non-functional requirements
 
-Deterministic output folder structure per tile
+Job-id-based output folders to avoid overwrites (no tile name in folder)
 
 Caching:
 
-don’t re-download LAZ/footprints if present unless --force
+don’t re-download LAZ/footprints if present in the output folder unless --force
 
 Logging:
 
@@ -184,7 +202,7 @@ Options
 
 --force (re-download and regenerate)
 
---format obj|glb (default obj)
+--format obj (default obj)
 
 --units feet|meters (default feet, affects output scaling and clamps)
 
@@ -199,6 +217,12 @@ Options
 --floor-to-floor <float> (default 10)
 
 --keep-rasters (default true or false, your call)
+
+--center <lat> <lon> (WGS84, Google Maps order; requires --size)
+
+--size <float> (clip size in output units)
+
+--outputs buildings,terrain,contours,parcels,naip (default buildings,terrain)
 
 REST query templates
 1) Tile lookup (tile → LAZ URL + geometry)
@@ -320,15 +344,13 @@ src/va_lidar_context/
 
 cli.py
 
-vgin_tile.py (tile grid queries + parsing PointCloudDownload href)
+core/ (raster + mesh + height + geo utilities)
 
-vgin_footprints.py (bbox queries + pagination)
+providers/ (VGIN + USGS + ArcGIS adapters)
 
-pdal_surfaces.py (DTM/DSM/nDSM pipelines)
+pipeline/ (build orchestration + IO + reports)
 
-heights.py (sampling + fallbacks + unit conversion)
-
-mesh.py (extrusion + merge + export)
+webapp.py (Flask UI)
 
 util.py (http, caching, logging)
 
@@ -382,6 +404,6 @@ Tile name returns multiple records: filter VComment='Current' or pick max Projec
 
 LAZ CRS missing/odd: fall back to keeping everything in 4326 for footprints download, but require LAZ CRS for final overlay (hard-fail with clear message).
 
-DSM polluted by trees: percentile sampling + footprint masking is the primary mitigation; clamp heights.
+DSM polluted by vegetation/structures: percentile sampling + footprint masking is the primary mitigation; clamp heights.
 
 If you want this to be “single command, zero manual install surprises” on macOS, the next step is defining the install doc for PDAL/GDAL + the Python env (one page), and deciding whether you want OBJ only or GLB as well.

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import trimesh
@@ -19,6 +21,7 @@ def extrude_footprints(
     xy_scale: float = 1.0,
     z_scale: float = 1.0,
 ) -> Optional[trimesh.Trimesh]:
+    """Extrude footprint polygons into a combined trimesh mesh."""
     try:
         import mapbox_earcut  # noqa: F401
 
@@ -57,10 +60,12 @@ def extrude_footprints(
 
 
 def export_mesh(mesh: trimesh.Trimesh, path: str) -> None:
+    """Export a mesh to the given path."""
     mesh.export(path)
 
 
 def combine_meshes(meshes: List[trimesh.Trimesh]) -> Optional[trimesh.Trimesh]:
+    """Concatenate multiple meshes into one."""
     valid = [m for m in meshes if m is not None]
     if not valid:
         return None
@@ -75,6 +80,7 @@ def apply_scene_transform(
     flip_y: bool = False,
     rotate_deg: float = 0.0,
 ) -> None:
+    """Apply flip/rotate transforms around a scene center."""
     if mesh is None:
         return
 
@@ -133,6 +139,7 @@ def terrain_mesh_from_raster(
     z_scale: float = 1.0,
     sample: int = 1,
 ) -> Optional[trimesh.Trimesh]:
+    """Generate a terrain mesh from a raster heightmap."""
     try:
         import numpy as np
         import rasterio
@@ -196,6 +203,7 @@ def export_obj_with_uv(
     mtl_path: str,
     texture_filename: str,
 ) -> None:
+    """Export an OBJ with UV coordinates and an MTL texture reference."""
     with open(obj_path, "w") as f:
         f.write(f"mtllib {Path(mtl_path).name}\n")
         f.write("o terrain\n")
@@ -224,6 +232,7 @@ def export_scene_with_terrain_texture(
     mtl_path: str,
     texture_filename: str,
 ) -> None:
+    """Export a combined terrain + buildings scene with terrain UVs."""
     t_verts = terrain_mesh.vertices
     t_faces = terrain_mesh.faces
     b_verts = buildings_mesh.vertices if buildings_mesh is not None else []
@@ -439,6 +448,8 @@ class DxfExporter:
             "CONTOURS": 8,  # Gray
             "PARCELS": 3,  # Green
             "BUILDINGS": 5,  # Blue
+            "origin": 1,  # Red
+            "north": 2,  # Yellow
         }
 
     def _ensure_layer(self, name: str, color: int = None) -> None:
@@ -539,69 +550,66 @@ class DxfExporter:
 
         return count
 
+    def add_cross(
+        self,
+        center: tuple[float, float, float],
+        size: float = 50.0,
+        layer_name: str = "origin",
+        color: int | None = None,
+    ) -> None:
+        """
+        Add a simple cross marker centered at the given point.
+
+        Args:
+            center: (x, y, z) in output units
+            size: Full width/height of the cross
+            layer_name: DXF layer name
+            color: Optional layer color override
+        """
+        self._ensure_layer(layer_name, color)
+        x, y, z = center
+        half = size / 2.0
+        self.msp.add_line(
+            (x - half, y, z), (x + half, y, z), dxfattribs={"layer": layer_name}
+        )
+        self.msp.add_line(
+            (x, y - half, z), (x, y + half, z), dxfattribs={"layer": layer_name}
+        )
+
+    def add_north_arrow(
+        self,
+        base: tuple[float, float, float],
+        length: float = 75.0,
+        head_length: float = 15.0,
+        head_angle_deg: float = 25.0,
+        layer_name: str = "north",
+        color: int | None = None,
+    ) -> None:
+        """
+        Add a one-sided north arrow pointing +Y.
+
+        Args:
+            base: (x, y, z) base point in output units
+            length: Arrow shaft length
+            head_length: Arrow head length
+            head_angle_deg: Arrow head angle from shaft
+            layer_name: DXF layer name
+            color: Optional layer color override
+        """
+        self._ensure_layer(layer_name, color)
+        x, y, z = base
+        tip = (x, y + length, z)
+        self.msp.add_line((x, y, z), tip, dxfattribs={"layer": layer_name})
+
+        angle = math.radians(head_angle_deg)
+        dx = head_length * math.sin(angle)
+        dy = head_length * math.cos(angle)
+        left = (tip[0] - dx, tip[1] - dy, z)
+        right = (tip[0] + dx, tip[1] - dy, z)
+        self.msp.add_line(tip, left, dxfattribs={"layer": layer_name})
+        self.msp.add_line(tip, right, dxfattribs={"layer": layer_name})
+
     def save(self, output_path: str) -> None:
         """Save the DXF file."""
         self.doc.saveas(output_path)
 
-
-def tree_mesh_from_canopy(
-    canopy_height_path: str,
-    dtm_path: str,
-    xy_scale: float,
-    z_scale: float,
-    sample: int,
-    min_height: float,
-    radius: float,
-    max_height: Optional[float] = None,
-) -> Optional[trimesh.Trimesh]:
-    try:
-        import numpy as np
-        import rasterio
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("numpy and rasterio are required for tree mesh") from exc
-
-    if sample < 1:
-        raise ValueError("sample must be >= 1")
-
-    with rasterio.open(canopy_height_path) as chm_ds, rasterio.open(dtm_path) as dtm_ds:
-        chm = chm_ds.read(1)
-        dtm = dtm_ds.read(1)
-        nodata = chm_ds.nodata if chm_ds.nodata is not None else -9999
-        transform = chm_ds.transform
-
-    if sample > 1:
-        chm = chm[::sample, ::sample]
-        dtm = dtm[::sample, ::sample]
-        transform = transform * rasterio.Affine.scale(sample, sample)
-
-    rows, cols = chm.shape
-    if rows == 0 or cols == 0:
-        return None
-
-    meshes: List[trimesh.Trimesh] = []
-    for r in range(rows):
-        for c in range(cols):
-            h = float(chm[r, c])
-            if not np.isfinite(h) or h == nodata:
-                continue
-            if h < min_height:
-                continue
-            if max_height is not None and h > max_height:
-                h = max_height
-            base = float(dtm[r, c])
-            if not np.isfinite(base) or base == nodata:
-                continue
-            x = transform.a * (c + 0.5) + transform.b * (r + 0.5) + transform.c
-            y = transform.d * (c + 0.5) + transform.e * (r + 0.5) + transform.f
-            try:
-                cone = trimesh.creation.cone(
-                    radius=radius * xy_scale, height=h * z_scale, sections=6
-                )
-            except Exception:
-                continue
-            cone.apply_translation((x * xy_scale, y * xy_scale, base * z_scale))
-            meshes.append(cone)
-
-    if not meshes:
-        return None
-    return trimesh.util.concatenate(meshes)

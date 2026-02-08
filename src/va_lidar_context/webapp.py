@@ -1,64 +1,57 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import re
 import shutil
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, jsonify, redirect, render_template_string, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
-from .cli import build_command
+from .pipeline.build import build as build_pipeline
 from .config import (
-    DEFAULT_ALLOW_MULTI_TILE,
-    DEFAULT_CLIP_SIZE,
     DEFAULT_COMBINE_OUTPUT,
-    DEFAULT_FILL_DTM,
-    DEFAULT_FILL_HARD,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
-    DEFAULT_FLIP_X,
-    DEFAULT_FLIP_Y,
     DEFAULT_FLOOR_TO_FLOOR,
     DEFAULT_FORMAT,
     DEFAULT_MAX_HEIGHT,
     DEFAULT_MIN_HEIGHT,
     DEFAULT_NAIP_FLIP_U,
     DEFAULT_NAIP_FLIP_V,
-    DEFAULT_NAIP_MAX_SIZE,
-    DEFAULT_NAIP_PIXEL_SIZE,
     DEFAULT_OUT_DIR,
+    DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
-    DEFAULT_RANDOM_SEED,
+    DEFAULT_PROVIDER,
     DEFAULT_RESOLUTION,
-    DEFAULT_TERRAIN_FLIP_Y,
-    DEFAULT_TERRAIN_SAMPLE,
-    DEFAULT_TREES_ENABLED,
-    DEFAULT_TREES_MAX_HEIGHT,
-    DEFAULT_TREES_MIN_HEIGHT,
-    DEFAULT_TREES_RADIUS,
-    DEFAULT_TREES_RESOLUTION,
-    DEFAULT_TREES_SAMPLE,
     DEFAULT_UNITS,
     BuildConfig,
 )
+from .parcels.registry import load_sources
+from .providers.usgs_index import query_for_point
+from .pipeline.io import generate_job_id
 from .util import ensure_dir, get_logger
 
 app = Flask(__name__)
 
 
-OUT_DIR = Path(os.getenv("VA_OUT_DIR", "./out"))
+OUT_DIR = Path(os.getenv("VA_OUT_DIR", str(DEFAULT_OUT_DIR)))
 RETENTION_DAYS = int(os.getenv("VA_RETENTION_DAYS", "7"))
 CLEANUP_INTERVAL_SECONDS = int(os.getenv("VA_CLEANUP_INTERVAL", "3600"))
+DEFAULT_RANDOM_MIN_HEIGHT = 15.0
+DEFAULT_RANDOM_MAX_HEIGHT = 40.0
+COVERAGE_CACHE_TTL_SECONDS = int(os.getenv("VA_COVERAGE_CACHE_TTL", "600"))
 
 _cleanup_started = False
 _cleanup_lock = threading.Lock()
+_coverage_cache: Dict[str, tuple[float, Optional[bool], str]] = {}
+_coverage_cache_lock = threading.Lock()
 
 
 @dataclass
@@ -126,332 +119,6 @@ class JobLogHandler(logging.Handler):
         self.job.logs.append(msg)
 
 
-INDEX_TEMPLATE = """
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VA Site Mesh Builder</title>
-    <style>
-      :root {
-        --bg: #2C2C2C;
-        --ink: #E4E4E4;
-        --muted: #bcbcbc;
-        --accent: #A8DADC;
-        --accent-2: #FFC1CC;
-        --card: #353535;
-        --border: #444444;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "Avenir Next", "Avenir", "Futura", "Trebuchet MS", sans-serif;
-        color: var(--ink);
-        background: var(--bg);
-      }
-      header {
-        padding: 28px 24px 8px;
-        text-align: center;
-      }
-      h1 {
-        margin: 0 0 6px;
-        font-size: 24px;
-        letter-spacing: 0.4px;
-      }
-      p.sub {
-        margin: 0;
-        color: var(--muted);
-      }
-      main {
-        padding: 16px 24px 40px;
-        display: grid;
-        gap: 16px;
-        justify-content: center;
-      }
-      main > * {
-        width: min(700px, 100%);
-      }
-      .card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 16px;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.35);
-      }
-      .grid {
-        display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      }
-      label {
-        display: block;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        color: var(--muted);
-        margin-bottom: 6px;
-      }
-      input[type="text"],
-      input[type="number"],
-      input[type="range"],
-      select {
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        font-size: 14px;
-      }
-      .check-row {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-      .check {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 14px;
-      }
-      .section-title {
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        color: var(--accent);
-        margin: 0 0 10px;
-      }
-      .note {
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 8px;
-      }
-      .btn {
-        background: #B39CD0;
-        color: #fff;
-        border: none;
-        padding: 12px 18px;
-        font-size: 14px;
-        border-radius: 10px;
-        cursor: pointer;
-      }
-      .btn.secondary {
-        background: #3a3a3a;
-      }
-      .footer {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      a {
-        color: #B39CD0;
-        text-decoration: none;
-      }
-      a:visited {
-        color: #B39CD0;
-      }
-
-          .hidden {
-        display: none;
-      }
-          input[type="range"] {
-        -webkit-appearance: none;
-        width: 100%;
-        height: 6px;
-        border-radius: 999px;
-        background: #3f3f3f;
-        outline: none;
-      }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
-      }
-      input[type="range"]::-moz-range-thumb {
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
-      }
-      select {
-        appearance: none;
-      }
-      .hidden {
-        display: none;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>VA Site Mesh Builder</h1>
-      <p class="sub">Generate site, building footprints, and contour models.</p>
-    </header>
-    <main>
-
-      <form class="card" method="post" action="{{ url_for('run_job') }}">
-        <div class="section-title">Outputs</div>
-        <div class="check-row">
-          <label class="check"><input type="checkbox" name="out_terrain" checked disabled /> Terrain</label>
-          <label class="check"><input type="checkbox" id="out_buildings" name="out_buildings" {% if defaults.out_buildings %}checked{% endif %} /> Buildings</label>
-          <label class="check"><input type="checkbox" id="combine_output" name="combine_output" {% if defaults.combine_output %}checked{% endif %} /> Combined</label>
-        </div>
-        <div class="check-row" style="margin-top:6px;">
-          <label class="check"><input type="checkbox" id="contours" name="contours" {% if defaults.contours %}checked{% endif %} /> Contours</label>
-          <label class="check"><input type="checkbox" name="trees" {% if defaults.trees %}checked{% endif %} /> Trees</label>
-        </div>
-
-        <div class="section-title" style="margin-top:16px;">Location</div>
-        <div class="grid">
-          <div style="grid-column: 1 / -1;">
-            <label>Coordinates</label>
-            <input type="text" name="coords" value="{{ defaults.center1 }}, {{ defaults.center2 }}" placeholder="lat, lon" />
-          </div>
-          <div>
-            <label>Clip Size (square)</label>
-            <input type="number" step="any" name="size" value="{{ defaults.clip_size }}" />
-          </div>
-          <div>
-            <label>Units</label>
-            <select name="units">
-              <option value="feet" {% if defaults.units == 'feet' %}selected{% endif %}>feet</option>
-              <option value="meters" {% if defaults.units == 'meters' %}selected{% endif %}>meters</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="section-title" style="margin-top:16px;">Complexity</div>
-        <div class="note">Higher = more polygons / slower export.</div>
-        <div class="grid" style="margin-top:6px;">
-          <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:12px;">
-            <input type="range" min="0" max="10" step="1" name="terrain_complexity" value="{{ defaults.terrain_complexity }}" oninput="document.getElementById('complexityValue').textContent = this.value;" />
-            <div id="complexityValue" style="min-width:20px; text-align:right;">{{ defaults.terrain_complexity }}</div>
-          </div>
-        </div>
-
-        <div class="section-title" style="margin-top:16px;">Contour Interval</div>
-        <div class="grid" id="contourIntervalRow">
-          <div>
-            <input type="number" step="any" name="contour_interval" value="{{ defaults.contour_interval }}" />
-          </div>
-        </div>
-
-        <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
-          <button class="btn" type="submit">Build</button>
-          <button class="btn secondary" type="reset">Reset</button>
-        </div>
-      </form>
-      <div class="note" style="margin-top:20px; text-align:center;">All data gathered from <a href="https://vgin.vdem.virginia.gov/documents/VGIN::vbmp-digitial-terrain-models-dtm/about" target="_blank" rel="noreferrer">VBMP DTM</a> and <a href="https://www.usgs.gov/centers/eros/science/usgs-eros-archive-aerial-photography-national-agriculture-imagery-program-naip" target="_blank" rel="noreferrer">NAIP</a>.</div>
-
-
-      <div class="card">
-        <div class="section-title">Recent Jobs</div>
-        {% if jobs %}
-          <ul>
-            {% for job in jobs %}
-              <li>
-                <a href="{{ url_for('job_status', job_id=job.job_id) }}">{{ job.job_id }}</a>
-                — {{ job.status }}
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="footer">No jobs yet.</p>
-        {% endif %}
-      </div>
-    </main>
-    <script>
-      function updateUiToggles() {
-        const contours = document.getElementById('contours');
-        const contourRow = document.getElementById('contourIntervalRow');
-        if (contours && contourRow) {
-          contourRow.classList.toggle('hidden', !contours.checked);
-        }
-        const buildings = document.getElementById('out_buildings');
-        const combined = document.getElementById('combine_output');
-        if (buildings && combined) {
-          if (!buildings.checked) {
-            combined.checked = false;
-            combined.disabled = true;
-          } else {
-            combined.disabled = false;
-          }
-        }
-      }
-
-      async function runBuild(event) {
-        event.preventDefault();
-        const form = event.target;
-        const runBtn = document.getElementById('runBtn');
-        const status = document.getElementById('jobStatus');
-        const logsEl = document.getElementById('jobLogs');
-        if (!form || !runBtn || !status || !logsEl) return;
-
-        runBtn.disabled = true;
-        const originalText = runBtn.textContent;
-        runBtn.textContent = 'Running...';
-        status.textContent = 'Starting build...';
-        logsEl.style.display = 'none';
-        logsEl.textContent = '';
-
-        const formData = new FormData(form);
-        const resp = await fetch(form.action, {
-          method: 'POST',
-          body: formData,
-          headers: { 'X-Requested-With': 'fetch' },
-        });
-        if (!resp.ok) {
-          status.textContent = 'Failed to start build.';
-          runBtn.disabled = false;
-          runBtn.textContent = originalText;
-          return;
-        }
-        const data = await resp.json();
-        status.textContent = `Job ${data.job_id} started.`;
-        logsEl.style.display = 'block';
-
-        let offset = 0;
-        async function poll() {
-          const logResp = await fetch(`/logs/${data.job_id}?offset=${offset}`);
-          if (!logResp.ok) return;
-          const logData = await logResp.json();
-          if (logData.logs && logData.logs.length) {
-            logsEl.textContent += logData.logs.join('
-') + '
-';
-            logsEl.scrollTop = logsEl.scrollHeight;
-            offset = logData.offset;
-          }
-          if (logData.status === 'running') {
-            setTimeout(poll, 1500);
-          } else {
-            status.textContent = `Job ${data.job_id}: ${logData.status}`;
-            runBtn.disabled = false;
-            runBtn.textContent = originalText;
-          }
-        }
-        poll();
-      }
-
-      document.addEventListener('DOMContentLoaded', () => {
-        updateUiToggles();
-        const contours = document.getElementById('contours');
-        const buildings = document.getElementById('out_buildings');
-        if (contours) contours.addEventListener('change', updateUiToggles);
-        if (buildings) buildings.addEventListener('change', updateUiToggles);
-        const form = document.querySelector('form.card');
-        const runBtn = document.getElementById('runBtn');
-        if (runBtn && form) {
-          runBtn.addEventListener('click', (e) => runBuild({ preventDefault: () => {}, target: form }));
-        }
-      });
-    </script>
-  </body>
-</html>
-"""
-
-
 STATUS_TEMPLATE = """
 <!doctype html>
 <html lang="en">
@@ -510,101 +177,80 @@ STATUS_TEMPLATE = """
   <body>
     <header>
       <h2>Job {{ job.job_id }}</h2>
-      <div class="meta">Status: <span id="status">{{ job.status }}</span></div>
-      <div class="meta">Output: {{ job.summary.get('out') }}</div>
-      <div class="meta">Tile/Center: {{ job.summary.get('target') }}</div>
+      <div class="meta">Status: <span id="status">{{ status_label(job.status) }}</span></div>
+      <div class="meta">Provider: {{ job.summary.get('provider_label') or job.summary.get('provider') }}</div>
+      <div class="meta">Output folder: {{ job.summary.get('out') }}</div>
+      <div class="meta">Target: {{ job.summary.get('target') }}</div>
+      {% if job.summary.get('tile') %}
+        <div class="meta">Tile: {{ job.summary.get('tile') }}</div>
+      {% endif %}
       <div class="meta"><a href="{{ url_for('index') }}">Back to form</a></div>
     </header>
     <main>
+      {% if job.error or job.summary.get('coverage') or job.summary.get('warnings') %}
       <div class="card">
-        <h3>Logs</h3>
+        <h3>Job Notes</h3>
+        {% if job.error %}
+          <p><strong>This job did not complete.</strong> {{ job.error }}</p>
+        {% endif %}
+        {% if job.summary.get('coverage') %}
+          {% set coverage = job.summary.get('coverage') %}
+          {% if coverage.get('status') %}
+            <p><strong>EPT coverage:</strong> {{ coverage.get('status') }}
+              {% if coverage.get('ratio') is not none %}
+                (~{{ '%.1f'|format(coverage.get('ratio') * 100) }}%)
+              {% endif %}
+            </p>
+          {% endif %}
+        {% endif %}
+        {% if job.summary.get('warnings') %}
+          <p><strong>Warnings:</strong></p>
+          <ul>
+          {% for warning in job.summary.get('warnings') %}
+            <li>{{ warning }}</li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="card">
+        <h3>Activity Log</h3>
         <pre id="logs"></pre>
       </div>
     </main>
     <script>
-      function updateUiToggles() {
-        const contours = document.getElementById('contours');
-        const contourRow = document.getElementById('contourIntervalRow');
-        if (contours && contourRow) {
-          contourRow.classList.toggle('hidden', !contours.checked);
-        }
-        const buildings = document.getElementById('out_buildings');
-        const combined = document.getElementById('combine_output');
-        if (buildings && combined) {
-          if (!buildings.checked) {
-            combined.checked = false;
-            combined.disabled = true;
-          } else {
-            combined.disabled = false;
-          }
-        }
-      }
+      const STATUS_LABELS = {
+        queued: 'Queued',
+        running: 'Running',
+        done: 'Completed',
+        error: 'Failed',
+      };
 
-      async function runBuild(event) {
-        event.preventDefault();
-        const form = event.target;
-        const runBtn = document.getElementById('runBtn');
-        const status = document.getElementById('jobStatus');
-        const logsEl = document.getElementById('jobLogs');
-        if (!form || !runBtn || !status || !logsEl) return;
-
-        runBtn.disabled = true;
-        const originalText = runBtn.textContent;
-        runBtn.textContent = 'Running...';
-        status.textContent = 'Starting build...';
-        logsEl.style.display = 'none';
-        logsEl.textContent = '';
-
-        const formData = new FormData(form);
-        const resp = await fetch(form.action, {
-          method: 'POST',
-          body: formData,
-          headers: { 'X-Requested-With': 'fetch' },
-        });
-        if (!resp.ok) {
-          status.textContent = 'Failed to start build.';
-          runBtn.disabled = false;
-          runBtn.textContent = originalText;
-          return;
-        }
-        const data = await resp.json();
-        status.textContent = `Job ${data.job_id} started.`;
-        logsEl.style.display = 'block';
-
+      async function pollLogs(jobId) {
+        const logsEl = document.getElementById('logs');
+        const statusEl = document.getElementById('status');
+        if (!logsEl || !statusEl) return;
         let offset = 0;
+
         async function poll() {
-          const logResp = await fetch(`/logs/${data.job_id}?offset=${offset}`);
+          const logResp = await fetch(`/logs/${jobId}?offset=${offset}`);
           if (!logResp.ok) return;
           const logData = await logResp.json();
           if (logData.logs && logData.logs.length) {
-            logsEl.textContent += logData.logs.join('
-') + '
-';
+            logsEl.textContent += logData.logs.join('\\n') + '\\n';
             logsEl.scrollTop = logsEl.scrollHeight;
             offset = logData.offset;
           }
-          if (logData.status === 'running') {
+          statusEl.textContent = STATUS_LABELS[logData.status] || logData.status;
+          if (logData.status === 'running' || logData.status === 'queued') {
             setTimeout(poll, 1500);
-          } else {
-            status.textContent = `Job ${data.job_id}: ${logData.status}`;
-            runBtn.disabled = false;
-            runBtn.textContent = originalText;
           }
         }
         poll();
       }
 
       document.addEventListener('DOMContentLoaded', () => {
-        updateUiToggles();
-        const contours = document.getElementById('contours');
-        const buildings = document.getElementById('out_buildings');
-        if (contours) contours.addEventListener('change', updateUiToggles);
-        if (buildings) buildings.addEventListener('change', updateUiToggles);
-        const form = document.querySelector('form.card');
-        const runBtn = document.getElementById('runBtn');
-        if (runBtn && form) {
-          runBtn.addEventListener('click', (e) => runBuild({ preventDefault: () => {}, target: form }));
-        }
+        pollLogs('{{ job.job_id }}');
       });
     </script>
   </body>
@@ -634,20 +280,129 @@ def parse_bool(value: str | None) -> bool:
     return value is not None
 
 
+VA_BOUNDS = {"lat_min": 36.5, "lat_max": 39.5, "lon_min": -83.0, "lon_max": -75.0}
+
+
+def is_in_virginia(lon: float, lat: float) -> bool:
+    return (
+        VA_BOUNDS["lon_min"] <= lon <= VA_BOUNDS["lon_max"]
+        and VA_BOUNDS["lat_min"] <= lat <= VA_BOUNDS["lat_max"]
+    )
+
+
+def resolve_provider(lat: float | None, lon: float | None) -> str:
+    if lat is None or lon is None:
+        return DEFAULT_PROVIDER
+    return "va" if is_in_virginia(lon, lat) else "national"
+
+
+def provider_label(provider: str) -> str:
+    return "VGIN (Virginia)" if provider == "va" else "USGS 3DEP (National)"
+
+
+def status_label(status: str) -> str:
+    mapping = {
+        "queued": "Queued",
+        "running": "Running",
+        "done": "Completed",
+        "error": "Failed",
+    }
+    return mapping.get(status, status.title())
+
+
+def _coverage_cache_key(lon: float, lat: float) -> str:
+    return f"{round(lon, 4)},{round(lat, 4)}"
+
+
+def resolve_image_quality(value: str | None) -> tuple[float, int, bool]:
+    quality = (value or "").strip().lower()
+    if quality == "high":
+        return (0.5, 8000, False)
+    if quality == "ultra":
+        return (0.3, 12000, False)
+    return (1.0, 4000, False)
+
+
+def _find_latest_report(out_dir: Path, started_at: float) -> Optional[Path]:
+    if not out_dir.exists():
+        return None
+    latest_path: Optional[Path] = None
+    latest_mtime = 0.0
+    cutoff = started_at - 5.0
+    for path in out_dir.rglob("report.json"):
+        if "_cache" in path.parts:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff:
+            continue
+        if latest_path is None or mtime > latest_mtime:
+            latest_path = path
+            latest_mtime = mtime
+    return latest_path
+
+
+def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
+    if not tile_dir.exists():
+        return {"dir": str(tile_dir), "files": []}
+    candidates = [
+        "terrain.obj",
+        "buildings.obj",
+        "combined.obj",
+        "terrain.png",
+        "contours.dxf",
+    ]
+    files = [name for name in candidates if (tile_dir / name).exists()]
+    return {"dir": str(tile_dir), "files": files}
+
+
 def snapshot_defaults() -> Dict[str, Any]:
+    outputs = set(DEFAULT_OUTPUTS)
     return {
         "out": str(OUT_DIR),
         "units": "feet",
+        "provider": "va",
+        "provider_label": "VGIN (Virginia)",
         "center1": 37.5390116184146,
         "center2": -77.43353162833343,
         "clip_size": 1000.0,
-        "terrain_complexity": 6,
-        "combine_output": True,
-        "out_buildings": True,
-        "trees": False,
-        "contours": True,
+        "resolution": DEFAULT_RESOLUTION,
+        "terrain_complexity": 2,
+        "output_terrain": "terrain" in outputs,
+        "output_buildings": "buildings" in outputs,
+        "output_contours": "contours" in outputs,
+        "output_parcels": "parcels" in outputs,
+        "output_naip": "naip" in outputs,
+        "output_combined": DEFAULT_COMBINE_OUTPUT,
+        "min_height": DEFAULT_MIN_HEIGHT,
+        "max_height": DEFAULT_MAX_HEIGHT,
+        "random_min_height": DEFAULT_RANDOM_MIN_HEIGHT,
+        "random_max_height": DEFAULT_RANDOM_MAX_HEIGHT,
         "contour_interval": 2.0,
+        "image_quality": "standard",
     }
+
+
+def parcel_sources_payload() -> List[Dict[str, Any]]:
+    sources = []
+    for source in load_sources():
+        payload = {"id": source.id, "name": source.name}
+        if source.coverage is not None:
+            payload["coverage"] = {
+                "xmin": source.coverage[0],
+                "ymin": source.coverage[1],
+                "xmax": source.coverage[2],
+                "ymax": source.coverage[3],
+            }
+        if source.exclude:
+            payload["exclude"] = [
+                {"xmin": b[0], "ymin": b[1], "xmax": b[2], "ymax": b[3]}
+                for b in source.exclude
+            ]
+        sources.append(payload)
+    return sources
 
 
 @app.before_request
@@ -658,46 +413,98 @@ def _start_cleanup():
 @app.route("/")
 def index():
     defaults = snapshot_defaults()
+    parcel_sources = parcel_sources_payload()
     with JOBS_LOCK:
         jobs = list(JOBS.values())[-8:][::-1]
-    return render_template_string(
-        INDEX_TEMPLATE, defaults=defaults, jobs=jobs, retention_days=RETENTION_DAYS
+    return render_template(
+        "index.html",
+        defaults=defaults,
+        parcel_sources=parcel_sources,
+        jobs=jobs,
+        retention_days=RETENTION_DAYS,
+        status_label=status_label,
     )
+
+
+@app.route("/recent-jobs")
+def recent_jobs():
+    with JOBS_LOCK:
+        jobs = list(JOBS.values())[-8:][::-1]
+    payload = [
+        {
+            "job_id": job.job_id,
+            "status": job.status,
+            "status_label": status_label(job.status),
+        }
+        for job in jobs
+    ]
+    return jsonify({"jobs": payload})
+
+
+@app.route("/coverage")
+def coverage():
+    lon = parse_float(request.args.get("lon"))
+    lat = parse_float(request.args.get("lat"))
+    if lon is None or lat is None:
+        return jsonify({"supported": None, "error": "Invalid coordinates"}), 400
+
+    provider = resolve_provider(lat, lon)
+    cache_key = _coverage_cache_key(lon, lat)
+    now = time.time()
+    with _coverage_cache_lock:
+        cached = _coverage_cache.get(cache_key)
+        if cached is not None:
+            ts, supported_cached, provider_cached = cached
+            if now - ts <= COVERAGE_CACHE_TTL_SECONDS and provider_cached == provider:
+                return jsonify(
+                    {"supported": supported_cached, "provider": provider, "cached": True}
+                )
+            _coverage_cache.pop(cache_key, None)
+
+    supported: Optional[bool] = None
+    error = None
+    if provider == "va":
+        supported = is_in_virginia(lon, lat)
+    else:
+        try:
+            supported = bool(query_for_point(lon, lat))
+        except Exception as exc:
+            error = str(exc)
+            supported = None
+
+    payload = {"supported": supported, "provider": provider}
+    if error:
+        payload["error"] = error
+    if supported is not None:
+        with _coverage_cache_lock:
+            _coverage_cache[cache_key] = (now, supported, provider)
+    return jsonify(payload)
 
 
 @app.route("/run", methods=["POST"])
 def run_job():
     form = request.form
-    tile_name = None
     out_dir = OUT_DIR
     ensure_dir(out_dir)
     units = form.get("units") or DEFAULT_UNITS
-    center_mode = "auto"
     coords = form.get("coords") or ""
     parts = [p for p in re.split(r"[ ,]+", coords.strip()) if p]
-    center1 = parse_float(parts[0]) if len(parts) > 0 else None
-    center2 = parse_float(parts[1]) if len(parts) > 1 else None
+    lat = parse_float(parts[0]) if len(parts) > 0 else None
+    lon = parse_float(parts[1]) if len(parts) > 1 else None
+    provider = resolve_provider(lat, lon)
+    ept_only = False
     clip_size = parse_float(form.get("size"))
+    if lat is None or lon is None:
+        return jsonify({"error": "Provide coordinates as lat, lon."}), 400
+    if clip_size is None:
+        return jsonify({"error": "Provide a clip size."}), 400
 
-    center_coords = None
-    center_lonlat = None
-    center_latlon = None
-    center_xy = None
-
-    if center1 is not None and center2 is not None:
-        if center_mode == "auto":
-            center_coords = (center1, center2)
-        elif center_mode == "lonlat":
-            center_lonlat = (center1, center2)
-        elif center_mode == "latlon":
-            center_latlon = (center1, center2)
-        elif center_mode == "xy":
-            center_xy = (center1, center2)
+    center = (lat, lon) if lat is not None and lon is not None else None
 
     resolution = DEFAULT_RESOLUTION
     terrain_complexity = parse_int(form.get("terrain_complexity"))
     if terrain_complexity is None:
-        terrain_complexity = 6
+        terrain_complexity = 2
     terrain_complexity = max(0, min(10, terrain_complexity))
     # Map 0-10 complexity to terrain_sample 11-1 (higher complexity -> smaller sample)
     terrain_sample = max(1, 11 - terrain_complexity)
@@ -707,47 +514,69 @@ def run_job():
     fill_smoothing = DEFAULT_FILL_SMOOTHING
 
     percentile = DEFAULT_PERCENTILE
-    min_height = DEFAULT_MIN_HEIGHT
-    max_height = DEFAULT_MAX_HEIGHT
+    min_height = parse_float(form.get("min_height"))
+    if min_height is None:
+        min_height = DEFAULT_MIN_HEIGHT
+    max_height = parse_float(form.get("max_height"))
+    if max_height is None:
+        max_height = DEFAULT_MAX_HEIGHT
     floor_to_floor = DEFAULT_FLOOR_TO_FLOOR
 
-    random_min = 15.0
-    random_max = 40.0
+    random_min = parse_float(form.get("random_min_height"))
+    if random_min is None:
+        random_min = DEFAULT_RANDOM_MIN_HEIGHT
+    random_max = parse_float(form.get("random_max_height"))
+    if random_max is None:
+        random_max = DEFAULT_RANDOM_MAX_HEIGHT
     random_seed = None
 
-    naip_texture = True
-    naip_pixel_size = DEFAULT_NAIP_PIXEL_SIZE
-    naip_max_size = DEFAULT_NAIP_MAX_SIZE
+    naip_pixel_size, naip_max_size, naip_tiled = resolve_image_quality(
+        form.get("image_quality")
+    )
     naip_flip_u = DEFAULT_NAIP_FLIP_U
     naip_flip_v = DEFAULT_NAIP_FLIP_V
 
-    combine_output = parse_bool(form.get("combine_output"))
-    export_buildings = parse_bool(form.get("out_buildings"))
-    contours_enabled = parse_bool(form.get("contours"))
+    outputs = []
+    if parse_bool(form.get("output_terrain")):
+        outputs.append("terrain")
+    if parse_bool(form.get("output_buildings")):
+        outputs.append("buildings")
+    if parse_bool(form.get("output_contours")):
+        outputs.append("contours")
+    if parse_bool(form.get("output_parcels")):
+        outputs.append("parcels")
+    if parse_bool(form.get("output_naip")):
+        outputs.append("naip")
+    if not outputs:
+        return jsonify({"error": "Select at least one output."}), 400
+
+    combine_output = parse_bool(form.get("output_combined"))
+    if combine_output and not (
+        "terrain" in outputs and "buildings" in outputs
+    ):
+        return (
+            jsonify({"error": "Combined output requires terrain + buildings."}),
+            400,
+        )
+
+    contours_enabled = "contours" in outputs
     contour_interval = (
         (parse_float(form.get("contour_interval")) or 2.0) if contours_enabled else None
     )
-    parcels = False
-    trees = parse_bool(form.get("trees"))
     keep_rasters = False
-
-    trees_resolution = DEFAULT_TREES_RESOLUTION
-    trees_sample = DEFAULT_TREES_SAMPLE
-    trees_min_height = DEFAULT_TREES_MIN_HEIGHT
-    trees_max_height = DEFAULT_TREES_MAX_HEIGHT
-    trees_radius = DEFAULT_TREES_RADIUS
 
     flip_x = False
     flip_y = False
-    terrain_flip_y = True
+    terrain_flip_y = False
     rotate_z = 0.0
 
     allow_multi_tile = True
     force = False
 
+    job_id = generate_job_id(center, clip_size, units)
     cfg = BuildConfig(
-        tile_name=tile_name,
-        center_coords=center_coords,
+        job_id=job_id,
+        center=center,
         out_dir=out_dir,
         force=force,
         fmt=DEFAULT_FORMAT,
@@ -766,42 +595,37 @@ def run_job():
         random_heights_min=random_min,
         random_heights_max=random_max,
         random_seed=random_seed,
-        naip_texture=naip_texture,
         naip_pixel_size=naip_pixel_size,
         naip_max_size=naip_max_size,
+        naip_tiled=naip_tiled,
         naip_flip_u=naip_flip_u,
         naip_flip_v=naip_flip_v,
         combine_output=combine_output,
-        trees=trees,
-        trees_resolution=trees_resolution,
-        trees_sample=trees_sample,
-        trees_min_height=trees_min_height,
-        trees_max_height=trees_max_height,
-        trees_radius=trees_radius,
         contour_interval=contour_interval,
-        parcels=parcels,
-        clip_center_lonlat=center_lonlat,
-        clip_center_latlon=center_latlon,
-        clip_center_xy=center_xy,
-        clip_size=clip_size,
+        size=clip_size,
         allow_multi_tile=allow_multi_tile,
-        export_buildings=export_buildings,
+        prefer_ept=True,
         flip_y=flip_y,
         flip_x=flip_x,
         terrain_flip_y=terrain_flip_y,
         rotate_z=rotate_z,
+        provider=provider,
+        ept_only=ept_only,
+        cleanup_intermediates=True,
+        outputs=tuple(outputs),
     )
 
     target_summary = None
-    if center1 is not None and center2 is not None:
-        target_summary = f"{center_mode}:{center1},{center2} size={clip_size}"
+    if lat is not None and lon is not None:
+        target_summary = f"latlon:{lat},{lon} size={clip_size}"
 
     summary = {
         "out": str(out_dir),
         "target": target_summary or "(tile lookup)",
+        "provider": provider,
+        "provider_label": provider_label(provider),
     }
 
-    job_id = uuid.uuid4().hex[:8]
     job = Job(job_id=job_id, status="queued", created_at=time.time(), summary=summary)
 
     with JOBS_LOCK:
@@ -821,7 +645,7 @@ def job_status(job_id: str):
         job = JOBS.get(job_id)
     if job is None:
         return "Job not found", 404
-    return render_template_string(STATUS_TEMPLATE, job=job)
+    return render_template_string(STATUS_TEMPLATE, job=job, status_label=status_label)
 
 
 @app.route("/logs/<job_id>")
@@ -839,6 +663,7 @@ def job_logs(job_id: str):
             "offset": next_offset,
             "error": job.error,
             "exit_code": job.exit_code,
+            "summary": job.summary,
         }
     return jsonify(payload)
 
@@ -850,7 +675,7 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     handler = JobLogHandler(job)
     logger.addHandler(handler)
     try:
-        job.exit_code = build_command(cfg)
+        job.exit_code = build_pipeline(cfg)
         if job.exit_code == 0:
             job.status = "done"
         else:
@@ -862,6 +687,22 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     finally:
         job.finished_at = time.time()
         logger.removeHandler(handler)
+
+        report_path = _find_latest_report(cfg.out_dir, job.started_at or time.time())
+        if report_path:
+            try:
+                report = json.loads(report_path.read_text())
+                job.summary["report_path"] = str(report_path)
+                job.summary["tile"] = report.get("tile")
+                if report.get("output_dir"):
+                    job.summary["out"] = report.get("output_dir")
+                job.summary["job_id"] = report.get("job_id")
+                job.summary["coverage"] = report.get("coverage")
+                job.summary["warnings"] = report.get("warnings")
+                job.summary["source_type"] = report.get("source_type")
+                job.summary["outputs"] = _collect_outputs(report_path.parent)
+            except Exception:
+                pass
 
 
 def main() -> int:
