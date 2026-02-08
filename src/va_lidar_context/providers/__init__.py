@@ -1,15 +1,3 @@
-from .base import (
-    BBoxWGS84,
-    FootprintsProvider,
-    LidarProvider,
-    LidarSource,
-    ParcelsProvider,
-)
+from ..pipeline.types import BBoxWGS84, LidarSource
 
-__all__ = [
-    "BBoxWGS84",
-    "FootprintsProvider",
-    "LidarProvider",
-    "LidarSource",
-    "ParcelsProvider",
-]
+__all__ = ["BBoxWGS84", "LidarSource"]

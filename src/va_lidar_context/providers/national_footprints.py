@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
-
-import requests
+from typing import Any, Dict, Tuple
 
 from ..constants import MAX_RECORD_COUNT, MSBFP2_QUERY
+from .arcgis import paged_query_geojson
 
 
 def fetch_footprints_geojson(
@@ -22,35 +21,9 @@ def fetch_footprints_geojson(
     Returns:
         GeoJSON FeatureCollection with building polygons
     """
-    xmin, ymin, xmax, ymax = bbox
-    all_features: List[Dict[str, Any]] = []
-    offset = 0
-
-    while True:
-        params = {
-            "where": "1=1",
-            "geometry": f"{xmin},{ymin},{xmax},{ymax}",
-            "geometryType": "esriGeometryEnvelope",
-            "inSR": 4326,
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "OBJECTID",
-            "returnGeometry": "true",
-            "outSR": 4326,
-            "f": "geojson",
-            "resultRecordCount": max_records,
-            "resultOffset": offset,
-        }
-
-        resp = requests.get(MSBFP2_QUERY, params=params, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        features = data.get("features", [])
-        if not features:
-            break
-        all_features.extend(features)
-        offset += max_records
-
-    return {
-        "type": "FeatureCollection",
-        "features": all_features,
-    }
+    return paged_query_geojson(
+        MSBFP2_QUERY,
+        bbox,
+        out_fields="OBJECTID",
+        max_record_count=max_records,
+    )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from va_lidar_context.providers import usgs_ept
+import va_lidar_context.providers.usgs_ept as usgs_ept
 
 
 def _feature(name: str, coords, year: int | None = None, url: str | None = None):

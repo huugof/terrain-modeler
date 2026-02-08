@@ -9,10 +9,12 @@
 - `src/va_lidar_context/` core Python package
 - `src/va_lidar_context/cli.py` CLI entry point
 - `src/va_lidar_context/webapp.py` local web UI
+- `src/va_lidar_context/core/` raster + mesh + geo helpers
 - `src/va_lidar_context/parcels/` parcel registry + fetchers
+- `src/va_lidar_context/pipeline/` build orchestration
 - `src/va_lidar_context/providers/` data source adapters
 - `out/` output jobs (default)
-- `references/` research notes and links
+- `docs/references/` research notes and links
 - `tests/` pytest suite
 
 ## Dev Environment
@@ -22,7 +24,7 @@
 
 ## Common Commands
 - Run CLI:
-  - `va-lidar-context build --center <lon> <lat> --size 500 --out ./out`
+  - `va-lidar-context build --center <lat> <lon> --size 500 --out ./out`
 - Run web UI:
   - `va-lidar-context-web`
   - or `python3 -m va_lidar_context.webapp`

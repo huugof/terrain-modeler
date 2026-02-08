@@ -19,6 +19,7 @@ def check_rockyweb(
     timeout: int = 10,
     logger=None,
 ) -> Dict[str, Any]:
+    """Check rockyweb availability and cache the result."""
     now = time.time()
     if cache_path.exists():
         try:

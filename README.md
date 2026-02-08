@@ -9,7 +9,8 @@ va-lidar-context build S13_4899_20 \
   --terrain-sample 10 \
   --random-heights 15 40 \
   --fill-dtm --fill-hard \
-  --naip-texture --naip-flip-v \
+  --outputs buildings,terrain,naip \
+  --naip-flip-v \
   --combine-output
 ```
 
@@ -23,10 +24,9 @@ va-lidar-context build \
   --terrain-sample 10 \
   --random-heights 15 40 \
   --fill-dtm --fill-hard \
-  --naip-texture \
+  --outputs buildings,terrain,naip,contours,parcels \
   --combine-output \
   --contours 2 \
-  --parcels \
   --resolution 0.5
 ```
 
@@ -46,10 +46,7 @@ Parcels are resolved from a small registry of public parcel sources in
 parcels are skipped and the web UI shows an alert when Parcels is checked.
 Use `--ept-only` if the USGS LAZ host is unreachable (will fail if EPT is missing).
 
-If you only have lat/lon order, use:
-```
---center-latlon 38.0275 -78.4662
-```
+Note: `--center` expects `lat, lon` (Google Maps order).
 
 ## Requirements
 - macOS
@@ -73,7 +70,8 @@ va-lidar-context build S13_4899_20 \
   --terrain-sample 10 \
   --random-heights 15 40 \
   --fill-dtm --fill-hard \
-  --naip-texture --naip-flip-v \
+  --outputs buildings,terrain,naip \
+  --naip-flip-v \
   --combine-output
 ```
 
@@ -125,9 +123,8 @@ Per run in `./out/<job_id>/` (job id is a hash of center coords + size + time):
 - `buildings.obj`
 - `terrain.obj`, `terrain.mtl`, `terrain.png`
 - `combined.obj` (if `--combine-output`)
-- `combined.mtl` (if `--combine-output` and `--naip-texture`)
+- `combined.mtl` (if `--combine-output` and `naip` output)
 - `contours.dxf` (if contours/parcels/exported)
-- `trees.obj`
 - `README.txt` (run metadata: center coords + size)
 - `report.json`
 - `dtm.tif`, `dsm.tif`, `ndsm.tif` (only if `--keep-rasters`)
@@ -141,7 +138,7 @@ Per run in `./out/<job_id>/` (job id is a hash of center coords + size + time):
 - If your clip crosses a tile boundary, add `--allow-multi-tile` to merge adjacent tiles.
 - `--naip-flip-u`/`--naip-flip-v` fix mirrored imagery.
 - If the geometry is mirrored or rotated, use `--flip-x`, `--flip-y`, and/or `--rotate-z`.
-- Tree blobs are derived from LAZ **classification 1**.
+- `--outputs` controls which outputs are generated: `buildings`, `terrain`, `contours`, `parcels`, `naip`.
 
 ## Parcel Sources
 Parcel boundaries are pulled from public ArcGIS FeatureServer layers listed in

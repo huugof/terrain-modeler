@@ -17,6 +17,7 @@ def build_naip_request(
     pixel_size: float,
     max_size: int,
 ) -> Dict[str, str]:
+    """Build NAIP ImageServer exportImage params for a bbox."""
     xmin, ymin, xmax, ymax = bbox_3857
     width_m = max(1.0, xmax - xmin)
     height_m = max(1.0, ymax - ymin)
@@ -45,6 +46,7 @@ def build_naip_request_with_size(
     width_px: int,
     height_px: int,
 ) -> Dict[str, str]:
+    """Build NAIP params with an explicit pixel size."""
     xmin, ymin, xmax, ymax = bbox_3857
     rendering_rule = json.dumps({"rasterFunction": "NaturalColor"})
     width_px = max(1, int(width_px))
@@ -116,6 +118,7 @@ def download_naip_image(
     pixel_size: float = 1.0,
     max_size: int = 4000,
 ) -> Dict[str, float]:
+    """Download a NAIP image for the bbox and save to PNG."""
     params = build_naip_request(bbox_3857, pixel_size, max_size)
     last_err = None
     for _ in range(2):
@@ -164,6 +167,7 @@ def download_naip_image_tiled(
     pixel_size: float = 0.3,
     tile_max_size: int = 4000,
 ) -> Dict[str, float]:
+    """Download a NAIP image by tiling requests to avoid size limits."""
     xmin, ymin, xmax, ymax = bbox_3857
     width_m = max(1.0, xmax - xmin)
     height_m = max(1.0, ymax - ymin)

@@ -31,6 +31,7 @@ def list_laz_urls(
     backoff: float = 2.0,
     logger=None,
 ) -> List[str]:
+    """List LAZ/ LAS URLs from a USGS LPC link."""
     url = _download_links_url(lpc_link)
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -141,6 +142,7 @@ def build_laz_index(
     force: bool = False,
     logger=None,
 ) -> List[LazTileInfo]:
+    """Build or load a cached LAZ tile index with bbox metadata."""
     if cache_path.exists() and not force:
         return _load_index(cache_path)
 
@@ -175,4 +177,5 @@ def select_laz_tiles(
     tiles: List[LazTileInfo],
     bbox_wgs84: Tuple[float, float, float, float],
 ) -> List[LazTileInfo]:
+    """Select LAZ tiles that intersect a bbox."""
     return [t for t in tiles if _bbox_intersects(t.bbox_wgs84, bbox_wgs84)]

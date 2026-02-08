@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal
 
 from ..constants import MAX_RECORD_COUNT
+from ..providers.arcgis import paged_query_geojson
 
 BBoxWGS84 = Tuple[float, float, float, float]
 
@@ -28,6 +29,7 @@ def _sources_path() -> Path:
 
 
 def load_sources() -> List[ParcelSource]:
+    """Load parcel sources from the bundled JSON registry."""
     path = _sources_path()
     data = json.loads(path.read_text())
     sources: List[ParcelSource] = []
@@ -79,6 +81,7 @@ def _point_in_bbox(point: tuple[float, float], bbox: BBoxWGS84) -> bool:
 
 
 def resolve_source(bbox_wgs84: BBoxWGS84, sources: Iterable[ParcelSource]) -> Optional[ParcelSource]:
+    """Pick the first parcel source whose coverage intersects the bbox."""
     center = ((bbox_wgs84[0] + bbox_wgs84[2]) / 2.0, (bbox_wgs84[1] + bbox_wgs84[3]) / 2.0)
     for source in sources:
         if source.exclude and any(_point_in_bbox(center, ex) for ex in source.exclude):
@@ -91,46 +94,19 @@ def resolve_source(bbox_wgs84: BBoxWGS84, sources: Iterable[ParcelSource]) -> Op
 
 
 def fetch_parcels_geojson(bbox: BBoxWGS84, source: ParcelSource) -> Dict[str, Any]:
+    """Fetch parcel polygons for a bbox from the given source."""
     if source.kind != "arcgis":
         raise ValueError(f"Unsupported parcel source kind: {source.kind}")
-
-    import requests
-
-    xmin, ymin, xmax, ymax = bbox
-    all_features: List[Dict[str, Any]] = []
-    offset = 0
-
-    while True:
-        params = {
-            "where": "1=1",
-            "geometry": f"{xmin},{ymin},{xmax},{ymax}",
-            "geometryType": "esriGeometryEnvelope",
-            "inSR": 4326,
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": source.out_fields,
-            "returnGeometry": "true",
-            "outSR": 4326,
-            "f": "geojson",
-            "resultRecordCount": source.max_record_count,
-            "resultOffset": offset,
-        }
-
-        resp = requests.get(source.query_url, params=params, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        features = data.get("features", [])
-        if not features:
-            break
-        all_features.extend(features)
-        offset += source.max_record_count
-
-    return {
-        "type": "FeatureCollection",
-        "features": all_features,
-    }
+    return paged_query_geojson(
+        source.query_url,
+        bbox,
+        out_fields=source.out_fields,
+        max_record_count=source.max_record_count,
+    )
 
 
 def fetch_parcels_for_bbox(bbox_wgs84: BBoxWGS84) -> Tuple[Optional[ParcelSource], Optional[Dict[str, Any]]]:
+    """Resolve and fetch parcels for a bbox, returning the source and GeoJSON."""
     sources = load_sources()
     source = resolve_source(bbox_wgs84, sources)
     if source is None:

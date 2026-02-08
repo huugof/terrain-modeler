@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from va_lidar_context.providers import rockyweb_health
+import va_lidar_context.providers.rockyweb_health as rockyweb_health
 
 
 def test_rockyweb_204_is_unavailable(monkeypatch, tmp_path):

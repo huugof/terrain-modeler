@@ -13,6 +13,7 @@ from rasterio.warp import Resampling, reproject
 
 
 def run_pdal_pipeline(pipeline: dict) -> None:
+    """Run a PDAL pipeline JSON spec via stdin."""
     proc = subprocess.run(
         ["pdal", "pipeline", "--stdin"],
         input=json.dumps(pipeline).encode("utf-8"),
@@ -33,6 +34,7 @@ def ept_to_laz(
     laz_path: Path,
     bounds: tuple[float, float, float, float],
 ) -> Path:
+    """Download an EPT subset into a LAZ file for the given bounds."""
     pipeline = {
         "pipeline": [
             {
@@ -55,6 +57,7 @@ def merge_lazs(
     merged_path: Path,
     target_srs: str | None = None,
 ) -> Path:
+    """Merge multiple LAZ files into one, optionally reprojecting first."""
     if not laz_paths:
         raise ValueError("No LAZ files provided for merge")
     if len(laz_paths) == 1:
@@ -88,6 +91,7 @@ def merge_lazs(
 
 
 def make_dtm(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
+    """Create a ground-only DTM raster from LAZ data."""
     pipeline = {
         "pipeline": [
             str(laz_path),
@@ -107,6 +111,7 @@ def make_dtm(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
 
 
 def make_dtm_unclassified(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
+    """Create a DTM using all points when no ground class is present."""
     pipeline = {
         "pipeline": [
             str(laz_path),
@@ -125,6 +130,7 @@ def make_dtm_unclassified(laz_path: Path, dtm_path: Path, resolution: float) -> 
 
 
 def raster_has_data(path: Path) -> bool:
+    """Return True if a raster contains any non-nodata values."""
     with rasterio.open(path) as ds:
         nodata = ds.nodata if ds.nodata is not None else -9999
         data = ds.read(1)
@@ -132,6 +138,7 @@ def raster_has_data(path: Path) -> bool:
 
 
 def make_dsm(laz_path: Path, dsm_path: Path, resolution: float) -> Path:
+    """Create a DSM raster from non-ground LAZ points."""
     pipeline = {
         "pipeline": [
             str(laz_path),
@@ -150,26 +157,8 @@ def make_dsm(laz_path: Path, dsm_path: Path, resolution: float) -> Path:
     return dsm_path
 
 
-def make_canopy_dsm(laz_path: Path, canopy_path: Path, resolution: float) -> Path:
-    pipeline = {
-        "pipeline": [
-            str(laz_path),
-            {"type": "filters.range", "limits": "Classification[1:1]"},
-            {
-                "type": "writers.gdal",
-                "filename": str(canopy_path),
-                "resolution": resolution,
-                "output_type": "max",
-                "gdaldriver": "GTiff",
-                "nodata": -9999,
-            },
-        ]
-    }
-    run_pdal_pipeline(pipeline)
-    return canopy_path
-
-
 def make_ndsm(dsm_path: Path, dtm_path: Path, ndsm_path: Path) -> Path:
+    """Compute a normalized DSM (DSM - DTM)."""
     with rasterio.open(dsm_path) as dsm_ds, rasterio.open(dtm_path) as dtm_ds:
         dsm = dsm_ds.read(1)
         dtm = dtm_ds.read(1)
@@ -208,10 +197,6 @@ def make_ndsm(dsm_path: Path, dtm_path: Path, ndsm_path: Path) -> Path:
     return ndsm_path
 
 
-def make_chm(canopy_path: Path, dtm_path: Path, chm_path: Path) -> Path:
-    return make_ndsm(canopy_path, dtm_path, chm_path)
-
-
 def fill_nodata_raster(
     in_path: Path,
     out_path: Path,
@@ -219,6 +204,7 @@ def fill_nodata_raster(
     smoothing_iterations: int = 0,
     hard_fill: bool = False,
 ) -> Path:
+    """Fill nodata holes in a raster using GDAL or rasterio."""
     cmd = shutil.which("gdal_fillnodata.py") or shutil.which("gdal_fillnodata")
     src_path = in_path
     if cmd:
@@ -280,6 +266,7 @@ def clip_raster(
     out_path: Path,
     polygon,
 ) -> Path:
+    """Clip a raster to a polygon and write the output."""
     with rasterio.open(in_path) as src:
         nodata = src.nodata if src.nodata is not None else -9999
         try:

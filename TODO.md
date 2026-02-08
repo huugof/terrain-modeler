@@ -1,5 +1,4 @@
 - [x] ability to create and export contour curves
-- [ ] look at the tree mesh again
 - [ ] better building height data
 - [ ] expand parcel source coverage (state + county)
 - [x] buildings are not included when multiple tiles are needed
@@ -9,3 +8,4 @@
 - [x] package in a way that doesn't need cli
 - [x] user to input coordinates and size only and script to select correct tile programmatically
 - [x] enable selecting more than one tile and tiling them correctly
+- [ ] how do i host this?

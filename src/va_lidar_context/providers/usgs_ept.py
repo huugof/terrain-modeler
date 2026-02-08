@@ -6,9 +6,9 @@ from typing import Any, Dict, Tuple
 import requests
 
 from ..constants import USGS_LIDAR_PUBLIC_BUCKET
-from .base import LidarSource
+from ..pipeline.types import LidarSource
 from .hobu_boundaries import find_intersections, load_boundaries, sort_datasets
-from .usgs_lidar_index import query_for_bbox, query_for_point, sort_features
+from .usgs_index import query_for_bbox, query_for_point, sort_features
 
 
 def _ept_url(workunit: str, name: str = "ept.json") -> str:
@@ -89,6 +89,7 @@ def _fetch_boundary_bbox(workunit: str) -> Dict[str, float] | None:
 def resolve_ept_from_point(
     lon: float, lat: float, logger=None, cache_dir=None
 ) -> LidarSource | None:
+    """Resolve an EPT source covering a point, if available."""
     # Preferred: Hobu boundaries (authoritative for EPT coverage)
     if cache_dir is not None:
         try:
@@ -187,6 +188,7 @@ def resolve_ept_from_point(
 def resolve_ept_from_bbox(
     bbox: Tuple[float, float, float, float], logger=None, cache_dir=None
 ) -> LidarSource | None:
+    """Resolve an EPT source covering a bbox, if available."""
     # Preferred: Hobu boundaries
     if cache_dir is not None:
         try:

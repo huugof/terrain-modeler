@@ -2,11 +2,23 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from .constants import MAX_RECORD_COUNT, VGIN_FOOTPRINTS_QUERY
+import requests
+
+from ..constants import MAX_RECORD_COUNT
+
+BBoxWGS84 = Tuple[float, float, float, float]
 
 
-def fetch_footprints_geojson(bbox: Tuple[float, float, float, float]) -> Dict[str, Any]:
-    import requests
+def paged_query_geojson(
+    query_url: str,
+    bbox: BBoxWGS84,
+    *,
+    out_fields: str,
+    max_record_count: int = MAX_RECORD_COUNT,
+    where: str = "1=1",
+    timeout: int = 60,
+) -> Dict[str, Any]:
+    """Fetch an ArcGIS FeatureServer layer with paging and return GeoJSON."""
 
     xmin, ymin, xmax, ymax = bbox
     all_features: List[Dict[str, Any]] = []
@@ -14,29 +26,26 @@ def fetch_footprints_geojson(bbox: Tuple[float, float, float, float]) -> Dict[st
 
     while True:
         params = {
-            "where": "1=1",
+            "where": where,
             "geometry": f"{xmin},{ymin},{xmax},{ymax}",
             "geometryType": "esriGeometryEnvelope",
             "inSR": 4326,
             "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "OBJECTID,BLDGHEIGHT,NUMSTORIES,BUILDINGCLASS,MUNICIPALITY",
+            "outFields": out_fields,
             "returnGeometry": "true",
             "outSR": 4326,
             "f": "geojson",
-            "resultRecordCount": MAX_RECORD_COUNT,
+            "resultRecordCount": max_record_count,
             "resultOffset": offset,
         }
 
-        resp = requests.get(VGIN_FOOTPRINTS_QUERY, params=params, timeout=60)
+        resp = requests.get(query_url, params=params, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         features = data.get("features", [])
         if not features:
             break
         all_features.extend(features)
-        offset += MAX_RECORD_COUNT
+        offset += max_record_count
 
-    return {
-        "type": "FeatureCollection",
-        "features": all_features,
-    }
+    return {"type": "FeatureCollection", "features": all_features}

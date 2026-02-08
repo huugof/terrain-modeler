@@ -15,6 +15,7 @@ def _query(params: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def query_for_point(lon: float, lat: float) -> List[Dict[str, Any]]:
+    """Query USGS 3DEP index workunits that contain a point."""
     geometry = json.dumps({"x": lon, "y": lat, "spatialReference": {"wkid": 4326}})
     params = {
         "geometry": geometry,
@@ -29,6 +30,7 @@ def query_for_point(lon: float, lat: float) -> List[Dict[str, Any]]:
 
 
 def query_for_bbox(bbox: Tuple[float, float, float, float]) -> List[Dict[str, Any]]:
+    """Query USGS 3DEP index workunits that intersect a bbox."""
     xmin, ymin, xmax, ymax = bbox
     params = {
         "geometry": f"{xmin},{ymin},{xmax},{ymax}",
@@ -64,6 +66,7 @@ def _collect_end_ms(feature: Dict[str, Any]) -> int:
 
 
 def select_best_feature(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pick the highest-quality, most recent feature from the index list."""
     if not features:
         raise ValueError("No LiDAR features returned")
 
@@ -76,6 +79,7 @@ def select_best_feature(features: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def sort_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort index features by quality level and collection end date."""
     if not features:
         return []
 
@@ -88,6 +92,7 @@ def sort_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def format_collect_date(feature: Dict[str, Any]) -> str | None:
+    """Format collect_end epoch ms into an ISO date string when available."""
     end_ms = _collect_end_ms(feature)
     if not end_ms:
         return None
