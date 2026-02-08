@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import trimesh
@@ -439,6 +441,8 @@ class DxfExporter:
             "CONTOURS": 8,  # Gray
             "PARCELS": 3,  # Green
             "BUILDINGS": 5,  # Blue
+            "origin": 1,  # Red
+            "north": 2,  # Yellow
         }
 
     def _ensure_layer(self, name: str, color: int = None) -> None:
@@ -538,6 +542,65 @@ class DxfExporter:
                     count += 1
 
         return count
+
+    def add_cross(
+        self,
+        center: tuple[float, float, float],
+        size: float = 50.0,
+        layer_name: str = "origin",
+        color: int | None = None,
+    ) -> None:
+        """
+        Add a simple cross marker centered at the given point.
+
+        Args:
+            center: (x, y, z) in output units
+            size: Full width/height of the cross
+            layer_name: DXF layer name
+            color: Optional layer color override
+        """
+        self._ensure_layer(layer_name, color)
+        x, y, z = center
+        half = size / 2.0
+        self.msp.add_line(
+            (x - half, y, z), (x + half, y, z), dxfattribs={"layer": layer_name}
+        )
+        self.msp.add_line(
+            (x, y - half, z), (x, y + half, z), dxfattribs={"layer": layer_name}
+        )
+
+    def add_north_arrow(
+        self,
+        base: tuple[float, float, float],
+        length: float = 75.0,
+        head_length: float = 15.0,
+        head_angle_deg: float = 25.0,
+        layer_name: str = "north",
+        color: int | None = None,
+    ) -> None:
+        """
+        Add a one-sided north arrow pointing +Y.
+
+        Args:
+            base: (x, y, z) base point in output units
+            length: Arrow shaft length
+            head_length: Arrow head length
+            head_angle_deg: Arrow head angle from shaft
+            layer_name: DXF layer name
+            color: Optional layer color override
+        """
+        self._ensure_layer(layer_name, color)
+        x, y, z = base
+        tip = (x, y + length, z)
+        self.msp.add_line((x, y, z), tip, dxfattribs={"layer": layer_name})
+
+        angle = math.radians(head_angle_deg)
+        dx = head_length * math.sin(angle)
+        dy = head_length * math.cos(angle)
+        left = (tip[0] - dx, tip[1] - dy, z)
+        right = (tip[0] + dx, tip[1] - dy, z)
+        self.msp.add_line(tip, left, dxfattribs={"layer": layer_name})
+        self.msp.add_line(tip, right, dxfattribs={"layer": layer_name})
 
     def save(self, output_path: str) -> None:
         """Save the DXF file."""

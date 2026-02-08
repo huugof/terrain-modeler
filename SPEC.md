@@ -63,6 +63,24 @@ BLDGHEIGHT, NUMSTORIES, BUILDINGCLASS, MUNICIPALITY, etc.
 
 MaxRecordCount=2000 (requires pagination)
 
+C) National mode (USGS 3DEP + Microsoft Building Footprints)
+
+USGS 3DEP LiDAR Index (workunit coverage + LPC links):
+
+https://index.nationalmap.gov/arcgis/rest/services/3DEPElevationIndex/MapServer/8
+
+USGS LiDAR public EPT bucket (workunit → ept.json + boundary.json):
+
+https://usgs-lidar-public.s3.amazonaws.com/<workunit>/ept.json
+
+Fallback LAZ download list (per workunit):
+
+https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/<project>/<workunit>/0_file_download_links.txt
+
+Microsoft US Building Footprints (Esri hosted FeatureServer):
+
+https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0
+
 Coordinate systems
 
 Both VGIN services report native spatial reference in Web Mercator (WKID 102100 / EPSG:3857).
@@ -155,11 +173,11 @@ optional GLB (if you add a GLTF exporter path)
 
 Non-functional requirements
 
-Deterministic output folder structure per tile
+Job-id-based output folders to avoid overwrites (no tile name in folder)
 
 Caching:
 
-don’t re-download LAZ/footprints if present unless --force
+don’t re-download LAZ/footprints if present in the output folder unless --force
 
 Logging:
 

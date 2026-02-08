@@ -1,8 +1,11 @@
 - [x] ability to create and export contour curves
 - [ ] look at the tree mesh again
-- [ ] overlay naib on buildings too?
-- [ ] figure out how to import this into a model effectively
-- [ ] how to run on windows
-- [ ] package in a way that doesn't need cli
+- [ ] better building height data
+- [ ] expand parcel source coverage (state + county)
+- [x] buildings are not included when multiple tiles are needed
+- [x] recent jobs should update automatically
+- [x] figure out how to import this into a model effectively
+- [x] how to run on windows
+- [x] package in a way that doesn't need cli
 - [x] user to input coordinates and size only and script to select correct tile programmatically
 - [x] enable selecting more than one tile and tiling them correctly

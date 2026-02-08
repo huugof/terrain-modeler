@@ -1,6 +1,6 @@
 # va-lidar-context
 
-CLI to build context building meshes from Virginia LiDAR and building footprints.
+CLI to build context building meshes from Virginia LiDAR and building footprints, with optional national USGS 3DEP support.
 
 **Primary example (current default workflow):**
 ```bash
@@ -29,6 +29,22 @@ va-lidar-context build \
   --parcels \
   --resolution 0.5
 ```
+
+**National mode (USGS 3DEP LiDAR + Microsoft building footprints):**
+```bash
+va-lidar-context build \
+  --provider national \
+  --ept-only \
+  --center 38.03344644806424 -78.46451371473545 \
+  --size 500 \
+  --out ./out \
+  --resolution 1
+```
+
+Parcels are resolved from a small registry of public parcel sources in
+`src/va_lidar_context/parcels/sources.json`. If no source matches the clip area,
+parcels are skipped and the web UI shows an alert when Parcels is checked.
+Use `--ept-only` if the USGS LAZ host is unreachable (will fail if EPT is missing).
 
 If you only have lat/lon order, use:
 ```
@@ -102,15 +118,17 @@ Override with env vars:
 - `VA_CLEANUP_INTERVAL=3600`
 
 ## Outputs
-Per tile in `./out/<tile_name>/`:
+Per run in `./out/<job_id>/` (job id is a hash of center coords + size + time):
 - `tile.json`
 - `tile.laz`
 - `footprints.geojson`
 - `buildings.obj`
 - `terrain.obj`, `terrain.mtl`, `terrain.png`
-- `scene.obj` (if `--combine-output`)
-- `scene.mtl` (if `--combine-output` and `--naip-texture`)
+- `combined.obj` (if `--combine-output`)
+- `combined.mtl` (if `--combine-output` and `--naip-texture`)
+- `contours.dxf` (if contours/parcels/exported)
 - `trees.obj`
+- `README.txt` (run metadata: center coords + size)
 - `report.json`
 - `dtm.tif`, `dsm.tif`, `ndsm.tif` (only if `--keep-rasters`)
 - `tiles_merged.laz` (only if `--allow-multi-tile` and the clip spans tiles)
@@ -124,3 +142,38 @@ Per tile in `./out/<tile_name>/`:
 - `--naip-flip-u`/`--naip-flip-v` fix mirrored imagery.
 - If the geometry is mirrored or rotated, use `--flip-x`, `--flip-y`, and/or `--rotate-z`.
 - Tree blobs are derived from LAZ **classification 1**.
+
+## Parcel Sources
+Parcel boundaries are pulled from public ArcGIS FeatureServer layers listed in
+`src/va_lidar_context/parcels/sources.json`. The resolver picks the first source
+whose `coverage` bbox intersects the requested clip area.
+
+### Add a Parcel Source
+1. Find a public ArcGIS FeatureServer layer that serves parcel polygons.
+2. Add a new entry to `src/va_lidar_context/parcels/sources.json`.
+3. Set a `coverage` bbox in WGS84 (lon/lat) so we only hit that source in-region.
+
+### Find Parcel Layers (Quick Checklist)
+1. Locate the GIS server root: `https://<domain>/arcgis/rest/services`
+2. Open it in a browser and search for folders/services named `Parcels`, `Cadastre`,
+   `TaxParcel`, or `Assessment`.
+3. Click a promising service, then open the `FeatureServer` (or `MapServer`) layer list.
+4. Use the layer’s `/query` endpoint as `query_url`, for example:
+   `.../FeatureServer/0/query`
+5. Confirm the layer returns polygons in GeoJSON by loading `?f=pjson` and
+   checking `geometryType` (should be `esriGeometryPolygon`) and
+   `supportsPagination`/`maxRecordCount` for paging.
+
+Example entry:
+```json
+{
+  "id": "state_or_county_parcels",
+  "name": "State/County Parcels",
+  "kind": "arcgis",
+  "query_url": "https://example.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
+  "out_fields": "OBJECTID,PARCELID",
+  "max_record_count": 2000,
+  "coverage": { "xmin": -120.0, "ymin": 32.0, "xmax": -114.0, "ymax": 42.0 },
+  "notes": "Any licensing caveats or coverage notes."
+}
+```

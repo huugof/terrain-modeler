@@ -19,4 +19,19 @@ VGIN_PARCELS_LAYER = (
 
 VGIN_PARCELS_QUERY = f"{VGIN_PARCELS_LAYER}/query"
 
+USGS_LIDAR_INDEX_LAYER = (
+    "https://index.nationalmap.gov/arcgis/rest/services/3DEPElevationIndex/MapServer/8"
+)
+
+USGS_LIDAR_INDEX_QUERY = f"{USGS_LIDAR_INDEX_LAYER}/query"
+
+USGS_LIDAR_PUBLIC_BUCKET = "https://usgs-lidar-public.s3.amazonaws.com"
+
+MSBFP2_LAYER = (
+    "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/"
+    "MSBFP2/FeatureServer/0"
+)
+
+MSBFP2_QUERY = f"{MSBFP2_LAYER}/query"
+
 MAX_RECORD_COUNT = 2000

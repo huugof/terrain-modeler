@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -68,3 +70,23 @@ def iter_offsets(total: int, step: int) -> Iterable[int]:
         offset += step
         if offset >= total:
             break
+
+
+def generate_job_id(
+    center: tuple[float, float] | None,
+    clip_size: float | None,
+    units: str | None,
+    *,
+    time_ns: int | None = None,
+) -> str:
+    if time_ns is None:
+        time_ns = time.time_ns()
+    if center is None:
+        center_text = "n/a"
+    else:
+        center_text = f"{center[0]:.6f},{center[1]:.6f}"
+    size_text = "n/a" if clip_size is None else f"{clip_size:g}"
+    units_text = units or "n/a"
+    payload = f"{center_text}|{size_text}|{units_text}|{time_ns}"
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return digest[:16]

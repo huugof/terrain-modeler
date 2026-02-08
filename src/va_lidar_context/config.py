@@ -20,6 +20,7 @@ DEFAULT_FILL_HARD = False
 DEFAULT_RANDOM_SEED = None
 DEFAULT_NAIP_PIXEL_SIZE = 1.0
 DEFAULT_NAIP_MAX_SIZE = 4000
+DEFAULT_NAIP_TILED = False
 DEFAULT_NAIP_FLIP_U = False
 DEFAULT_NAIP_FLIP_V = False
 DEFAULT_COMBINE_OUTPUT = False
@@ -36,11 +37,17 @@ DEFAULT_TREES_MAX_HEIGHT = None
 DEFAULT_TREES_RADIUS = 6.0
 DEFAULT_ALLOW_MULTI_TILE = False
 DEFAULT_EXPORT_BUILDINGS = True
+DEFAULT_EXPORT_TERRAIN = True
+DEFAULT_PREFER_EPT = True
+DEFAULT_PROVIDER = "va"
+DEFAULT_EPT_ONLY = False
+DEFAULT_CLEANUP_INTERMEDIATES = False
 
 
 @dataclass(frozen=True)
 class BuildConfig:
     tile_name: str | None = None
+    job_id: str | None = None
     center_coords: tuple[float, float] | None = None  # Raw user input (auto-detected)
     out_dir: Path = DEFAULT_OUT_DIR
     force: bool = False
@@ -63,6 +70,7 @@ class BuildConfig:
     naip_texture: bool = False
     naip_pixel_size: float = DEFAULT_NAIP_PIXEL_SIZE
     naip_max_size: int = DEFAULT_NAIP_MAX_SIZE
+    naip_tiled: bool = DEFAULT_NAIP_TILED
     naip_flip_u: bool = DEFAULT_NAIP_FLIP_U
     naip_flip_v: bool = DEFAULT_NAIP_FLIP_V
     combine_output: bool = DEFAULT_COMBINE_OUTPUT
@@ -84,3 +92,8 @@ class BuildConfig:
     parcels: bool = False
     allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE
     export_buildings: bool = DEFAULT_EXPORT_BUILDINGS
+    export_terrain: bool = DEFAULT_EXPORT_TERRAIN
+    prefer_ept: bool = DEFAULT_PREFER_EPT
+    provider: str = DEFAULT_PROVIDER
+    ept_only: bool = DEFAULT_EPT_ONLY
+    cleanup_intermediates: bool = DEFAULT_CLEANUP_INTERMEDIATES

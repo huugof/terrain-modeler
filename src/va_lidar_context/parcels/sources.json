@@ -1,0 +1,65 @@
+[
+  {
+    "id": "va_vgin_parcels",
+    "name": "Virginia Parcels (VGIN)",
+    "kind": "arcgis",
+    "query_url": "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0/query",
+    "out_fields": "OBJECTID,VGIN_QPID,PARCELID,LOCALITY,Shape__Area",
+    "max_record_count": 2000,
+    "coverage": {
+      "xmin": -83.0,
+      "ymin": 36.5,
+      "xmax": -75.0,
+      "ymax": 39.5
+    },
+    "notes": "Statewide parcel boundaries from VGIN. Coverage heuristic matches existing VA provider bounds."
+  },
+  {
+    "id": "ct_cama_parcels",
+    "name": "Connecticut Parcels (CAMA + Parcels)",
+    "kind": "arcgis",
+    "query_url": "https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query",
+    "out_fields": "OBJECTID",
+    "max_record_count": 2000,
+    "coverage": {
+      "xmin": -73.7272,
+      "ymin": 40.9801,
+      "xmax": -71.7869,
+      "ymax": 42.0506
+    },
+    "notes": "Statewide CT parcel dataset from CT GIS (CAMA and Parcels)."
+  },
+  {
+    "id": "ny_nys_tax_parcels_public",
+    "name": "New York Parcels (NYS Tax Parcels Public)",
+    "kind": "arcgis",
+    "query_url": "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1/query",
+    "out_fields": "OBJECTID",
+    "max_record_count": 1000,
+    "coverage": {
+      "xmin": -79.7624,
+      "ymin": 40.4960,
+      "xmax": -71.7775,
+      "ymax": 45.0150
+    },
+    "exclude": [
+      { "xmin": -73.75, "ymin": 40.95, "xmax": -71.8, "ymax": 42.05 }
+    ],
+    "notes": "Public parcel layer only includes NY counties that granted permission; not statewide-complete."
+  },
+  {
+    "id": "co_public_parcel_composite",
+    "name": "Colorado Parcels (Public Parcel Composite)",
+    "kind": "arcgis",
+    "query_url": "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0/query",
+    "out_fields": "OBJECTID",
+    "max_record_count": 2000,
+    "coverage": {
+      "xmin": -109.0602,
+      "ymin": 36.9920,
+      "xmax": -102.0467,
+      "ymax": 41.0033
+    },
+    "notes": "Statewide public parcel composite; resale prohibited per service copyright."
+  }
+]

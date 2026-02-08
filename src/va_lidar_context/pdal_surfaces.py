@@ -23,6 +23,33 @@ def run_pdal_pipeline(pipeline: dict) -> None:
         raise RuntimeError(proc.stderr.decode("utf-8"))
 
 
+def _format_bounds(bounds: tuple[float, float, float, float]) -> str:
+    minx, miny, maxx, maxy = bounds
+    return f"([{minx},{maxx}],[{miny},{maxy}])"
+
+
+def ept_to_laz(
+    ept_url: str,
+    laz_path: Path,
+    bounds: tuple[float, float, float, float],
+) -> Path:
+    pipeline = {
+        "pipeline": [
+            {
+                "type": "readers.ept",
+                "filename": ept_url,
+                "bounds": _format_bounds(bounds),
+            },
+            {
+                "type": "writers.las",
+                "filename": str(laz_path),
+            },
+        ]
+    }
+    run_pdal_pipeline(pipeline)
+    return laz_path
+
+
 def merge_lazs(
     laz_paths: list[Path],
     merged_path: Path,
@@ -77,6 +104,31 @@ def make_dtm(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
     }
     run_pdal_pipeline(pipeline)
     return dtm_path
+
+
+def make_dtm_unclassified(laz_path: Path, dtm_path: Path, resolution: float) -> Path:
+    pipeline = {
+        "pipeline": [
+            str(laz_path),
+            {
+                "type": "writers.gdal",
+                "filename": str(dtm_path),
+                "resolution": resolution,
+                "output_type": "min",
+                "gdaldriver": "GTiff",
+                "nodata": -9999,
+            },
+        ]
+    }
+    run_pdal_pipeline(pipeline)
+    return dtm_path
+
+
+def raster_has_data(path: Path) -> bool:
+    with rasterio.open(path) as ds:
+        nodata = ds.nodata if ds.nodata is not None else -9999
+        data = ds.read(1)
+        return bool(np.any((data != nodata) & np.isfinite(data)))
 
 
 def make_dsm(laz_path: Path, dsm_path: Path, resolution: float) -> Path:
