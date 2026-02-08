@@ -16,6 +16,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from .pipeline.build import build as build_pipeline
 from .config import (
+    DEFAULT_COMBINE_OUTPUT,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
     DEFAULT_FLOOR_TO_FLOOR,
@@ -374,6 +375,7 @@ def snapshot_defaults() -> Dict[str, Any]:
         "output_contours": "contours" in outputs,
         "output_parcels": "parcels" in outputs,
         "output_naip": "naip" in outputs,
+        "output_combined": DEFAULT_COMBINE_OUTPUT,
         "min_height": DEFAULT_MIN_HEIGHT,
         "max_height": DEFAULT_MAX_HEIGHT,
         "random_min_height": DEFAULT_RANDOM_MIN_HEIGHT,
@@ -548,11 +550,19 @@ def run_job():
     if not outputs:
         return jsonify({"error": "Select at least one output."}), 400
 
+    combine_output = parse_bool(form.get("output_combined"))
+    if combine_output and not (
+        "terrain" in outputs and "buildings" in outputs
+    ):
+        return (
+            jsonify({"error": "Combined output requires terrain + buildings."}),
+            400,
+        )
+
     contours_enabled = "contours" in outputs
     contour_interval = (
         (parse_float(form.get("contour_interval")) or 2.0) if contours_enabled else None
     )
-    combine_output = False
     keep_rasters = False
 
     flip_x = False

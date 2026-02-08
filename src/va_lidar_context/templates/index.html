@@ -39,12 +39,14 @@
           <div class="check-row">
             <label class="check"><input type="checkbox" id="output_terrain" name="output_terrain" {% if defaults.output_terrain %}checked{% endif %} /> Terrain Mesh</label>
             <label class="check"><input type="checkbox" id="output_buildings" name="output_buildings" {% if defaults.output_buildings %}checked{% endif %} /> Buildings</label>
+            <label class="check"><input type="checkbox" id="output_combined" name="output_combined" {% if defaults.output_combined %}checked{% endif %} /> Combined OBJ</label>
           </div>
           <div class="check-row" style="margin-top:6px;">
             <label class="check"><input type="checkbox" id="output_contours" name="output_contours" {% if defaults.output_contours %}checked{% endif %} /> Contours</label>
             <label class="check"><input type="checkbox" id="output_parcels" name="output_parcels" {% if defaults.output_parcels %}checked{% endif %} /> Parcels</label>
             <label class="check"><input type="checkbox" id="output_naip" name="output_naip" {% if defaults.output_naip %}checked{% endif %} /> NAIP Texture</label>
           </div>
+          <div id="combinedNote" class="inline-note hidden">Requires Terrain + Buildings outputs.</div>
 
           <div id="advancedControls" class="advanced-controls">
             <div id="meshResolutionSection">
@@ -370,7 +372,7 @@
         const complexityValue = Number(complexityInput.value || 0);
         const units = unitsInput ? unitsInput.value : 'feet';
         if (!Number.isFinite(size) || size <= 0) {
-          estimateEl.textContent = 'Estimated terrain faces: —';
+          estimateEl.textContent = 'Estimated mesh polygons: —';
           return;
         }
 
@@ -382,15 +384,12 @@
           cellSize *= metersToFeet;
         }
         if (!Number.isFinite(cellSize) || cellSize <= 0) {
-          estimateEl.textContent = 'Estimated terrain faces: —';
+          estimateEl.textContent = 'Estimated mesh polygons: —';
           return;
         }
         const samplesPerSide = Math.max(2, Math.floor(size / cellSize));
         const faces = 2 * Math.pow(samplesPerSide - 1, 2);
-        const resolutionLabel = units === 'feet'
-          ? `${(baseResolution * metersToFeet).toFixed(2)} ft`
-          : `${baseResolution.toFixed(2)} m`;
-        estimateEl.textContent = `Estimated terrain faces: ~${formatCount(faces)} (assumes ${resolutionLabel} raster)`;
+        estimateEl.textContent = `Estimated mesh polygons: ~${formatCount(faces)}`;
       }
 
       const advancedState = {};
@@ -417,10 +416,20 @@
         const outTerrain = document.getElementById('output_terrain');
         const outBuildings = document.getElementById('output_buildings');
         const outImage = document.getElementById('output_naip');
+        const outCombined = document.getElementById('output_combined');
+        const combinedNote = document.getElementById('combinedNote');
         if (outTerrain) setAdvancedVisibility('meshResolutionSection', outTerrain.checked);
         if (outBuildings) setAdvancedVisibility('buildingHeightsSection', outBuildings.checked);
         if (contours) setAdvancedVisibility('contourIntervalSection', contours.checked);
         if (outImage) setAdvancedVisibility('imageQualitySection', outImage.checked);
+        if (outCombined && outTerrain && outBuildings) {
+          const canCombine = outTerrain.checked && outBuildings.checked;
+          outCombined.disabled = !canCombine;
+          if (!canCombine) outCombined.checked = false;
+          if (combinedNote) {
+            combinedNote.classList.toggle('hidden', canCombine);
+          }
+        }
         if (parcels) updateAlerts();
         updateComplexityEstimate();
         updateProviderLabel();
@@ -482,6 +491,7 @@
         const outTerrain = document.getElementById('output_terrain');
         const outBuildings = document.getElementById('output_buildings');
         const outImage = document.getElementById('output_naip');
+        const outCombined = document.getElementById('output_combined');
         const coords = document.querySelector('input[name="coords"]');
         const size = document.querySelector('input[name="size"]');
         const units = document.querySelector('select[name="units"]');
@@ -490,6 +500,7 @@
         if (outTerrain) outTerrain.addEventListener('change', updateUiToggles);
         if (outBuildings) outBuildings.addEventListener('change', updateUiToggles);
         if (outImage) outImage.addEventListener('change', updateUiToggles);
+        if (outCombined) outCombined.addEventListener('change', updateUiToggles);
         if (coords) coords.addEventListener('input', () => {
           updateProviderLabel();
           updateAlerts();
