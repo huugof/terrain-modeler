@@ -23,12 +23,14 @@ from ..core.mesh import (
     DxfExporter,
     apply_scene_transform,
     combine_meshes,
+    export_contours_xyz,
     export_mesh,
     export_obj_with_uv,
     export_scene_with_terrain_texture,
     export_terrain_xyz,
     extrude_footprints,
     generate_contours_from_raster,
+    resample_contours,
     terrain_mesh_from_raster,
 )
 from ..core.naip import download_naip_image, download_naip_image_tiled
@@ -126,10 +128,22 @@ def build(cfg: BuildConfig) -> int:
     export_parcels = "parcels" in outputs
     export_naip = "naip" in outputs
     export_xyz = "xyz" in outputs
+    include_parcels = export_parcels or cfg.dxf_include_parcels
+    include_buildings = cfg.dxf_include_buildings
 
     if export_contours and cfg.contour_interval is None:
         raise ValueError("Contours output requires --contours INTERVAL.")
-    if not export_contours and cfg.contour_interval is not None:
+    if export_xyz and cfg.xyz_mode == "contours" and cfg.contour_interval is None:
+        raise ValueError(
+            "XYZ contour output requires --contours INTERVAL "
+            "(even if 'contours' output is disabled). "
+            "Use --xyz-mode grid for a full terrain grid."
+        )
+    if (
+        not export_contours
+        and cfg.contour_interval is not None
+        and not (export_xyz and cfg.xyz_mode == "contours")
+    ):
         raise ValueError("--contours requires 'contours' in --outputs.")
     if cfg.combine_output and not (export_buildings and export_terrain):
         raise ValueError(
@@ -941,21 +955,42 @@ def build(cfg: BuildConfig) -> int:
     if center_laz_x is not None and center_laz_y is not None:
         dxf_origin = (center_laz_x * xy_scale, center_laz_y * xy_scale)
 
-    xyz_point_count = 0
-    if export_xyz:
-        xyz_path = tile_dir / "terrain.xyz"
-        xyz_point_count = export_terrain_xyz(
+    contours = None
+    contours_needed = export_contours or (export_xyz and cfg.xyz_mode == "contours")
+    if contours_needed and cfg.contour_interval is not None:
+        interval_laz = cfg.contour_interval / z_scale
+        contours = generate_contours_from_raster(
             str(terrain_source_path),
-            str(xyz_path),
+            interval=interval_laz,
             xy_scale=xy_scale,
             z_scale=z_scale,
-            sample=cfg.terrain_sample,
+            sample=1,
             origin=dxf_origin,
             rotate_deg=cfg.rotate_z,
         )
+
+    xyz_point_count = 0
+    if export_xyz:
+        xyz_path = tile_dir / "terrain.xyz"
+        if cfg.xyz_mode == "contours":
+            if contours:
+                spacing = cfg.xyz_contour_spacing or 0.0
+                xyz_point_count = export_contours_xyz(
+                    contours, str(xyz_path), spacing=spacing
+                )
+        else:
+            xyz_point_count = export_terrain_xyz(
+                str(terrain_source_path),
+                str(xyz_path),
+                xy_scale=xy_scale,
+                z_scale=z_scale,
+                sample=cfg.terrain_sample,
+                origin=dxf_origin,
+                rotate_deg=cfg.rotate_z,
+            )
         logger.info(f"Exported {xyz_point_count} points to {xyz_path}")
 
-    export_dxf = export_contours or export_parcels
+    export_dxf = export_contours or include_parcels
     if export_dxf:
         logger.info("Generating DXF export")
         dxf_path = tile_dir / "contours.dxf"
@@ -974,25 +1009,17 @@ def build(cfg: BuildConfig) -> int:
         dxf.add_cross(marker_center, size=50.0, layer_name="origin")
         dxf.add_north_arrow(marker_center, layer_name="north")
 
-        if export_contours and cfg.contour_interval is not None:
-            interval_laz = cfg.contour_interval / z_scale
-            contours = generate_contours_from_raster(
-                str(terrain_source_path),
-                interval=interval_laz,
-                xy_scale=xy_scale,
-                z_scale=z_scale,
-                sample=1,
-                origin=dxf_origin,
-                rotate_deg=cfg.rotate_z,
+        if export_contours and contours:
+            dxf_contours = contours
+            if cfg.dxf_contour_spacing:
+                dxf_contours = resample_contours(contours, cfg.dxf_contour_spacing)
+            major_interval = cfg.contour_interval * 5
+            contour_count = dxf.add_contours(
+                dxf_contours, major_interval=major_interval
             )
-            if contours:
-                major_interval = cfg.contour_interval * 5
-                contour_count = dxf.add_contours(
-                    contours, major_interval=major_interval
-                )
-                logger.info(f"  Added {contour_count} contour polylines")
+            logger.info(f"  Added {contour_count} contour polylines")
 
-        if export_parcels:
+        if include_parcels:
             parcels_bbox = None
             if clip_bbox_wgs84:
                 parcels_bbox = clip_bbox_wgs84
@@ -1028,17 +1055,18 @@ def build(cfg: BuildConfig) -> int:
                         f"  Added {parcel_count} parcel boundaries ({source.name})"
                     )
 
-        building_count = dxf.add_polygons_from_geojson(
-            footprints,
-            layer_name="BUILDINGS",
-            xy_scale=xy_scale,
-            transform_func=to_laz.transform,
-            color=5,
-            origin=dxf_origin,
-            clip_boundary=clip_poly,
-            rotate_deg=cfg.rotate_z,
-        )
-        logger.info(f"  Added {building_count} building footprints")
+        if include_buildings:
+            building_count = dxf.add_polygons_from_geojson(
+                footprints,
+                layer_name="BUILDINGS",
+                xy_scale=xy_scale,
+                transform_func=to_laz.transform,
+                color=5,
+                origin=dxf_origin,
+                clip_boundary=clip_poly,
+                rotate_deg=cfg.rotate_z,
+            )
+            logger.info(f"  Added {building_count} building footprints")
 
         dxf.save(str(dxf_path))
         logger.info(f"Exported DXF to {dxf_path}")
@@ -1123,10 +1151,20 @@ def build(cfg: BuildConfig) -> int:
         "contours": {
             "enabled": export_contours,
             "interval": cfg.contour_interval if export_contours else None,
+            "dxf_spacing": cfg.dxf_contour_spacing if export_contours else None,
+            "include_parcels": include_parcels if export_dxf else None,
+            "include_buildings": include_buildings if export_dxf else None,
         },
         "xyz": {
             "enabled": export_xyz,
             "points": xyz_point_count if export_xyz else None,
+            "mode": cfg.xyz_mode if export_xyz else None,
+            "contour_interval": cfg.contour_interval
+            if export_xyz and cfg.xyz_mode == "contours"
+            else None,
+            "contour_spacing": cfg.xyz_contour_spacing
+            if export_xyz and cfg.xyz_mode == "contours"
+            else None,
         },
         "warnings": warnings,
     }

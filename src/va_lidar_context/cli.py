@@ -7,6 +7,7 @@ from typing import Iterable
 from .config import (
     DEFAULT_ALLOW_MULTI_TILE,
     DEFAULT_COMBINE_OUTPUT,
+    DEFAULT_DXF_CONTOUR_SPACING,
     DEFAULT_EPT_ONLY,
     DEFAULT_FILL_DTM,
     DEFAULT_FILL_HARD,
@@ -31,6 +32,7 @@ from .config import (
     DEFAULT_TERRAIN_FLIP_Y,
     DEFAULT_TERRAIN_SAMPLE,
     DEFAULT_UNITS,
+    DEFAULT_XYZ_MODE,
     BuildConfig,
 )
 from .pipeline.build import build
@@ -146,7 +148,28 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar="INTERVAL",
-        help="Generate contour lines at this interval (in output units). Exports to DXF.",
+        help=(
+            "Generate contour lines at this interval (in output units). "
+            "Also used for XYZ when --xyz-mode=contours."
+        ),
+    )
+    build_cmd.add_argument(
+        "--dxf-contour-spacing",
+        type=float,
+        default=DEFAULT_DXF_CONTOUR_SPACING,
+        help="Resample spacing along contour lines in DXF (output units).",
+    )
+    build_cmd.add_argument(
+        "--xyz-mode",
+        choices=["contours", "grid"],
+        default=DEFAULT_XYZ_MODE,
+        help="XYZ export mode: contours (vertices along contour lines) or grid.",
+    )
+    build_cmd.add_argument(
+        "--xyz-contour-spacing",
+        type=float,
+        default=None,
+        help="Resample spacing along contour lines for XYZ (output units).",
     )
     build_cmd.add_argument(
         "--terrain-flip-y",
@@ -247,6 +270,9 @@ def main() -> int:
             flip_x=args.flip_x,
             terrain_flip_y=args.terrain_flip_y,
             rotate_z=args.rotate_z,
+            xyz_mode=args.xyz_mode,
+            xyz_contour_spacing=args.xyz_contour_spacing,
+            dxf_contour_spacing=args.dxf_contour_spacing,
             provider=args.provider,
             ept_only=args.ept_only,
             outputs=outputs,

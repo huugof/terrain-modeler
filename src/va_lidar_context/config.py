@@ -30,12 +30,17 @@ DEFAULT_FLIP_Y = False
 DEFAULT_FLIP_X = False
 DEFAULT_TERRAIN_FLIP_Y = False
 DEFAULT_ROTATE_Z = 0.0
+DEFAULT_PROJECT_ZERO = 0.0
+DEFAULT_XYZ_MODE = "contours"
+DEFAULT_DXF_CONTOUR_SPACING = 0.0
+DEFAULT_DXF_INCLUDE_PARCELS = False
+DEFAULT_DXF_INCLUDE_BUILDINGS = True
 DEFAULT_ALLOW_MULTI_TILE = False
 DEFAULT_PREFER_EPT = True
 DEFAULT_PROVIDER = "va"
 DEFAULT_EPT_ONLY = False
 DEFAULT_CLEANUP_INTERMEDIATES = False
-DEFAULT_OUTPUTS: Tuple[str, ...] = ("buildings", "terrain")
+DEFAULT_OUTPUTS: Tuple[str, ...] = ("contours", "xyz")
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,12 @@ class BuildConfig:
     flip_x: bool = DEFAULT_FLIP_X
     terrain_flip_y: bool = DEFAULT_TERRAIN_FLIP_Y
     rotate_z: float = DEFAULT_ROTATE_Z
+    project_zero: float | None = DEFAULT_PROJECT_ZERO
+    xyz_mode: str = DEFAULT_XYZ_MODE
+    xyz_contour_spacing: float | None = None
+    dxf_contour_spacing: float | None = None
+    dxf_include_parcels: bool = DEFAULT_DXF_INCLUDE_PARCELS
+    dxf_include_buildings: bool = DEFAULT_DXF_INCLUDE_BUILDINGS
     contour_interval: float | None = None
     allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE
     prefer_ept: bool = DEFAULT_PREFER_EPT

@@ -46,72 +46,18 @@
                         </div>
                         <div>
                             <label>Units</label>
-              <select name="units">
-                <option value="feet" {% if defaults.units == 'feet' %}selected{% endif %}>
-                  feet
-                </option>
-                <option value="meters" {% if defaults.units == 'meters' %}selected{% endif %}>
-                  meters
-                </option>
-              </select>
+                            <select name="units">
+                                <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
+                                <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
+                            </select>
                         </div>
-                    </div>
-                    <div class="note" style="margin-top: 8px">
-                        Provider:
-                        <span id="providerValue"
-                            >{{ defaults.provider_label }}</span
-                        >
                     </div>
 
                     <div class="section-title" style="margin-top: 16px">
                         Outputs
                     </div>
                     <div class="check-row">
-                        <label class="check"
-                            ><input
-                                type="checkbox"
-                                id="output_terrain"
-                                name="output_terrain"
-                                {%
-                                if
-                                defaults.output_terrain
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Terrain Mesh</label
-                        >
-                        <label class="check"
-                            ><input
-                                type="checkbox"
-                                id="output_buildings"
-                                name="output_buildings"
-                                {%
-                                if
-                                defaults.output_buildings
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Buildings</label
-                        >
-                        <label class="check"
-                            ><input
-                                type="checkbox"
-                                id="output_combined"
-                                name="output_combined"
-                                {%
-                                if
-                                defaults.output_combined
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Combined OBJ</label
-                        >
-                    </div>
-                    <div class="check-row" style="margin-top: 6px">
-                        <label class="check"
+                        <label class="check" title="contours.dxf (DXF)"
                             ><input
                                 type="checkbox"
                                 id="output_contours"
@@ -125,35 +71,7 @@
                             />
                             Contours</label
                         >
-                        <label class="check"
-                            ><input
-                                type="checkbox"
-                                id="output_parcels"
-                                name="output_parcels"
-                                {%
-                                if
-                                defaults.output_parcels
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Parcels</label
-                        >
-                        <label class="check"
-                            ><input
-                                type="checkbox"
-                                id="output_naip"
-                                name="output_naip"
-                                {%
-                                if
-                                defaults.output_naip
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            NAIP Texture</label
-                        >
-                        <label class="check"
+                        <label class="check" title="terrain.xyz (XYZ)"
                             ><input
                                 type="checkbox"
                                 id="output_xyz"
@@ -165,139 +83,280 @@
                                 endif
                                 %}
                             />
-                            XYZ Points</label
+                            Point Cloud</label
+                        >
+                        <label class="check" title="terrain.png (PNG)"
+                            ><input
+                                type="checkbox"
+                                id="output_naip"
+                                name="output_naip"
+                                {%
+                                if
+                                defaults.output_naip
+                                %}checked{%
+                                endif
+                                %}
+                            />
+                            Satellite Image</label
                         >
                     </div>
-                    <div id="combinedNote" class="inline-note hidden">
-                        Requires Terrain + Buildings outputs.
+                    <div class="check-row" style="margin-top: 6px">
+                        <label class="check" title="terrain.obj (OBJ)"
+                            ><input
+                                type="checkbox"
+                                id="output_terrain"
+                                name="output_terrain"
+                                {%
+                                if
+                                defaults.output_terrain
+                                %}checked{%
+                                endif
+                                %}
+                            />
+                            Terrain</label
+                        >
+                        <label class="check" title="buildings.obj (OBJ)"
+                            ><input
+                                type="checkbox"
+                                id="output_buildings"
+                                name="output_buildings"
+                                {%
+                                if
+                                defaults.output_buildings
+                                %}checked{%
+                                endif
+                                %}
+                            />
+                            Buildings</label
+                        >
                     </div>
 
+                    <div class="section-title" style="margin-top: 18px">
+                        Settings
+                    </div>
                     <div id="advancedControls" class="advanced-controls">
                         <div id="meshResolutionSection">
-                            <div class="section-title" style="margin-top: 16px">
-                                Mesh Resolution
-                            </div>
-                            <div class="grid" style="margin-top: 6px">
-                                <div
-                                    style="
-                                        grid-column: 1 / -1;
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 12px;
+                            <label>Output Resolution</label>
+                            <div class="slider-row">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="10"
+                                    step="1"
+                                    name="terrain_complexity"
+                                    value="{{ defaults.terrain_complexity }}"
+                                    oninput="
+                                        document.getElementById(
+                                            'complexityValue',
+                                        ).textContent = this.value
                                     "
+                                />
+                                <div id="complexityValue">
+                                    {{ defaults.terrain_complexity }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid two-col">
+                            <div id="rotationSection">
+                                <label
+                                    title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates outputs around the --center point and does not affect terrain.png."
+                                    >Project North (Deg)</label
                                 >
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max="10"
-                                        step="1"
-                                        name="terrain_complexity"
-                                        value="{{ defaults.terrain_complexity }}"
-                                        oninput="
-                                            document.getElementById(
-                                                'complexityValue',
-                                            ).textContent = this.value;
-                                            updateComplexityEstimate();
-                                        "
-                                    />
-                                    <div
-                                        id="complexityValue"
-                                        style="
-                                            min-width: 20px;
-                                            text-align: right;
-                                        "
-                                    >
-                                        {{ defaults.terrain_complexity }}
-                                    </div>
-                                </div>
+                                <input
+                                    type="number"
+                                    step="any"
+                                    name="rotate_z"
+                                    value="{{ defaults.rotate_z }}"
+                                />
                             </div>
-                            <div
-                                class="note"
-                                id="complexityEstimate"
-                                style="margin-top: 6px"
-                            ></div>
+                            <div id="projectZeroSection">
+                                <label
+                                    >Project Zero (<span data-unit-label
+                                        >feet</span
+                                    >)</label
+                                >
+                                <input
+                                    type="number"
+                                    step="any"
+                                    name="project_zero"
+                                    value="{{ defaults.project_zero }}"
+                                />
+                            </div>
                         </div>
 
-                        <div id="rotationSection">
-                            <div class="section-title" style="margin-top: 16px">
-                                Rotation
-                            </div>
-                            <div class="grid" style="margin-top: 6px">
-                                <div>
-                                    <label
-                                        title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates outputs around the --center point and does not affect terrain.png."
-                                        >Rotation (deg)</label
-                                    >
-                                    <input
-                                        type="number"
-                                        step="any"
-                                        name="rotate_z"
-                                        value="{{ defaults.rotate_z }}"
-                                    />
+                        <div id="contourSmoothingSection">
+                            <label>Contour Smoothing</label>
+                            <div class="slider-row">
+                                <input
+                                    type="range"
+                                    id="dxfSpacingRange"
+                                    name="dxf_contour_spacing"
+                                    min="0"
+                                    max="10"
+                                    step="1"
+                                    value="{{ defaults.dxf_contour_spacing }}"
+                                    oninput="
+                                        document.getElementById(
+                                            'dxfSpacingValue',
+                                        ).textContent = this.value
+                                    "
+                                />
+                                <div id="dxfSpacingValue">
+                                    {{ defaults.dxf_contour_spacing }}
                                 </div>
                             </div>
                         </div>
 
-                        <div id="buildingHeightsSection">
-                            <div class="section-title" style="margin-top: 16px">
-                                Building Heights
-                            </div>
-                            <div class="grid" style="margin-top: 6px">
-                                <div>
-                                    <label>Random Min Height</label>
-                                    <input
-                                        type="number"
-                                        step="any"
-                                        name="random_min_height"
-                                        value="{{ defaults.random_min_height }}"
-                                    />
+                        <div class="grid two-col">
+                            <div id="contourIntervalSection">
+                                <label
+                                    >Contour Interval (<span data-unit-label
+                                        >feet</span
+                                    >)</label
+                                >
+                                <div
+                                    class="segmented"
+                                    data-target="contour_interval"
+                                >
+                                    <button type="button" data-value="1">
+                                        1
+                                    </button>
+                                    <button type="button" data-value="2">
+                                        2
+                                    </button>
+                                    <button type="button" data-value="5">
+                                        5
+                                    </button>
+                                    <button type="button" data-value="10">
+                                        10
+                                    </button>
                                 </div>
-                                <div>
-                                    <label>Random Max Height</label>
-                                    <input
-                                        type="number"
-                                        step="any"
-                                        name="random_max_height"
-                                        value="{{ defaults.random_max_height }}"
-                                    />
+                                <input
+                                    type="hidden"
+                                    id="contour_interval"
+                                    name="contour_interval"
+                                    value="{{ defaults.contour_interval }}"
+                                />
+                            </div>
+                            <div id="contourLayersSection">
+                                <label>Layers</label>
+                                <div class="segmented contour-icons" data-toggle-group="layers">
+                                    <button type="button" class="active static" title="Contours" disabled>C</button>
+                                    <button type="button" data-input="dxf_include_parcels" title="Parcels">P</button>
+                                    <button type="button" data-input="dxf_include_buildings" title="Building Footprints">B</button>
+                                    <button type="button" data-input="dxf_include_roads" title="Roads (coming soon)" disabled>R</button>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    id="dxf_include_parcels"
+                                    name="dxf_include_parcels"
+                                    class="visually-hidden"
+                                    {%
+                                    if
+                                    defaults.dxf_include_parcels
+                                    %}checked{%
+                                    endif
+                                    %}
+                                />
+                                <input
+                                    type="checkbox"
+                                    id="dxf_include_buildings"
+                                    name="dxf_include_buildings"
+                                    class="visually-hidden"
+                                    {%
+                                    if
+                                    defaults.dxf_include_buildings
+                                    %}checked{%
+                                    endif
+                                    %}
+                                />
+                                <input
+                                    type="checkbox"
+                                    id="dxf_include_roads"
+                                    name="dxf_include_roads"
+                                    class="visually-hidden"
+                                    disabled
+                                />
+                            </div>
+                        </div>
+
+                        <div class="grid two-col">
+                            <div id="xyzSamplingSection">
+                                <label>Point Cloud Mode</label>
+                                <select id="xyz_mode" name="xyz_mode">
+                                    <option value="contours" {% if defaults.xyz_mode is equalto 'contours' %}selected{% endif %}>Contours</option>
+                                    <option value="grid" {% if defaults.xyz_mode is equalto 'grid' %}selected{% endif %}>Uniform Grid</option>
+                                </select>
+                            </div>
+                            <div id="imageQualitySection">
+                                <label>Satellite Image Quality</label>
+                                <div
+                                    class="segmented"
+                                    data-target="image_quality"
+                                >
+                                    <button type="button" data-value="standard">
+                                        S
+                                    </button>
+                                    <button type="button" data-value="high">
+                                        M
+                                    </button>
+                                    <button type="button" data-value="ultra">
+                                        L
+                                    </button>
+                                </div>
+                                <input
+                                    type="hidden"
+                                    id="image_quality"
+                                    name="image_quality"
+                                    value="{{ defaults.image_quality }}"
+                                />
+                            </div>
+                        </div>
+                        <div id="xyzContourOptions" class="subcontrol">
+                            <label
+                                title="Resample spacing along contour lines (0 = contour vertices only). Units match the output units."
+                                >Contour Resampling</label
+                            >
+                            <div class="slider-row">
+                                <input
+                                    type="range"
+                                    id="xyzSpacingRange"
+                                    name="xyz_contour_spacing"
+                                    min="0"
+                                    max="50"
+                                    step="0.5"
+                                    value="{{ defaults.xyz_contour_spacing }}"
+                                    oninput="
+                                        document.getElementById(
+                                            'xyzSpacingValue',
+                                        ).textContent = this.value
+                                    "
+                                />
+                                <div id="xyzSpacingValue">
+                                    {{ defaults.xyz_contour_spacing }}
                                 </div>
                             </div>
                         </div>
 
-                        <div id="contourIntervalSection">
-                            <div class="section-title" style="margin-top: 16px">
-                                Contour Interval
+                        <div id="buildingHeightsSection" class="grid two-col">
+                            <div>
+                                <label>Min Building Height</label>
+                                <input
+                                    type="number"
+                                    step="any"
+                                    name="random_min_height"
+                                    value="{{ defaults.random_min_height }}"
+                                />
                             </div>
-                            <div class="grid" id="contourIntervalRow">
-                                <div>
-                                    <input
-                                        type="number"
-                                        step="any"
-                                        name="contour_interval"
-                                        value="{{ defaults.contour_interval }}"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div id="imageQualitySection">
-                            <div class="section-title" style="margin-top: 16px">
-                                Image Quality
-                            </div>
-                            <div class="grid" style="margin-top: 6px">
-                                <div>
-                                    <select id="image_quality" name="image_quality">
-                                        <option value="standard" {% if defaults.image_quality == 'standard' %}selected{% endif %}>
-                                            Standard
-                                        </option>
-                                        <option value="high" {% if defaults.image_quality == 'high' %}selected{% endif %}>
-                                            High
-                                        </option>
-                                        <option value="ultra" {% if defaults.image_quality == 'ultra' %}selected{% endif %}>
-                                            Ultra
-                                        </option>
-                                    </select>
-                                </div>
+                            <div>
+                                <label>Max Building Height</label>
+                                <input
+                                    type="number"
+                                    step="any"
+                                    name="random_max_height"
+                                    value="{{ defaults.random_max_height }}"
+                                />
                             </div>
                         </div>
                     </div>
@@ -379,19 +438,6 @@
                 lat >= VA_BOUNDS.latMin &&
                 lat <= VA_BOUNDS.latMax
               );
-            }
-
-            function updateProviderLabel() {
-              const providerEl = document.getElementById('providerValue');
-              if (!providerEl) return;
-              const coords = getCoords();
-              if (!coords) {
-                providerEl.textContent = 'VGIN (Virginia)';
-                return;
-              }
-              providerEl.textContent = isInVirginia(coords.lon, coords.lat)
-                ? 'VGIN (Virginia)'
-                : 'USGS 3DEP (National)';
             }
 
             function hasParcelCoverage(lon, lat) {
@@ -482,11 +528,8 @@
             }
 
             function updateAlerts() {
-              const parcels = document.getElementById('output_parcels');
-              if (!parcels) {
-                setAlert('', false);
-                return;
-              }
+              const parcels = document.getElementById('dxf_include_parcels');
+              const contours = document.getElementById('output_contours');
               const coordsInput = document.querySelector('input[name="coords"]');
               const coords = coordsInput ? parseCoords(coordsInput.value) : null;
               if (coordsInput && coordsInput.value.trim() && !coords) {
@@ -505,11 +548,13 @@
                 setAlert('Coordinates are outside the supported area (contiguous US).', true);
                 return;
               }
-              if (
-                parcels.checked &&
-                coords &&
-                !hasParcelCoverage(coords.lon, coords.lat)
-              ) {
+              const parcelsRequested = Boolean(
+                parcels &&
+                contours &&
+                contours.checked &&
+                parcels.checked
+              );
+              if (parcelsRequested && coords && !hasParcelCoverage(coords.lon, coords.lat)) {
                 setAlert('No parcel data available for this location.', true);
                 return;
               }
@@ -561,91 +606,154 @@
               window.__recentJobsPoll = setInterval(refreshRecentJobs, RECENT_JOBS_POLL_MS);
             }
 
-            function formatCount(value) {
-              if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-              if (value >= 1e3) return `${Math.round(value / 1e3)}k`;
-              return `${Math.round(value)}`;
-            }
-
-            function updateComplexityEstimate() {
-              const estimateEl = document.getElementById('complexityEstimate');
-              const sizeInput = document.querySelector('input[name="size"]');
+            function updateUnitLabels() {
               const unitsInput = document.querySelector('select[name="units"]');
-              const complexityInput = document.querySelector('input[name="terrain_complexity"]');
-              const outTerrain = document.getElementById('output_terrain');
-              if (!estimateEl || !sizeInput || !complexityInput || !outTerrain) return;
-
-              if (!outTerrain.checked) {
-                estimateEl.textContent = '';
-                return;
-              }
-
-              const size = Number(sizeInput.value);
-              const complexityValue = Number(complexityInput.value || 0);
-              const units = unitsInput ? unitsInput.value : 'feet';
-              if (!Number.isFinite(size) || size <= 0) {
-                estimateEl.textContent = 'Estimated mesh polygons: —';
-                return;
-              }
-
-              const terrainSample = Math.max(1, 11 - Math.round(complexityValue));
-              const baseResolution = Number({{ defaults.resolution }}) || 1;
-              const metersToFeet = 3.28084;
-              let cellSize = baseResolution * terrainSample;
-              if (units === 'feet') {
-                cellSize *= metersToFeet;
-              }
-              if (!Number.isFinite(cellSize) || cellSize <= 0) {
-                estimateEl.textContent = 'Estimated mesh polygons: —';
-                return;
-              }
-              const samplesPerSide = Math.max(2, Math.floor(size / cellSize));
-              const faces = 2 * Math.pow(samplesPerSide - 1, 2);
-              estimateEl.textContent = `Estimated mesh polygons: ~${formatCount(faces)}`;
+              const unitValue = unitsInput ? unitsInput.value : 'feet';
+              const label = unitValue === 'meters' ? 'meters' : 'feet';
+              document.querySelectorAll('[data-unit-label]').forEach((el) => {
+                el.textContent = label;
+              });
             }
 
-            const advancedState = {};
-
-            function setAdvancedVisibility(sectionId, checked) {
-              const section = document.getElementById(sectionId);
-              const container = document.getElementById('advancedControls');
-              if (!section || !container) return;
-              const prev = advancedState[sectionId];
-              if (checked) {
-                section.classList.remove('hidden');
-                if (!prev) {
-                  container.appendChild(section);
+            function initSegmentedControls() {
+              document.querySelectorAll('.segmented[data-target]').forEach((segmented) => {
+                const inputId = segmented.dataset.target;
+                const input = document.getElementById(inputId);
+                const buttons = Array.from(segmented.querySelectorAll('button[data-value]'));
+                if (!input || buttons.length === 0) return;
+                const bound = segmented.dataset.bound === 'true';
+                const values = buttons.map((btn) => btn.dataset.value);
+                let current = input.value;
+                if (!values.includes(current)) {
+                  if (inputId === 'contour_interval') {
+                    const numeric = Number(current);
+                    let best = values[0];
+                    let bestDelta = Infinity;
+                    values.forEach((value) => {
+                      const delta = Math.abs(Number(value) - numeric);
+                      if (delta < bestDelta) {
+                        bestDelta = delta;
+                        best = value;
+                      }
+                    });
+                    current = best;
+                  } else {
+                    current = values[0];
+                  }
+                  input.value = current;
                 }
-              } else {
-                section.classList.add('hidden');
-              }
-              advancedState[sectionId] = checked;
+                const setActive = (value) => {
+                  input.value = value;
+                  buttons.forEach((btn) => {
+                    btn.classList.toggle('active', btn.dataset.value === value);
+                  });
+                };
+                setActive(current);
+                if (!bound) {
+                  buttons.forEach((btn) => {
+                    btn.addEventListener('click', () => setActive(btn.dataset.value));
+                  });
+                  segmented.dataset.bound = 'true';
+                }
+              });
+            }
+
+            function syncToggleButtons() {
+              document.querySelectorAll('button[data-input]').forEach((btn) => {
+                const input = document.getElementById(btn.dataset.input);
+                if (!input) return;
+                btn.classList.toggle('active', input.checked);
+                btn.setAttribute('aria-pressed', input.checked ? 'true' : 'false');
+                btn.disabled = input.disabled;
+              });
+            }
+
+            function initToggleButtons() {
+              document.querySelectorAll('button[data-input]').forEach((btn) => {
+                if (btn.dataset.bound === 'true') return;
+                const input = document.getElementById(btn.dataset.input);
+                if (!input) return;
+                btn.addEventListener('click', () => {
+                  if (btn.disabled) return;
+                  input.checked = !input.checked;
+                  syncToggleButtons();
+                  updateAlerts();
+                });
+                btn.dataset.bound = 'true';
+              });
+              syncToggleButtons();
+            }
+
+            function setSectionLocked(sectionId, locked) {
+              const section = document.getElementById(sectionId);
+              if (!section) return;
+              section.classList.toggle('locked', locked);
             }
 
             function updateUiToggles() {
               const contours = document.getElementById('output_contours');
-              const parcels = document.getElementById('output_parcels');
               const outTerrain = document.getElementById('output_terrain');
               const outBuildings = document.getElementById('output_buildings');
               const outImage = document.getElementById('output_naip');
-              const outCombined = document.getElementById('output_combined');
-              const combinedNote = document.getElementById('combinedNote');
-              if (outTerrain) setAdvancedVisibility('meshResolutionSection', outTerrain.checked);
-              if (outBuildings) setAdvancedVisibility('buildingHeightsSection', outBuildings.checked);
-              if (contours) setAdvancedVisibility('contourIntervalSection', contours.checked);
-              if (outImage) setAdvancedVisibility('imageQualitySection', outImage.checked);
-              if (outCombined && outTerrain && outBuildings) {
-                const canCombine = outTerrain.checked && outBuildings.checked;
-                outCombined.disabled = !canCombine;
-                if (!canCombine) outCombined.checked = false;
-                if (combinedNote) {
-                  combinedNote.classList.toggle('hidden', canCombine);
-                }
+              const outXyz = document.getElementById('output_xyz');
+              const xyzMode = document.getElementById('xyz_mode');
+              const dxfParcels = document.getElementById('dxf_include_parcels');
+              const dxfBuildings = document.getElementById('dxf_include_buildings');
+
+              const contoursActive = contours && contours.checked;
+              const xyzActive = outXyz && outXyz.checked;
+              const terrainActive = outTerrain && outTerrain.checked;
+              const buildingsActive = outBuildings && outBuildings.checked;
+              const rotationActive = terrainActive || buildingsActive || contoursActive || xyzActive;
+              const projectZeroActive = rotationActive;
+              const xyzModeIsContours = xyzMode && xyzMode.value === 'contours';
+              const showContourControls = contoursActive || (xyzActive && xyzModeIsContours);
+
+              setSectionLocked('meshResolutionSection', false);
+              setSectionLocked('buildingHeightsSection', !buildingsActive);
+              setSectionLocked('contourIntervalSection', !showContourControls);
+              setSectionLocked('contourLayersSection', !contoursActive);
+              setSectionLocked('contourSmoothingSection', !contoursActive);
+              setSectionLocked('xyzSamplingSection', !xyzActive);
+              setSectionLocked('imageQualitySection', !(outImage && outImage.checked));
+              setSectionLocked('rotationSection', !rotationActive);
+              setSectionLocked('projectZeroSection', !projectZeroActive);
+
+              if (dxfParcels) dxfParcels.disabled = !contoursActive;
+              if (dxfBuildings) dxfBuildings.disabled = !contoursActive;
+              const parcelsBtn = document.querySelector('button[data-input="dxf_include_parcels"]');
+              const buildingsBtn = document.querySelector('button[data-input="dxf_include_buildings"]');
+              if (parcelsBtn) parcelsBtn.disabled = !contoursActive;
+              if (buildingsBtn) buildingsBtn.disabled = !contoursActive;
+
+              const xyzContourOptions = document.getElementById('xyzContourOptions');
+              if (xyzContourOptions) {
+                const lockXyz = !xyzActive || !xyzModeIsContours;
+                xyzContourOptions.classList.toggle('locked', lockXyz);
               }
-              if (parcels) updateAlerts();
-              updateComplexityEstimate();
-              updateProviderLabel();
+
+              const xyzRange = document.getElementById('xyzSpacingRange');
+              const xyzValue = document.getElementById('xyzSpacingValue');
+              if (xyzRange && xyzValue) {
+                xyzRange.disabled = !xyzActive || !xyzModeIsContours;
+                xyzValue.textContent = xyzRange.value;
+              }
+              const dxfRange = document.getElementById('dxfSpacingRange');
+              const dxfValue = document.getElementById('dxfSpacingValue');
+              if (dxfRange && dxfValue) {
+                dxfRange.disabled = !contoursActive;
+                dxfValue.textContent = dxfRange.value;
+              }
+              const complexityInput = document.querySelector('input[name="terrain_complexity"]');
+              const complexityValue = document.getElementById('complexityValue');
+              if (complexityInput && complexityValue) {
+                complexityValue.textContent = complexityInput.value;
+              }
+
+              updateAlerts();
+              syncToggleButtons();
             }
+
 
             async function runBuild(event) {
               event.preventDefault();
@@ -697,34 +805,41 @@
             }
 
             document.addEventListener('DOMContentLoaded', () => {
+              initSegmentedControls();
+              initToggleButtons();
+              updateUnitLabels();
               updateUiToggles();
               const contours = document.getElementById('output_contours');
-              const parcels = document.getElementById('output_parcels');
               const outTerrain = document.getElementById('output_terrain');
               const outBuildings = document.getElementById('output_buildings');
               const outImage = document.getElementById('output_naip');
-              const outCombined = document.getElementById('output_combined');
+              const outXyz = document.getElementById('output_xyz');
+              const xyzMode = document.getElementById('xyz_mode');
+              const dxfParcels = document.getElementById('dxf_include_parcels');
               const coords = document.querySelector('input[name="coords"]');
-              const size = document.querySelector('input[name="size"]');
               const units = document.querySelector('select[name="units"]');
               if (contours) contours.addEventListener('change', updateUiToggles);
-              if (parcels) parcels.addEventListener('change', updateAlerts);
+              if (dxfParcels) dxfParcels.addEventListener('change', updateAlerts);
               if (outTerrain) outTerrain.addEventListener('change', updateUiToggles);
               if (outBuildings) outBuildings.addEventListener('change', updateUiToggles);
               if (outImage) outImage.addEventListener('change', updateUiToggles);
-              if (outCombined) outCombined.addEventListener('change', updateUiToggles);
+              if (outXyz) outXyz.addEventListener('change', updateUiToggles);
+              if (xyzMode) xyzMode.addEventListener('change', updateUiToggles);
               if (coords) coords.addEventListener('input', () => {
-                updateProviderLabel();
                 updateAlerts();
                 scheduleCoverageCheck();
               });
-              if (size) size.addEventListener('input', updateComplexityEstimate);
-              if (units) units.addEventListener('change', updateComplexityEstimate);
+              if (units) units.addEventListener('change', () => {
+                updateUnitLabels();
+              });
               const form = document.querySelector('form.card');
               if (form) {
                 form.addEventListener('submit', runBuild);
                 form.addEventListener('reset', () => {
                   setTimeout(() => {
+                    initSegmentedControls();
+                    initToggleButtons();
+                    updateUnitLabels();
                     updateUiToggles();
                     updateAlerts();
                     scheduleCoverageCheck();

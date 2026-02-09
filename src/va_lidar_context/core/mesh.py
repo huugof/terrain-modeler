@@ -435,6 +435,83 @@ def generate_contours_from_raster(
     return results
 
 
+def _resample_polyline(
+    points: np.ndarray, spacing: float
+) -> list[tuple[float, float, float]]:
+    if spacing <= 0 or len(points) < 2:
+        return [tuple(p) for p in points]
+
+    pts = np.asarray(points, dtype=float)
+    seg = np.diff(pts[:, :2], axis=0)
+    seg_len = np.hypot(seg[:, 0], seg[:, 1])
+    total = float(seg_len.sum())
+    if total == 0.0:
+        return [tuple(pts[0])]
+
+    cum = np.concatenate(([0.0], np.cumsum(seg_len)))
+    targets = np.arange(0.0, total, spacing)
+    if total - targets[-1] > 1e-6:
+        targets = np.append(targets, total)
+
+    out: list[tuple[float, float, float]] = []
+    for t in targets:
+        idx = int(np.searchsorted(cum, t, side="right") - 1)
+        if idx >= len(seg_len):
+            idx = len(seg_len) - 1
+        seg_total = seg_len[idx]
+        if seg_total == 0.0:
+            pt = pts[idx]
+        else:
+            ratio = (t - cum[idx]) / seg_total
+            pt = pts[idx] + (pts[idx + 1] - pts[idx]) * ratio
+        out.append((float(pt[0]), float(pt[1]), float(pt[2])))
+    return out
+
+
+def export_contours_xyz(
+    contours: List[Tuple[float, List[np.ndarray]]],
+    output_path: str,
+    spacing: float | None = None,
+) -> int:
+    """Export contour polylines as XYZ points.
+
+    When spacing is provided (> 0), resample points uniformly along each contour.
+    """
+    count = 0
+    spacing_value = spacing or 0.0
+    with open(output_path, "w") as f:
+        for _elevation, polylines in contours:
+            for polyline in polylines:
+                if spacing_value > 0:
+                    points = _resample_polyline(polyline, spacing_value)
+                else:
+                    points = [tuple(p) for p in polyline]
+                for x, y, z in points:
+                    f.write(f"{x} {y} {z}\n")
+                    count += 1
+    return count
+
+
+def resample_contours(
+    contours: List[Tuple[float, List[np.ndarray]]],
+    spacing: float,
+) -> List[Tuple[float, List[np.ndarray]]]:
+    """Resample contour polylines to a uniform spacing in XY."""
+    if spacing <= 0:
+        return contours
+    results: List[Tuple[float, List[np.ndarray]]] = []
+    for elevation, polylines in contours:
+        resampled: List[np.ndarray] = []
+        for polyline in polylines:
+            points = _resample_polyline(polyline, spacing)
+            if len(points) < 2:
+                continue
+            resampled.append(np.array(points, dtype=float))
+        if resampled:
+            results.append((elevation, resampled))
+    return results
+
+
 def export_contours_dxf(
     contours: List[Tuple[float, List[np.ndarray]]],
     output_path: str,

@@ -16,6 +16,9 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from .config import (
     DEFAULT_COMBINE_OUTPUT,
+    DEFAULT_DXF_CONTOUR_SPACING,
+    DEFAULT_DXF_INCLUDE_BUILDINGS,
+    DEFAULT_DXF_INCLUDE_PARCELS,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
     DEFAULT_FLOOR_TO_FLOOR,
@@ -27,9 +30,11 @@ from .config import (
     DEFAULT_OUT_DIR,
     DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
+    DEFAULT_PROJECT_ZERO,
     DEFAULT_PROVIDER,
     DEFAULT_RESOLUTION,
     DEFAULT_UNITS,
+    DEFAULT_XYZ_MODE,
     BuildConfig,
 )
 from .parcels.registry import load_sources
@@ -372,13 +377,17 @@ def snapshot_defaults() -> Dict[str, Any]:
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 2,
         "rotate_z": 0.0,
+        "project_zero": DEFAULT_PROJECT_ZERO,
+        "xyz_mode": DEFAULT_XYZ_MODE,
+        "xyz_contour_spacing": 0.0,
+        "dxf_contour_spacing": DEFAULT_DXF_CONTOUR_SPACING,
+        "dxf_include_parcels": DEFAULT_DXF_INCLUDE_PARCELS,
+        "dxf_include_buildings": DEFAULT_DXF_INCLUDE_BUILDINGS,
         "output_terrain": "terrain" in outputs,
         "output_buildings": "buildings" in outputs,
         "output_contours": "contours" in outputs,
-        "output_parcels": "parcels" in outputs,
         "output_naip": "naip" in outputs,
         "output_xyz": "xyz" in outputs,
-        "output_combined": DEFAULT_COMBINE_OUTPUT,
         "min_height": DEFAULT_MIN_HEIGHT,
         "max_height": DEFAULT_MAX_HEIGHT,
         "random_min_height": DEFAULT_RANDOM_MIN_HEIGHT,
@@ -550,8 +559,6 @@ def run_job():
         outputs.append("buildings")
     if parse_bool(form.get("output_contours")):
         outputs.append("contours")
-    if parse_bool(form.get("output_parcels")):
-        outputs.append("parcels")
     if parse_bool(form.get("output_naip")):
         outputs.append("naip")
     if parse_bool(form.get("output_xyz")):
@@ -567,8 +574,30 @@ def run_job():
         )
 
     contours_enabled = "contours" in outputs
+    xyz_enabled = "xyz" in outputs
+    xyz_mode = (form.get("xyz_mode") or DEFAULT_XYZ_MODE).strip().lower()
+    if xyz_mode not in ("contours", "grid"):
+        xyz_mode = DEFAULT_XYZ_MODE
     contour_interval = (
-        (parse_float(form.get("contour_interval")) or 2.0) if contours_enabled else None
+        (parse_float(form.get("contour_interval")) or 2.0)
+        if (contours_enabled or (xyz_enabled and xyz_mode == "contours"))
+        else None
+    )
+    xyz_contour_spacing = parse_float(form.get("xyz_contour_spacing"))
+    if xyz_mode != "contours":
+        xyz_contour_spacing = None
+    if xyz_contour_spacing is not None and xyz_contour_spacing <= 0:
+        xyz_contour_spacing = None
+    dxf_contour_spacing = (
+        parse_float(form.get("dxf_contour_spacing")) if contours_enabled else None
+    )
+    if dxf_contour_spacing is not None and dxf_contour_spacing <= 0:
+        dxf_contour_spacing = None
+    dxf_include_parcels = (
+        parse_bool(form.get("dxf_include_parcels")) if contours_enabled else False
+    )
+    dxf_include_buildings = (
+        parse_bool(form.get("dxf_include_buildings")) if contours_enabled else False
     )
     keep_rasters = False
 
@@ -578,6 +607,9 @@ def run_job():
     rotate_z = parse_float(form.get("rotate_z"))
     if rotate_z is None:
         rotate_z = 0.0
+    project_zero = parse_float(form.get("project_zero"))
+    if project_zero is None:
+        project_zero = DEFAULT_PROJECT_ZERO
 
     allow_multi_tile = True
     force = False
@@ -618,6 +650,12 @@ def run_job():
         flip_x=flip_x,
         terrain_flip_y=terrain_flip_y,
         rotate_z=rotate_z,
+        project_zero=project_zero,
+        xyz_mode=xyz_mode,
+        xyz_contour_spacing=xyz_contour_spacing,
+        dxf_contour_spacing=dxf_contour_spacing,
+        dxf_include_parcels=dxf_include_parcels,
+        dxf_include_buildings=dxf_include_buildings,
         provider=provider,
         ept_only=ept_only,
         cleanup_intermediates=True,
