@@ -313,32 +313,6 @@
                                 />
                             </div>
                         </div>
-                        <div id="xyzContourOptions" class="subcontrol">
-                            <label
-                                title="Resample spacing along contour lines (0 = contour vertices only). Units match the output units."
-                                >Contour Resampling</label
-                            >
-                            <div class="slider-row">
-                                <input
-                                    type="range"
-                                    id="xyzSpacingRange"
-                                    name="xyz_contour_spacing"
-                                    min="0"
-                                    max="50"
-                                    step="0.5"
-                                    value="{{ defaults.xyz_contour_spacing }}"
-                                    oninput="
-                                        document.getElementById(
-                                            'xyzSpacingValue',
-                                        ).textContent = this.value
-                                    "
-                                />
-                                <div id="xyzSpacingValue">
-                                    {{ defaults.xyz_contour_spacing }}
-                                </div>
-                            </div>
-                        </div>
-
                         <div id="buildingHeightsSection" class="grid two-col">
                             <div>
                                 <label>Min Building Height</label>
@@ -726,18 +700,6 @@
               if (parcelsBtn) parcelsBtn.disabled = !contoursActive;
               if (buildingsBtn) buildingsBtn.disabled = !contoursActive;
 
-              const xyzContourOptions = document.getElementById('xyzContourOptions');
-              if (xyzContourOptions) {
-                const lockXyz = !xyzActive || !xyzModeIsContours;
-                xyzContourOptions.classList.toggle('locked', lockXyz);
-              }
-
-              const xyzRange = document.getElementById('xyzSpacingRange');
-              const xyzValue = document.getElementById('xyzSpacingValue');
-              if (xyzRange && xyzValue) {
-                xyzRange.disabled = !xyzActive || !xyzModeIsContours;
-                xyzValue.textContent = xyzRange.value;
-              }
               const dxfRange = document.getElementById('dxfSpacingRange');
               const dxfValue = document.getElementById('dxfSpacingValue');
               if (dxfRange && dxfValue) {
