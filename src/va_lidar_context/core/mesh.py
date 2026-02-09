@@ -196,6 +196,68 @@ def terrain_mesh_from_raster(
     return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 
+def export_terrain_xyz(
+    raster_path: str,
+    output_path: str,
+    xy_scale: float = 1.0,
+    z_scale: float = 1.0,
+    sample: int = 1,
+    origin: Optional[tuple[float, float]] = None,
+    rotate_deg: float = 0.0,
+) -> int:
+    """Export terrain grid points to an XYZ point cloud file.
+
+    Reads the DTM raster and writes one ``X Y Z`` line per valid cell.
+    When *origin* ``(x, y)`` is given (in **scaled** output units) it is
+    subtracted from every point so the file is centred on that location.
+    When *rotate_deg* is provided, points are rotated around the origin
+    after centering.
+    Returns the number of points written.
+    """
+    import rasterio
+
+    if sample < 1:
+        raise ValueError("sample must be >= 1")
+
+    with rasterio.open(raster_path) as ds:
+        data = ds.read(1)
+        nodata = ds.nodata if ds.nodata is not None else -9999
+        transform = ds.transform
+
+    if sample > 1:
+        data = data[::sample, ::sample]
+        transform = transform * rasterio.Affine.scale(sample, sample)
+
+    rows, cols = data.shape
+    mask_valid = (data != nodata) & np.isfinite(data)
+
+    ox = origin[0] if origin else 0.0
+    oy = origin[1] if origin else 0.0
+    theta = math.radians(rotate_deg)
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+
+    count = 0
+    with open(output_path, "w") as f:
+        for r in range(rows):
+            for col in range(cols):
+                if not mask_valid[r, col]:
+                    continue
+                x = transform.a * (col + 0.5) + transform.b * (r + 0.5) + transform.c
+                y = transform.d * (col + 0.5) + transform.e * (r + 0.5) + transform.f
+                z = float(data[r, col])
+                px = x * xy_scale - ox
+                py = y * xy_scale - oy
+                if rotate_deg:
+                    rx = px * cos_theta - py * sin_theta
+                    ry = px * sin_theta + py * cos_theta
+                else:
+                    rx, ry = px, py
+                f.write(f"{rx} {ry} {z * z_scale}\n")
+                count += 1
+    return count
+
+
 def export_obj_with_uv(
     mesh: trimesh.Trimesh,
     uv: "list[list[float]]",
@@ -285,9 +347,16 @@ def generate_contours_from_raster(
     xy_scale: float = 1.0,
     z_scale: float = 1.0,
     sample: int = 1,
+    origin: Optional[tuple[float, float]] = None,
+    rotate_deg: float = 0.0,
 ) -> List[Tuple[float, List[np.ndarray]]]:
     """
     Generate contour polylines from a raster at the given interval.
+
+    When *origin* ``(x, y)`` is given (in **scaled** output units) it is
+    subtracted from every point so the output is centred on that location.
+    When *rotate_deg* is provided, points are rotated around the origin
+    after centering.
 
     Returns a list of (elevation, [polylines]) tuples where each polyline
     is an Nx2 or Nx3 numpy array of coordinates.
@@ -338,15 +407,26 @@ def generate_contours_from_raster(
     plt.close(fig)
 
     results: List[Tuple[float, List[np.ndarray]]] = []
+    theta = math.radians(rotate_deg)
+    c = math.cos(theta)
+    s = math.sin(theta)
     for level_idx, level in enumerate(cs.levels):
         polylines: List[np.ndarray] = []
         for path in cs.allsegs[level_idx]:
             if len(path) < 2:
                 continue
             # Scale coordinates and add Z
+            ox = origin[0] if origin else 0.0
+            oy = origin[1] if origin else 0.0
             scaled = np.zeros((len(path), 3))
-            scaled[:, 0] = path[:, 0] * xy_scale
-            scaled[:, 1] = path[:, 1] * xy_scale
+            px = path[:, 0] * xy_scale - ox
+            py = path[:, 1] * xy_scale - oy
+            if rotate_deg:
+                scaled[:, 0] = px * c - py * s
+                scaled[:, 1] = px * s + py * c
+            else:
+                scaled[:, 0] = px
+                scaled[:, 1] = py
             scaled[:, 2] = level * z_scale
             polylines.append(scaled)
         if polylines:
@@ -500,6 +580,9 @@ class DxfExporter:
         transform_func=None,
         z_value: float = 0.0,
         color: int = None,
+        origin: Optional[tuple[float, float]] = None,
+        clip_boundary=None,
+        rotate_deg: float = 0.0,
     ) -> int:
         """
         Add polygons from a GeoJSON FeatureCollection.
@@ -511,15 +594,22 @@ class DxfExporter:
             transform_func: Optional function to transform (lon, lat) -> (x, y)
             z_value: Z coordinate for all points
             color: Layer color (uses default if None)
+            origin: Optional (x, y) in scaled units to subtract from all points
+            clip_boundary: Optional Shapely polygon (in LAZ CRS) to clip features
+            rotate_deg: Optional rotation (degrees) around the origin after centering
 
         Returns:
             Number of polygons added
         """
-        from shapely.geometry import shape
+        from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
+        from shapely.ops import transform as shp_transform
 
         self._ensure_layer(layer_name, color)
 
         count = 0
+        theta = math.radians(rotate_deg)
+        c = math.cos(theta)
+        s = math.sin(theta)
         for feature in geojson.get("features", []):
             try:
                 geom = shape(feature["geometry"])
@@ -534,19 +624,52 @@ class DxfExporter:
                 continue
 
             for poly in polygons:
-                # Get exterior ring
-                coords = list(poly.exterior.coords)
+                geom = poly
                 if transform_func:
                     try:
-                        coords = [transform_func(c[0], c[1]) for c in coords]
+                        geom = shp_transform(
+                            lambda x, y, z=None: transform_func(x, y), geom
+                        )
                     except Exception:
                         continue
-                points = [(c[0] * xy_scale, c[1] * xy_scale, z_value) for c in coords]
-                if len(points) >= 3:
-                    self.msp.add_polyline3d(
-                        points, close=True, dxfattribs={"layer": layer_name}
-                    )
-                    count += 1
+
+                if clip_boundary is not None:
+                    try:
+                        geom = geom.intersection(clip_boundary)
+                    except Exception:
+                        continue
+
+                if geom.is_empty:
+                    continue
+
+                if isinstance(geom, Polygon):
+                    clipped_polys = [geom]
+                elif isinstance(geom, MultiPolygon):
+                    clipped_polys = list(geom.geoms)
+                elif isinstance(geom, GeometryCollection):
+                    clipped_polys = [g for g in geom.geoms if isinstance(g, Polygon)]
+                else:
+                    continue
+
+                for clipped in clipped_polys:
+                    coords = list(clipped.exterior.coords)
+                    ox = origin[0] if origin else 0.0
+                    oy = origin[1] if origin else 0.0
+                    points = []
+                    for cx, cy in coords:
+                        px = cx * xy_scale - ox
+                        py = cy * xy_scale - oy
+                        if rotate_deg:
+                            rx = px * c - py * s
+                            ry = px * s + py * c
+                        else:
+                            rx, ry = px, py
+                        points.append((rx, ry, z_value))
+                    if len(points) >= 3:
+                        self.msp.add_polyline3d(
+                            points, close=True, dxfattribs={"layer": layer_name}
+                        )
+                        count += 1
 
         return count
 
@@ -612,4 +735,3 @@ class DxfExporter:
     def save(self, output_path: str) -> None:
         """Save the DXF file."""
         self.doc.saveas(output_path)
-

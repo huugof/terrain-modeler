@@ -26,6 +26,7 @@ from ..core.mesh import (
     export_mesh,
     export_obj_with_uv,
     export_scene_with_terrain_texture,
+    export_terrain_xyz,
     extrude_footprints,
     generate_contours_from_raster,
     terrain_mesh_from_raster,
@@ -50,10 +51,17 @@ from ..pipeline.io import (
     write_job_info,
 )
 from ..pipeline.report import write_report
-from ..providers import national_footprints, rockyweb_health, usgs_ept, usgs_index, usgs_laz, vgin
+from ..providers import (
+    national_footprints,
+    rockyweb_health,
+    usgs_ept,
+    usgs_index,
+    usgs_laz,
+    vgin,
+)
 from ..util import download_file, ensure_dir, get_logger, write_json
 
-OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip"}
+OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
 
 
 def _validate_outputs(outputs: Iterable[str]) -> set[str]:
@@ -67,7 +75,9 @@ def _validate_outputs(outputs: Iterable[str]) -> set[str]:
         cleaned.append(name)
 
     if not cleaned:
-        raise ValueError("No outputs specified. Provide --outputs with at least one value.")
+        raise ValueError(
+            "No outputs specified. Provide --outputs with at least one value."
+        )
 
     unknown = [name for name in cleaned if name not in OUTPUT_CHOICES]
     if unknown:
@@ -115,13 +125,16 @@ def build(cfg: BuildConfig) -> int:
     export_contours = "contours" in outputs
     export_parcels = "parcels" in outputs
     export_naip = "naip" in outputs
+    export_xyz = "xyz" in outputs
 
     if export_contours and cfg.contour_interval is None:
         raise ValueError("Contours output requires --contours INTERVAL.")
     if not export_contours and cfg.contour_interval is not None:
         raise ValueError("--contours requires 'contours' in --outputs.")
     if cfg.combine_output and not (export_buildings and export_terrain):
-        raise ValueError("--combine-output requires both buildings and terrain outputs.")
+        raise ValueError(
+            "--combine-output requires both buildings and terrain outputs."
+        )
 
     lat, lon = None, None
     if cfg.center is not None:
@@ -396,12 +409,18 @@ def build(cfg: BuildConfig) -> int:
                 )
             if ept_source is not None and ept_source.crs_wkt:
                 ept_crs = CRS.from_wkt(ept_source.crs_wkt)
-                unit_scale = get_unit_scale(ept_crs, cfg.units)
-                size_laz = cfg.size / unit_scale
-                half = size_laz / 2.0
                 to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
-                cx, cy = to_laz.transform(lon, lat)
-                bounds = (cx - half, cy - half, cx + half, cy + half)
+                wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
+                    lat, lon, cfg.size, cfg.units
+                )
+                c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
+                c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
+                bounds = (
+                    min(c1[0], c2[0]),
+                    min(c1[1], c2[1]),
+                    max(c1[0], c2[0]),
+                    max(c1[1], c2[1]),
+                )
                 try:
                     ept_to_laz(ept_source.uri, laz_path, bounds)
                     source_type_used = "ept"
@@ -436,12 +455,18 @@ def build(cfg: BuildConfig) -> int:
                 tile_info["crs_wkt"] = ept_wkt
                 write_json(tile_json, tile_info)
             ept_crs = CRS.from_wkt(ept_wkt)
-            unit_scale = get_unit_scale(ept_crs, cfg.units)
-            size_laz = cfg.size / unit_scale
-            half = size_laz / 2.0
             to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
-            cx, cy = to_laz.transform(lon, lat)
-            bounds = (cx - half, cy - half, cx + half, cy + half)
+            wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
+                lat, lon, cfg.size, cfg.units
+            )
+            c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
+            c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
+            bounds = (
+                min(c1[0], c2[0]),
+                min(c1[1], c2[1]),
+                max(c1[0], c2[0]),
+                max(c1[1], c2[1]),
+            )
             try:
                 if cfg.force or not laz_path.exists():
                     ept_to_laz(ept_url, laz_path, bounds)
@@ -510,15 +535,17 @@ def build(cfg: BuildConfig) -> int:
 
     laz_wkt = get_laz_crs_wkt(str(laz_processing_path))
     laz_crs = CRS.from_wkt(laz_wkt)
-    unit_scale = get_unit_scale(laz_crs, cfg.units)
+    xy_scale = get_unit_scale(laz_crs, cfg.units, latitude=lat)
+    z_scale = get_unit_scale(laz_crs, cfg.units, latitude=None)
 
     clip_poly = None
     clip_bbox_wgs84 = None
 
-    if cfg.size is not None and lat is not None and lon is not None:
-        size_laz = cfg.size / unit_scale
-        half = size_laz / 2.0
+    # Center of the clip area in LAZ CRS, used to zero-origin all outputs
+    center_laz_x: float | None = None
+    center_laz_y: float | None = None
 
+    if cfg.size is not None and lat is not None and lon is not None:
         if provider == "va":
             bbox = tile_info["bbox_wgs84"]
             if not (
@@ -531,7 +558,23 @@ def build(cfg: BuildConfig) -> int:
 
         to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
         cx, cy = to_laz.transform(lon, lat)
-        clip_poly = box(cx - half, cy - half, cx + half, cy + half)
+        center_laz_x, center_laz_y = cx, cy
+
+        # Build the clip polygon by transforming the accurate WGS84 bbox
+        # corners into LAZ CRS.  This avoids Mercator-scale distortion that
+        # occurs when applying a metre offset directly in EPSG:3857.
+        wgs84_bbox = clip_bbox_wgs84_hint
+        if wgs84_bbox is None:
+            wgs84_bbox = bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
+        corners_laz = [
+            to_laz.transform(wgs84_bbox[0], wgs84_bbox[1]),
+            to_laz.transform(wgs84_bbox[0], wgs84_bbox[3]),
+            to_laz.transform(wgs84_bbox[2], wgs84_bbox[1]),
+            to_laz.transform(wgs84_bbox[2], wgs84_bbox[3]),
+        ]
+        laz_xs = [c[0] for c in corners_laz]
+        laz_ys = [c[1] for c in corners_laz]
+        clip_poly = box(min(laz_xs), min(laz_ys), max(laz_xs), max(laz_ys))
 
         to_wgs84 = Transformer.from_crs(laz_crs, "EPSG:4326", always_xy=True)
         clip_poly_wgs84 = shp_transform(to_wgs84.transform, clip_poly)
@@ -606,7 +649,9 @@ def build(cfg: BuildConfig) -> int:
             footprints = vgin.fetch_footprints_geojson(bbox_tuple)
         else:
             if clip_bbox_wgs84 is None:
-                raise ValueError("National provider requires a clip bbox for footprints")
+                raise ValueError(
+                    "National provider requires a clip bbox for footprints"
+                )
             footprints = national_footprints.fetch_footprints_geojson(clip_bbox_wgs84)
         footprints_path.write_text(json.dumps(footprints))
 
@@ -652,9 +697,9 @@ def build(cfg: BuildConfig) -> int:
     heights = []
     height_warnings: list[str] = []
     if needs_heights:
-        min_height_laz = cfg.min_height / unit_scale
-        max_height_laz = cfg.max_height / unit_scale
-        floor_to_floor_laz = cfg.floor_to_floor / unit_scale
+        min_height_laz = cfg.min_height / z_scale
+        max_height_laz = cfg.max_height / z_scale
+        floor_to_floor_laz = cfg.floor_to_floor / z_scale
 
         reprojected = reproject_features(footprints, laz_crs)
         if clip_poly is not None:
@@ -670,8 +715,8 @@ def build(cfg: BuildConfig) -> int:
             if cfg.random_heights_min >= cfg.random_heights_max:
                 raise ValueError("random-heights min must be < max")
             override_range = (
-                cfg.random_heights_min / unit_scale,
-                cfg.random_heights_max / unit_scale,
+                cfg.random_heights_min / z_scale,
+                cfg.random_heights_max / z_scale,
             )
             rng = random.Random(cfg.random_seed)
 
@@ -691,7 +736,7 @@ def build(cfg: BuildConfig) -> int:
     logger.info("Stage 6/6: mesh export")
     mesh = None
     if export_buildings:
-        mesh = extrude_footprints(heights, xy_scale=unit_scale, z_scale=unit_scale)
+        mesh = extrude_footprints(heights, xy_scale=xy_scale, z_scale=z_scale)
         if mesh is None:
             logger.warning("No mesh produced (empty footprints or extrusion failures)")
 
@@ -700,8 +745,8 @@ def build(cfg: BuildConfig) -> int:
     if export_terrain:
         terrain_mesh = terrain_mesh_from_raster(
             str(terrain_source_path),
-            xy_scale=unit_scale,
-            z_scale=unit_scale,
+            xy_scale=xy_scale,
+            z_scale=z_scale,
             sample=cfg.terrain_sample,
         )
         if terrain_mesh is None:
@@ -816,7 +861,12 @@ def build(cfg: BuildConfig) -> int:
             rotate_deg=cfg.rotate_z,
         )
 
-    if export_naip and export_terrain and terrain_mesh is not None and uv_context is not None:
+    if (
+        export_naip
+        and export_terrain
+        and terrain_mesh is not None
+        and uv_context is not None
+    ):
         (
             xmin,
             xmax,
@@ -829,8 +879,8 @@ def build(cfg: BuildConfig) -> int:
             use_raster_uv,
         ) = uv_context
         verts = terrain_mesh.vertices
-        x_laz = verts[:, 0] / unit_scale
-        y_laz = verts[:, 1] / unit_scale
+        x_laz = verts[:, 0] / xy_scale
+        y_laz = verts[:, 1] / xy_scale
         if use_raster_uv:
             inv = ~transform
             col = inv.a * x_laz + inv.b * y_laz + inv.c
@@ -879,9 +929,31 @@ def build(cfg: BuildConfig) -> int:
         else:
             combined = combine_meshes([terrain_mesh, mesh])
             if combined is None:
-                logger.warning("No combined mesh produced (missing terrain or buildings)")
+                logger.warning(
+                    "No combined mesh produced (missing terrain or buildings)"
+                )
             else:
                 export_mesh(combined, str(combined_path))
+
+    # Origin offset in scaled output units – centres all DXF/XYZ output on
+    # the user's --center point so coordinates are small, relative values.
+    dxf_origin: tuple[float, float] | None = None
+    if center_laz_x is not None and center_laz_y is not None:
+        dxf_origin = (center_laz_x * xy_scale, center_laz_y * xy_scale)
+
+    xyz_point_count = 0
+    if export_xyz:
+        xyz_path = tile_dir / "terrain.xyz"
+        xyz_point_count = export_terrain_xyz(
+            str(terrain_source_path),
+            str(xyz_path),
+            xy_scale=xy_scale,
+            z_scale=z_scale,
+            sample=cfg.terrain_sample,
+            origin=dxf_origin,
+            rotate_deg=cfg.rotate_z,
+        )
+        logger.info(f"Exported {xyz_point_count} points to {xyz_path}")
 
     export_dxf = export_contours or export_parcels
     if export_dxf:
@@ -891,30 +963,33 @@ def build(cfg: BuildConfig) -> int:
 
         to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
 
-        marker_center = None
-        if lat is not None and lon is not None:
+        marker_center = (0.0, 0.0, 0.0)
+        if lat is not None and lon is not None and dxf_origin is None:
             try:
                 cx, cy = to_laz.transform(lon, lat)
-                marker_center = (cx * unit_scale, cy * unit_scale, 0.0)
+                marker_center = (cx * xy_scale, cy * xy_scale, 0.0)
             except Exception:
-                marker_center = None
+                pass
 
-        if marker_center is not None:
-            dxf.add_cross(marker_center, size=50.0, layer_name="origin")
-            dxf.add_north_arrow(marker_center, layer_name="north")
+        dxf.add_cross(marker_center, size=50.0, layer_name="origin")
+        dxf.add_north_arrow(marker_center, layer_name="north")
 
         if export_contours and cfg.contour_interval is not None:
-            interval_laz = cfg.contour_interval / unit_scale
+            interval_laz = cfg.contour_interval / z_scale
             contours = generate_contours_from_raster(
                 str(terrain_source_path),
                 interval=interval_laz,
-                xy_scale=unit_scale,
-                z_scale=unit_scale,
+                xy_scale=xy_scale,
+                z_scale=z_scale,
                 sample=1,
+                origin=dxf_origin,
+                rotate_deg=cfg.rotate_z,
             )
             if contours:
                 major_interval = cfg.contour_interval * 5
-                contour_count = dxf.add_contours(contours, major_interval=major_interval)
+                contour_count = dxf.add_contours(
+                    contours, major_interval=major_interval
+                )
                 logger.info(f"  Added {contour_count} contour polylines")
 
         if export_parcels:
@@ -935,14 +1010,19 @@ def build(cfg: BuildConfig) -> int:
             else:
                 source, parcels = fetch_parcels_for_bbox(parcels_bbox)
                 if source is None or parcels is None:
-                    logger.warning("No parcel source available for this area; skipping.")
+                    logger.warning(
+                        "No parcel source available for this area; skipping."
+                    )
                 else:
                     parcel_count = dxf.add_polygons_from_geojson(
                         parcels,
                         layer_name="PARCELS",
-                        xy_scale=unit_scale,
+                        xy_scale=xy_scale,
                         transform_func=to_laz.transform,
                         color=3,
+                        origin=dxf_origin,
+                        clip_boundary=clip_poly,
+                        rotate_deg=cfg.rotate_z,
                     )
                     logger.info(
                         f"  Added {parcel_count} parcel boundaries ({source.name})"
@@ -951,9 +1031,12 @@ def build(cfg: BuildConfig) -> int:
         building_count = dxf.add_polygons_from_geojson(
             footprints,
             layer_name="BUILDINGS",
-            xy_scale=unit_scale,
+            xy_scale=xy_scale,
             transform_func=to_laz.transform,
             color=5,
+            origin=dxf_origin,
+            clip_boundary=clip_poly,
+            rotate_deg=cfg.rotate_z,
         )
         logger.info(f"  Added {building_count} building footprints")
 
@@ -965,7 +1048,7 @@ def build(cfg: BuildConfig) -> int:
             if path.exists():
                 path.unlink()
 
-    height_values = [h.height * unit_scale for h in heights]
+    height_values = [h.height * z_scale for h in heights]
     report: Dict[str, Any] = {
         "job_id": job_id,
         "output_dir": str(tile_dir),
@@ -989,13 +1072,17 @@ def build(cfg: BuildConfig) -> int:
             "used": multi_tile_used,
         },
         "units": cfg.units,
-        "unit_scale": unit_scale,
+        "unit_scale": xy_scale,
+        "xy_scale": xy_scale,
+        "z_scale": z_scale,
         "outputs": sorted(outputs),
         "footprints_total": len(footprints.get("features", [])),
         "footprints_extruded": len(heights) if needs_heights else 0,
         "clip": {
             "enabled": clip_poly is not None,
-            "center_latlon": (lat, lon) if lat is not None and lon is not None else None,
+            "center_latlon": (lat, lon)
+            if lat is not None and lon is not None
+            else None,
             "size": cfg.size,
         },
         "transform": {
@@ -1036,6 +1123,10 @@ def build(cfg: BuildConfig) -> int:
         "contours": {
             "enabled": export_contours,
             "interval": cfg.contour_interval if export_contours else None,
+        },
+        "xyz": {
+            "enabled": export_xyz,
+            "points": xyz_point_count if export_xyz else None,
         },
         "warnings": warnings,
     }

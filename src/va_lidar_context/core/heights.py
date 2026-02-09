@@ -64,12 +64,27 @@ def get_laz_crs_wkt(laz_path: str) -> str:
     return wkt
 
 
-def get_unit_scale(crs: CRS, output_units: str) -> float:
-    """Return a multiplier to convert CRS units to desired output units."""
+def get_unit_scale(crs: CRS, output_units: str, latitude: float | None = None) -> float:
+    """Return a multiplier to convert CRS units to desired output units.
+
+    When *latitude* is provided and the CRS is Web Mercator (EPSG:3857),
+    the scale is corrected for Mercator distortion so that output
+    coordinates represent true ground distances.
+    """
+    import math
+
     axis = crs.axis_info[0] if crs.axis_info else None
     to_meters = (
         axis.unit_conversion_factor if axis and axis.unit_conversion_factor else 1.0
     )
+    # Web Mercator metres are not true metres — correct with cos(lat).
+    if latitude is not None:
+        try:
+            epsg = crs.to_epsg()
+        except Exception:
+            epsg = None
+        if epsg == 3857:
+            to_meters *= math.cos(math.radians(latitude))
     if output_units == "meters":
         return to_meters
     if output_units == "feet":

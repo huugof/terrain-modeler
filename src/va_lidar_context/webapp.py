@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
-from .pipeline.build import build as build_pipeline
 from .config import (
     DEFAULT_COMBINE_OUTPUT,
     DEFAULT_FILL_MAX_DIST,
@@ -34,8 +33,9 @@ from .config import (
     BuildConfig,
 )
 from .parcels.registry import load_sources
-from .providers.usgs_index import query_for_point
+from .pipeline.build import build as build_pipeline
 from .pipeline.io import generate_job_id
+from .providers.usgs_index import query_for_point
 from .util import ensure_dir, get_logger
 
 app = Flask(__name__)
@@ -353,6 +353,7 @@ def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
         "combined.obj",
         "terrain.png",
         "contours.dxf",
+        "terrain.xyz",
     ]
     files = [name for name in candidates if (tile_dir / name).exists()]
     return {"dir": str(tile_dir), "files": files}
@@ -370,11 +371,13 @@ def snapshot_defaults() -> Dict[str, Any]:
         "clip_size": 1000.0,
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 2,
+        "rotate_z": 0.0,
         "output_terrain": "terrain" in outputs,
         "output_buildings": "buildings" in outputs,
         "output_contours": "contours" in outputs,
         "output_parcels": "parcels" in outputs,
         "output_naip": "naip" in outputs,
+        "output_xyz": "xyz" in outputs,
         "output_combined": DEFAULT_COMBINE_OUTPUT,
         "min_height": DEFAULT_MIN_HEIGHT,
         "max_height": DEFAULT_MAX_HEIGHT,
@@ -457,7 +460,11 @@ def coverage():
             ts, supported_cached, provider_cached = cached
             if now - ts <= COVERAGE_CACHE_TTL_SECONDS and provider_cached == provider:
                 return jsonify(
-                    {"supported": supported_cached, "provider": provider, "cached": True}
+                    {
+                        "supported": supported_cached,
+                        "provider": provider,
+                        "cached": True,
+                    }
                 )
             _coverage_cache.pop(cache_key, None)
 
@@ -547,13 +554,13 @@ def run_job():
         outputs.append("parcels")
     if parse_bool(form.get("output_naip")):
         outputs.append("naip")
+    if parse_bool(form.get("output_xyz")):
+        outputs.append("xyz")
     if not outputs:
         return jsonify({"error": "Select at least one output."}), 400
 
     combine_output = parse_bool(form.get("output_combined"))
-    if combine_output and not (
-        "terrain" in outputs and "buildings" in outputs
-    ):
+    if combine_output and not ("terrain" in outputs and "buildings" in outputs):
         return (
             jsonify({"error": "Combined output requires terrain + buildings."}),
             400,
@@ -568,7 +575,9 @@ def run_job():
     flip_x = False
     flip_y = False
     terrain_flip_y = False
-    rotate_z = 0.0
+    rotate_z = parse_float(form.get("rotate_z"))
+    if rotate_z is None:
+        rotate_z = 0.0
 
     allow_multi_tile = True
     force = False

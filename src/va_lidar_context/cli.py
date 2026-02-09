@@ -20,8 +20,8 @@ from .config import (
     DEFAULT_NAIP_MAX_SIZE,
     DEFAULT_NAIP_PIXEL_SIZE,
     DEFAULT_NAIP_TILED,
-    DEFAULT_OUTPUTS,
     DEFAULT_OUT_DIR,
+    DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
     DEFAULT_PREFER_EPT,
     DEFAULT_PROVIDER,
@@ -35,7 +35,7 @@ from .config import (
 )
 from .pipeline.build import build
 
-OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip"}
+OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
 
 
 def parse_outputs(value: str | None) -> tuple[str, ...]:
@@ -99,10 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
     build_cmd.set_defaults(prefer_ept=DEFAULT_PREFER_EPT)
     build_cmd.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
     build_cmd.add_argument("--force", action="store_true")
-    build_cmd.add_argument("--format", dest="fmt", default=DEFAULT_FORMAT, choices=["obj"])
+    build_cmd.add_argument(
+        "--format", dest="fmt", default=DEFAULT_FORMAT, choices=["obj"]
+    )
     build_cmd.add_argument("--units", default=DEFAULT_UNITS, choices=["feet", "meters"])
     build_cmd.add_argument("--resolution", type=float, default=DEFAULT_RESOLUTION)
-    build_cmd.add_argument("--percentile", type=int, choices=[90, 95], default=DEFAULT_PERCENTILE)
+    build_cmd.add_argument(
+        "--percentile", type=int, choices=[90, 95], default=DEFAULT_PERCENTILE
+    )
     build_cmd.add_argument("--min-height", type=float, default=DEFAULT_MIN_HEIGHT)
     build_cmd.add_argument("--max-height", type=float, default=DEFAULT_MAX_HEIGHT)
     build_cmd.add_argument("--floor-to-floor", type=float, default=10.0)
@@ -125,7 +129,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_RANDOM_SEED,
         help="Seed for random heights (optional).",
     )
-    build_cmd.add_argument("--naip-pixel-size", type=float, default=DEFAULT_NAIP_PIXEL_SIZE)
+    build_cmd.add_argument(
+        "--naip-pixel-size", type=float, default=DEFAULT_NAIP_PIXEL_SIZE
+    )
     build_cmd.add_argument("--naip-max-size", type=int, default=DEFAULT_NAIP_MAX_SIZE)
     build_cmd.add_argument("--naip-tiled", action="store_true")
     build_cmd.add_argument("--naip-flip-u", action="store_true")
@@ -161,7 +167,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--rotate-z",
         type=float,
         default=DEFAULT_ROTATE_Z,
-        help="Rotate all meshes around Z by degrees (counter-clockwise).",
+        help=(
+            "Rotate meshes and DXF/XYZ outputs around Z by degrees "
+            "(counter-clockwise, around --center)."
+        ),
     )
     build_cmd.add_argument(
         "--center",
@@ -186,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help=(
-            "Comma-separated outputs. Options: buildings, terrain, contours, parcels, naip. "
+            "Comma-separated outputs. Options: buildings, terrain, contours, parcels, naip, xyz. "
             "Defaults to buildings,terrain."
         ),
     )
