@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
@@ -373,9 +374,9 @@ def snapshot_defaults() -> Dict[str, Any]:
         "provider_label": "VGIN (Virginia)",
         "center1": 37.5390116184146,
         "center2": -77.43353162833343,
-        "clip_size": 1000.0,
+        "clip_size": 1500.0,
         "resolution": DEFAULT_RESOLUTION,
-        "terrain_complexity": 2,
+        "terrain_complexity": 5,
         "rotate_z": 0.0,
         "project_zero": DEFAULT_PROJECT_ZERO,
         "xyz_mode": DEFAULT_XYZ_MODE,
@@ -400,7 +401,7 @@ def snapshot_defaults() -> Dict[str, Any]:
 def parcel_sources_payload() -> List[Dict[str, Any]]:
     sources = []
     for source in load_sources():
-        payload = {"id": source.id, "name": source.name}
+        payload = {"id": source.id, "name": source.name, "url": source.query_url}
         if source.coverage is not None:
             payload["coverage"] = {
                 "xmin": source.coverage[0],
@@ -417,6 +418,85 @@ def parcel_sources_payload() -> List[Dict[str, Any]]:
     return sources
 
 
+def _domain_key(url: str) -> str:
+    return urlparse(url).netloc.lower()
+
+
+def _base_service_url(url: str) -> str:
+    parsed = urlparse(url)
+    root = f"{parsed.scheme}://{parsed.netloc}"
+    marker = "/arcgis/rest/services"
+    idx = parsed.path.find(marker)
+    if idx != -1:
+        return root + marker
+    return root
+
+
+def data_sources_payload(parcel_sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    static_sources = [
+        {
+            "name": "VGIN LiDAR",
+            "url": "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Download/Virginia_LiDAR_Downloads/MapServer/1",
+        },
+        {
+            "name": "VGIN Footprints",
+            "url": "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Building_Footprints/FeatureServer/0",
+        },
+        {
+            "name": "USGS 3DEP LiDAR",
+            "url": "https://index.nationalmap.gov/arcgis/rest/services/3DEPElevationIndex/MapServer/8",
+        },
+        {
+            "name": "Microsoft Footprints",
+            "url": "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0",
+        },
+        {
+            "name": "NAIP Imagery",
+            "url": "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer",
+        },
+    ]
+
+    entries = list(static_sources)
+    for source in parcel_sources:
+        if source.get("url"):
+            entries.append({"name": source["name"], "url": source["url"]})
+
+    provider_labels = {
+        "vginmaps.vdem.virginia.gov": "VGIN",
+    }
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for entry in entries:
+        domain = _domain_key(entry["url"])
+        if domain not in grouped:
+            grouped[domain] = {
+                "name": entry["name"],
+                "url": entry["url"],
+                "details": [],
+            }
+            order.append(domain)
+        grouped[domain]["details"].append(entry["name"])
+
+    sources = []
+    for domain in order:
+        group = grouped[domain]
+        if len(group["details"]) > 1:
+            name = provider_labels.get(domain, domain)
+            url = _base_service_url(group["url"])
+        else:
+            name = group["name"]
+            url = group["url"]
+        sources.append(
+            {
+                "name": name,
+                "url": url,
+                "details": group["details"],
+            }
+        )
+    return sources
+
+
 @app.before_request
 def _start_cleanup():
     ensure_cleanup_thread()
@@ -426,11 +506,13 @@ def _start_cleanup():
 def index():
     defaults = snapshot_defaults()
     parcel_sources = parcel_sources_payload()
+    data_sources = data_sources_payload(parcel_sources)
     with JOBS_LOCK:
         jobs = list(JOBS.values())[-8:][::-1]
     return render_template(
         "index.html",
         defaults=defaults,
+        data_sources=data_sources,
         parcel_sources=parcel_sources,
         jobs=jobs,
         retention_days=RETENTION_DAYS,

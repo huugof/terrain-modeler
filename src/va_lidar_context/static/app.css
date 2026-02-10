@@ -154,6 +154,11 @@ select {
     justify-content: center;
     height: 100%;
 }
+.contour-icons .lucide {
+    width: 16px;
+    height: 16px;
+    stroke-width: 1.8;
+}
 .segmented button + button {
     border-left: 1px solid var(--border);
 }
@@ -203,6 +208,46 @@ select {
     color: var(--muted);
     margin-top: 8px;
 }
+.data-sources {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    text-align: center;
+}
+.data-source-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+.data-sources-label {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 10px;
+    display: block;
+    margin-bottom: 2px;
+}
+.data-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #2f2f2f;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+    line-height: 1;
+}
+.data-pill:hover {
+    color: #fff;
+    background: #3a3a3a;
+}
 .inline-note {
     font-size: 12px;
     color: var(--muted);
@@ -250,6 +295,13 @@ a:visited {
 
 .hidden {
     display: none;
+}
+#parcelAlert {
+    min-height: 40px;
+}
+#parcelAlert.hidden {
+    display: block;
+    visibility: hidden;
 }
 input[type="range"] {
     -webkit-appearance: none;

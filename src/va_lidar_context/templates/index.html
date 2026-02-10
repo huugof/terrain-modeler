@@ -4,6 +4,7 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Terrain Modeler</title>
+        <link rel="icon" type="image/svg+xml" id="favicon" href="data:," />
         <link
             rel="stylesheet"
             href="{{ url_for('static', filename='app.css') }}"
@@ -113,7 +114,7 @@
                                 endif
                                 %}
                             />
-                            Terrain</label
+                            Terrain Mesh</label
                         >
                         <label class="check" title="buildings.obj (OBJ)"
                             ><input
@@ -127,7 +128,7 @@
                                 endif
                                 %}
                             />
-                            Buildings</label
+                            Building Massing</label
                         >
                     </div>
 
@@ -242,10 +243,40 @@
                             <div id="contourLayersSection">
                                 <label>Layers</label>
                                 <div class="segmented contour-icons" data-toggle-group="layers">
-                                    <button type="button" class="active static" title="Contours" disabled>C</button>
-                                    <button type="button" data-input="dxf_include_parcels" title="Parcels">P</button>
-                                    <button type="button" data-input="dxf_include_buildings" title="Building Footprints">B</button>
-                                    <button type="button" data-input="dxf_include_roads" title="Roads (coming soon)" disabled>R</button>
+                                    <button
+                                        type="button"
+                                        class="active static"
+                                        title="Contours"
+                                        aria-label="Contours"
+                                        disabled
+                                    >
+                                        <i data-lucide="waves"></i>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-input="dxf_include_parcels"
+                                        title="Parcels"
+                                        aria-label="Parcels"
+                                    >
+                                        <i data-lucide="layout-grid"></i>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-input="dxf_include_buildings"
+                                        title="Building Footprints"
+                                        aria-label="Building Footprints"
+                                    >
+                                        <i data-lucide="house"></i>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-input="dxf_include_roads"
+                                        title="Roads (coming soon)"
+                                        aria-label="Roads (coming soon)"
+                                        disabled
+                                    >
+                                        <i data-lucide="route"></i>
+                                    </button>
                                 </div>
                                 <input
                                     type="checkbox"
@@ -348,9 +379,20 @@
                     </div>
                 </div>
             </form>
-            <div class="note" style="margin-top: 20px; text-align: center">
-                Data sources: VGIN LiDAR/Footprints (VA mode), USGS 3DEP LiDAR +
-                Microsoft Footprints (National mode), and NAIP imagery.
+            <div class="note data-sources">
+                <span class="data-sources-label">Data sources:</span>
+                <div class="data-source-group">
+                    {% for source in data_sources %}
+                    <a
+                        class="data-pill"
+                        href="{{ source.url }}"
+                        target="_blank"
+                        rel="noopener"
+                        title="{{ source.details | join(', ') }}"
+                        >{{ source.name }}</a
+                    >
+                    {% endfor %}
+                </div>
             </div>
 
             <div class="card">
@@ -374,7 +416,30 @@
                 </div>
             </div>
         </main>
+        <i
+            id="faviconSource"
+            class="visually-hidden"
+            data-lucide="mountain"
+            aria-hidden="true"
+        ></i>
+        <script src="https://unpkg.com/lucide@latest"></script>
         <script>
+            function setFaviconFromLucide() {
+              const icon = document.getElementById('faviconSource');
+              if (!icon || icon.tagName.toLowerCase() !== 'svg') return;
+              const svg = icon.cloneNode(true);
+              svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+              svg.setAttribute('width', '64');
+              svg.setAttribute('height', '64');
+              svg.style.color = '#e4e4e4';
+              const encoded = encodeURIComponent(svg.outerHTML)
+                .replace(/'/g, '%27')
+                .replace(/"/g, '%22');
+              const link = document.getElementById('favicon');
+              if (link) {
+                link.href = `data:image/svg+xml,${encoded}`;
+              }
+            }
             const VA_BOUNDS = { latMin: 36.5, latMax: 39.5, lonMin: -83.0, lonMax: -75.0 };
             const CONUS_BOUNDS = { latMin: 24.5, latMax: 49.5, lonMin: -125.0, lonMax: -66.5 };
             const PARCEL_SOURCES = {{ parcel_sources | tojson }};
@@ -771,6 +836,10 @@
               initToggleButtons();
               updateUnitLabels();
               updateUiToggles();
+              if (window.lucide) {
+                lucide.createIcons();
+                setFaviconFromLucide();
+              }
               const contours = document.getElementById('output_contours');
               const outTerrain = document.getElementById('output_terrain');
               const outBuildings = document.getElementById('output_buildings');

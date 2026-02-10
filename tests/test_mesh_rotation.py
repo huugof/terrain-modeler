@@ -15,7 +15,7 @@ def _round_point(pt, ndigits=6):
 def test_export_terrain_xyz_rotation(tmp_path):
     raster_path = tmp_path / "raster.tif"
     data = np.ones((2, 2), dtype=np.float32)
-    transform = Affine(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    transform = Affine(1.0, 0.0, 100.0, 0.0, 1.0, 200.0)
 
     with rasterio.open(
         raster_path,

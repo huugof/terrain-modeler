@@ -16,7 +16,7 @@
   },
   {
     "id": "ct_cama_parcels",
-    "name": "Connecticut Parcels (CAMA + Parcels)",
+    "name": "CT GIS Parcels",
     "kind": "arcgis",
     "query_url": "https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query",
     "out_fields": "OBJECTID",
@@ -31,7 +31,7 @@
   },
   {
     "id": "ny_nys_tax_parcels_public",
-    "name": "New York Parcels (NYS Tax Parcels Public)",
+    "name": "NY GIS Parcels",
     "kind": "arcgis",
     "query_url": "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1/query",
     "out_fields": "OBJECTID",
@@ -49,7 +49,7 @@
   },
   {
     "id": "co_public_parcel_composite",
-    "name": "Colorado Parcels (Public Parcel Composite)",
+    "name": "CO GIS Parcels",
     "kind": "arcgis",
     "query_url": "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0/query",
     "out_fields": "OBJECTID",

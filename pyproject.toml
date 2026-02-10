@@ -39,3 +39,8 @@ va_lidar_context = [
   "parcels/sources.json",
   "py.typed",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "ignore::pyparsing.PyparsingDeprecationWarning",
+]

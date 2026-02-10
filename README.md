@@ -138,6 +138,7 @@ Per run in `./out/<job_id>/` (job id is a hash of center coords + size + time):
 - If your clip crosses a tile boundary, add `--allow-multi-tile` to merge adjacent tiles.
 - `--naip-flip-u`/`--naip-flip-v` fix mirrored imagery.
 - If the geometry is mirrored or rotated, use `--flip-x`, `--flip-y`, and/or `--rotate-z`.
+- XYZ output defaults to a uniform grid; use `--xyz-mode contours` for contour sampling.
 - `--rotate-z` also rotates DXF/XYZ outputs around the `--center` point (it does not affect `terrain.png`).
 - `terrain.xyz` defaults to contour vertices; use `--xyz-mode grid` for a full grid and
   `--xyz-contour-spacing` to resample along contours.
