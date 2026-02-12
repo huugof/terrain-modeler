@@ -11,6 +11,35 @@
         />
     </head>
     <body>
+        {% if auth_enabled and current_user %}
+        {% set profile_name = current_user.get('name') or ((current_user.get('email') or '').split('@')[0]) or 'User' %}
+        {% set profile_initial = (profile_name[:1] if profile_name else 'U')|upper %}
+        <div id="profileShell" class="profile-shell">
+            <button
+                type="button"
+                id="profileButton"
+                class="profile-button"
+                aria-label="Account menu"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="profileDropdown"
+            >
+                {{ profile_initial }}
+            </button>
+            <div id="profileDropdown" class="profile-dropdown hidden" role="menu" aria-labelledby="profileButton">
+                <p class="profile-row">
+                    Signed in as <strong>{{ current_user.email }}</strong>
+                </p>
+                {% if current_user.is_admin %}
+                <a class="profile-link" href="{{ url_for('admin_users') }}">Admin</a>
+                {% endif %}
+                <form method="post" action="{{ url_for('auth_logout') }}" class="profile-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <button class="btn secondary profile-logout" type="submit">Sign out</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
         <header>
             <h1>Terrain Modeler</h1>
             <p class="sub">
@@ -24,6 +53,7 @@
                 method="post"
                 action="{{ url_for('run_job') }}"
             >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <div class="form-body">
                     <div class="section-title">Location</div>
                     <div class="grid">
@@ -801,7 +831,12 @@
                 headers: { 'X-Requested-With': 'fetch' },
               });
               if (!resp.ok) {
-                buildErrorMessage = 'Build failed to start. Please check your inputs and try again.';
+                try {
+                  const payload = await resp.json();
+                  buildErrorMessage = payload.error || 'Build failed to start. Please check your inputs and try again.';
+                } catch (err) {
+                  buildErrorMessage = 'Build failed to start. Please check your inputs and try again.';
+                }
                 updateAlerts();
                 runBtn.disabled = false;
                 runBtn.textContent = originalText;
@@ -832,6 +867,37 @@
             }
 
             document.addEventListener('DOMContentLoaded', () => {
+              const profileShell = document.getElementById('profileShell');
+              const profileButton = document.getElementById('profileButton');
+              const profileDropdown = document.getElementById('profileDropdown');
+              if (profileShell && profileButton && profileDropdown) {
+                const closeProfileMenu = () => {
+                  profileDropdown.classList.add('hidden');
+                  profileButton.setAttribute('aria-expanded', 'false');
+                };
+                profileButton.addEventListener('click', (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const willOpen = profileDropdown.classList.contains('hidden');
+                  if (willOpen) {
+                    profileDropdown.classList.remove('hidden');
+                    profileButton.setAttribute('aria-expanded', 'true');
+                  } else {
+                    closeProfileMenu();
+                  }
+                });
+                document.addEventListener('click', (event) => {
+                  if (!profileShell.contains(event.target)) {
+                    closeProfileMenu();
+                  }
+                });
+                document.addEventListener('keydown', (event) => {
+                  if (event.key === 'Escape') {
+                    closeProfileMenu();
+                  }
+                });
+              }
+
               initSegmentedControls();
               initToggleButtons();
               updateUnitLabels();

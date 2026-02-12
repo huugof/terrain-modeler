@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
     python3.11-distutils \
+    libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
 
 # Create an isolated venv to avoid system Python package conflicts
@@ -34,10 +35,20 @@ WORKDIR /app
 
 COPY pyproject.toml README.md /app/
 COPY src /app/src
+COPY gunicorn.conf.py /app/gunicorn.conf.py
 
 RUN pip install -e . && \
     pip install gunicorn
 
+RUN useradd -m -u 10001 appuser && \
+    mkdir -p /data/out /data/app && \
+    chown -R appuser:appuser /app /data
+
 EXPOSE 8000
 
-CMD ["gunicorn", "-b", "0.0.0.0:8000", "--workers", "1", "--threads", "8", "va_lidar_context.webapp:app"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
+
+USER appuser
+
+CMD ["gunicorn", "-c", "/app/gunicorn.conf.py", "va_lidar_context.webapp:app"]
