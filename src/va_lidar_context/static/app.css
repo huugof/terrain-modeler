@@ -319,6 +319,13 @@ select {
     font-size: 14px;
     border-radius: 10px;
     cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.btn:visited {
+    color: #fff;
 }
 .btn.secondary {
     background: #3a3a3a;

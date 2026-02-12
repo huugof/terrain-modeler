@@ -26,6 +26,7 @@ from flask import (
     render_template,
     render_template_string,
     request,
+    send_from_directory,
     session,
     url_for,
 )
@@ -605,6 +606,75 @@ def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
     return {"dir": str(tile_dir), "files": files}
 
 
+def _is_path_within(base_dir: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve().relative_to(base_dir.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_job_output_dir(job: Job) -> Optional[Path]:
+    outputs = job.summary.get("outputs")
+    if isinstance(outputs, dict):
+        raw_dir = outputs.get("dir")
+        if isinstance(raw_dir, str) and raw_dir.strip():
+            candidate = Path(raw_dir).expanduser()
+            if candidate.exists() and candidate.is_dir() and _is_path_within(OUT_DIR, candidate):
+                return candidate
+
+    report_path = job.summary.get("report_path")
+    if isinstance(report_path, str) and report_path:
+        report_file = Path(report_path).expanduser()
+        if report_file.exists() and report_file.is_file():
+            candidate = report_file.parent
+            if _is_path_within(OUT_DIR, candidate):
+                return candidate
+
+    default_dir = OUT_DIR / job.job_id
+    if default_dir.exists() and default_dir.is_dir() and _is_path_within(OUT_DIR, default_dir):
+        return default_dir
+    return None
+
+
+def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
+    output_dir = _resolve_job_output_dir(job)
+    if output_dir is None:
+        return []
+
+    artifacts: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    outputs = job.summary.get("outputs")
+    summary_files: List[str] = []
+    if isinstance(outputs, dict) and isinstance(outputs.get("files"), list):
+        for value in outputs.get("files"):
+            if isinstance(value, str):
+                summary_files.append(value.strip())
+
+    for name in summary_files:
+        if not name or "/" in name or "\\" in name or name in seen:
+            continue
+        path = output_dir / name
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+        seen.add(name)
+
+    if not artifacts:
+        for path in sorted(output_dir.iterdir(), key=lambda p: p.name.lower()):
+            if not path.is_file():
+                continue
+            name = path.name
+            if name in seen:
+                continue
+            stat = path.stat()
+            artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+            seen.add(name)
+
+    return artifacts
+
+
 def _clerk_auth_ready() -> bool:
     return bool(CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY)
 
@@ -931,16 +1001,19 @@ def auth_logout():
 
 
 @app.route("/")
-@require_login
 def index():
     defaults = snapshot_defaults()
     parcel_sources = parcel_sources_payload()
     data_sources = data_sources_payload(parcel_sources)
     user = current_user()
+    can_build = (not AUTH_ENABLED) or (user is not None)
     with JOBS_LOCK:
         jobs = list(JOBS.values())
-        if AUTH_ENABLED and user and not user.get("is_admin"):
-            jobs = [job for job in jobs if job.user_id == user["id"]]
+        if AUTH_ENABLED:
+            if user is None:
+                jobs = []
+            elif not user.get("is_admin"):
+                jobs = [job for job in jobs if job.user_id == user["id"]]
         jobs = jobs[-8:][::-1]
     return render_template(
         "index.html",
@@ -948,6 +1021,7 @@ def index():
         data_sources=data_sources,
         parcel_sources=parcel_sources,
         jobs=jobs,
+        can_build=can_build,
         retention_days=RETENTION_DAYS,
         status_label=status_label,
     )
@@ -970,6 +1044,20 @@ def recent_jobs():
         }
         for job in jobs
     ]
+    for item, job in zip(payload, jobs):
+        if job.status != "done":
+            continue
+        artifacts = _list_job_artifacts(job)
+        if not artifacts:
+            continue
+        item["downloads"] = [
+            {
+                "name": artifact["name"],
+                "url": url_for("job_download", job_id=job.job_id, name=artifact["name"]),
+            }
+            for artifact in artifacts
+        ]
+        item["artifact_count"] = len(artifacts)
     return jsonify({"jobs": payload})
 
 
@@ -995,7 +1083,6 @@ def admin_users_upsert():
 
 
 @app.route("/coverage")
-@require_login
 def coverage():
     lon = parse_float(request.args.get("lon"))
     lat = parse_float(request.args.get("lat"))
@@ -1287,6 +1374,51 @@ def job_logs(job_id: str):
             "summary": job.summary,
         }
     return jsonify(payload)
+
+
+@app.route("/jobs/<job_id>/artifacts")
+@require_login
+def job_artifacts(job_id: str):
+    if not _user_can_access_job(job_id):
+        return _forbidden_response("Not allowed to access this job.")
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    artifacts = _list_job_artifacts(job)
+    payload = [
+        {
+            "name": item["name"],
+            "size": item["size"],
+            "mtime": item["mtime"],
+            "download_url": url_for("job_download", job_id=job_id, name=item["name"]),
+        }
+        for item in artifacts
+    ]
+    return jsonify({"job_id": job_id, "files": payload})
+
+
+@app.route("/jobs/<job_id>/download/<name>")
+@require_login
+def job_download(job_id: str, name: str):
+    if "/" in name or "\\" in name:
+        return jsonify({"error": "Invalid file name."}), 400
+    if not _user_can_access_job(job_id):
+        return _forbidden_response("Not allowed to access this job.")
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return ("Job not found", 404)
+
+    output_dir = _resolve_job_output_dir(job)
+    if output_dir is None:
+        return ("No artifacts available for this job.", 404)
+    artifacts = _list_job_artifacts(job)
+    allowed_names = {item["name"] for item in artifacts}
+    if name not in allowed_names:
+        return ("File not found", 404)
+    return send_from_directory(output_dir, name, as_attachment=True, download_name=name)
 
 
 @app.route("/internal/worker/jobs/<job_id>/complete", methods=["POST"])
