@@ -740,37 +740,32 @@ STATUS_TEMPLATE = """
           return url;
         });
 
-        return new Promise((resolve, reject) => {
+        return (async () => {
           const objLoader = new window.OBJLoader(manager);
-          const objUrl = buildDownloadUrl(model.obj);
-
-          const onObjReady = () => {
-            objLoader.load(
-              objUrl,
-              (obj) => resolve(obj),
-              undefined,
-              (err) => reject(err)
-            );
-          };
-
-          if (!model.mtl) {
-            onObjReady();
-            return;
+          if (model.mtl) {
+            try {
+              const mtlResp = await fetch(buildDownloadUrl(model.mtl), { cache: 'no-store' });
+              if (mtlResp.ok) {
+                const mtlText = await mtlResp.text();
+                const mtlLoader = new window.MTLLoader(manager);
+                const mtlPath = `/jobs/${previewState.jobId}/download/`;
+                const materials = mtlLoader.parse(mtlText, mtlPath);
+                materials.preload();
+                objLoader.setMaterials(materials);
+              }
+            } catch (error) {
+              // Continue without MTL if it cannot be loaded.
+            }
           }
 
-          const mtlLoader = new window.MTLLoader(manager);
-          mtlLoader.setResourcePath(`/jobs/${previewState.jobId}/download/`);
-          mtlLoader.load(
-            buildDownloadUrl(model.mtl),
-            (materials) => {
-              materials.preload();
-              objLoader.setMaterials(materials);
-              onObjReady();
-            },
-            undefined,
-            () => onObjReady()
-          );
-        });
+          const objUrl = buildDownloadUrl(model.obj);
+          const objResp = await fetch(objUrl, { cache: 'no-store' });
+          if (!objResp.ok) {
+            throw new Error(`OBJ fetch failed (${objResp.status}) for ${model.obj}`);
+          }
+          const objText = await objResp.text();
+          return objLoader.parse(objText);
+        })();
       }
 
       async function renderModel(modelKey) {
@@ -788,7 +783,8 @@ STATUS_TEMPLATE = """
           resetCamera();
           setPreviewMessage('');
         } catch (error) {
-          setPreviewMessage('Failed to load preview model.');
+          const msg = (error && error.message) ? error.message : 'Failed to load preview model.';
+          setPreviewMessage(msg);
         }
       }
 
