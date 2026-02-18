@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import secrets
 import shutil
 import threading
 import time
+import zipfile
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
@@ -26,6 +28,7 @@ from flask import (
     render_template,
     render_template_string,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -294,8 +297,6 @@ def _user_can_access_job(job_id: str) -> bool:
     user = current_user()
     if user is None:
         return False
-    if user.get("is_admin"):
-        return True
     owner_id = auth_store.get_job_owner_id(DB_PATH, job_id)
     return owner_id is not None and owner_id == user["id"]
 
@@ -487,6 +488,10 @@ STATUS_TEMPLATE = """
           height: 340px;
         }
       }
+      #preview-section {
+        display: none;
+        margin-bottom: 14px;
+      }
     </style>
   </head>
   <body>
@@ -518,19 +523,19 @@ STATUS_TEMPLATE = """
         {% endif %}
       </div>
       {% endif %}
-      <div class="card" id="preview-card" style="display:none;">
-        <h3>3D Preview</h3>
-        <div id="preview-container">
-          <div id="preview-message">Waiting for model files...</div>
+      <div class="card" id="preview-card">
+        <h3>3D Preview & Activity</h3>
+        <div id="preview-section">
+          <div id="preview-container">
+            <div id="preview-message">Waiting for model files...</div>
+          </div>
+          <div id="preview-controls">
+            <button type="button" onclick="toggleWireframe()">Wireframe</button>
+            <button type="button" onclick="resetCamera()">Reset View</button>
+            <select id="preview-file"></select>
+          </div>
         </div>
-        <div id="preview-controls">
-          <button type="button" onclick="toggleWireframe()">Wireframe</button>
-          <button type="button" onclick="resetCamera()">Reset View</button>
-          <select id="preview-file"></select>
-        </div>
-      </div>
-      <div class="card">
-        <h3>Activity Log</h3>
+        <h4>Activity Log</h4>
         <pre id="logs"></pre>
       </div>
     </main>
@@ -584,17 +589,17 @@ STATUS_TEMPLATE = """
       }
 
       function showPreviewCard() {
-        const card = document.getElementById('preview-card');
-        if (card) {
-          card.style.display = 'block';
+        const section = document.getElementById('preview-section');
+        if (section) {
+          section.style.display = 'block';
           previewState.cardVisible = true;
         }
       }
 
       function hidePreviewCard() {
-        const card = document.getElementById('preview-card');
-        if (card) {
-          card.style.display = 'none';
+        const section = document.getElementById('preview-section');
+        if (section) {
+          section.style.display = 'none';
           previewState.cardVisible = false;
         }
       }
@@ -1480,7 +1485,7 @@ def index():
         if AUTH_ENABLED:
             if user is None:
                 jobs = []
-            elif not user.get("is_admin"):
+            else:
                 jobs = [job for job in jobs if job.user_id == user["id"]]
         jobs = jobs[-8:][::-1]
     return render_template(
@@ -1501,14 +1506,19 @@ def recent_jobs():
     user = current_user()
     with JOBS_LOCK:
         jobs = list(JOBS.values())
-        if AUTH_ENABLED and user and not user.get("is_admin"):
-            jobs = [job for job in jobs if job.user_id == user["id"]]
+        if AUTH_ENABLED:
+            if user is None:
+                jobs = []
+            else:
+                jobs = [job for job in jobs if job.user_id == user["id"]]
         jobs = jobs[-8:][::-1]
     payload = [
         {
             "job_id": job.job_id,
+            "name": str(job.summary.get("tile") or job.job_id),
             "status": job.status,
             "status_label": status_label(job.status),
+            "preview_url": url_for("job_status", job_id=job.job_id),
         }
         for job in jobs
     ]
@@ -1518,16 +1528,8 @@ def recent_jobs():
         artifacts = _list_job_artifacts(job)
         if not artifacts:
             continue
-        item["downloads"] = [
-            {
-                "name": artifact["name"],
-                "url": url_for(
-                    "job_download", job_id=job.job_id, name=artifact["name"]
-                ),
-            }
-            for artifact in artifacts
-        ]
         item["artifact_count"] = len(artifacts)
+        item["download_all_url"] = url_for("job_download_all", job_id=job.job_id)
     return jsonify({"jobs": payload})
 
 
@@ -1891,6 +1893,38 @@ def job_download(job_id: str, name: str):
         name,
         as_attachment=not inline,
         download_name=name,
+    )
+
+
+@app.route("/jobs/<job_id>/download-all")
+@require_login
+def job_download_all(job_id: str):
+    if not _user_can_access_job(job_id):
+        return _forbidden_response("Not allowed to access this job.")
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return ("Job not found", 404)
+    output_dir = _resolve_job_output_dir(job)
+    if output_dir is None:
+        return ("No artifacts available for this job.", 404)
+    artifacts = _list_job_artifacts(job)
+    if not artifacts:
+        return ("No artifacts available for this job.", 404)
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for artifact in artifacts:
+            name = artifact["name"]
+            path = output_dir / name
+            if path.is_file():
+                archive.write(path, arcname=name)
+    data.seek(0)
+    return send_file(
+        data,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{job_id}_artifacts.zip",
     )
 
 

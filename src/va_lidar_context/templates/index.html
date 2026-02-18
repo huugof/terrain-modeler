@@ -440,17 +440,13 @@
                     <ul>
                         {% for job in jobs %}
                         <li>
-                            <a
-                                href="{{ url_for('job_status', job_id=job.job_id) }}"
-                                >{{ job.job_id }}</a
-                            >
-                            — {{ status_label(job.status) }}
-                            {% if job.status == 'done' and job.summary.get('outputs') and job.summary.get('outputs').get('files') %}
-                            —
-                            {% for name in job.summary.get('outputs').get('files') %}
-                            <a href="{{ url_for('job_download', job_id=job.job_id, name=name) }}">Download {{ name }}</a>{% if not loop.last %}, {% endif %}
-                            {% endfor %}
-                            {% endif %}
+                            <div>{{ job.summary.get('tile') or job.job_id }} - {{ status_label(job.status) }}</div>
+                            <div>
+                                <a href="{{ url_for('job_status', job_id=job.job_id) }}">Preview</a>
+                                {% if job.status == 'done' and job.summary.get('outputs') and job.summary.get('outputs').get('files') %}
+                                , <a href="{{ url_for('job_download_all', job_id=job.job_id) }}">Download</a>
+                                {% endif %}
+                            </div>
                         </li>
                         {% endfor %}
                     </ul>
@@ -661,24 +657,25 @@
               const list = document.createElement('ul');
               jobs.forEach((job) => {
                 const item = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = `/jobs/${job.job_id}`;
-                link.textContent = job.job_id;
-                item.appendChild(link);
                 const label = job.status_label || job.status;
-                item.appendChild(document.createTextNode(` — ${label}`));
-                if (Array.isArray(job.downloads) && job.downloads.length > 0) {
-                  item.appendChild(document.createTextNode(' — '));
-                  job.downloads.forEach((download, idx) => {
-                    const dl = document.createElement('a');
-                    dl.href = download.url;
-                    dl.textContent = `Download ${download.name}`;
-                    item.appendChild(dl);
-                    if (idx < job.downloads.length - 1) {
-                      item.appendChild(document.createTextNode(', '));
-                    }
-                  });
+                const name = job.name || job.job_id;
+                const line1 = document.createElement('div');
+                line1.textContent = `${name} - ${label}`;
+                item.appendChild(line1);
+
+                const line2 = document.createElement('div');
+                const previewLink = document.createElement('a');
+                previewLink.href = job.preview_url || `/jobs/${job.job_id}`;
+                previewLink.textContent = 'Preview';
+                line2.appendChild(previewLink);
+                if (job.download_all_url) {
+                  line2.appendChild(document.createTextNode(', '));
+                  const downloadLink = document.createElement('a');
+                  downloadLink.href = job.download_all_url;
+                  downloadLink.textContent = 'Download';
+                  line2.appendChild(downloadLink);
                 }
+                item.appendChild(line2);
                 list.appendChild(item);
               });
               container.appendChild(list);
