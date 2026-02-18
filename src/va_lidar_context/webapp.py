@@ -534,10 +534,16 @@ STATUS_TEMPLATE = """
         <pre id="logs"></pre>
       </div>
     </main>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/OBJLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/MTLLoader.js"></script>
+    <script type="module">
+      import * as THREE_NS from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+      import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+      import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+      import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+      window.THREE = THREE_NS;
+      window.THREE.OrbitControls = OrbitControls;
+      window.THREE.OBJLoader = OBJLoader;
+      window.THREE.MTLLoader = MTLLoader;
+    </script>
     <script>
       const STATUS_LABELS = {
         queued: 'Queued',
