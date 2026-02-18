@@ -540,9 +540,10 @@ STATUS_TEMPLATE = """
       import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
       import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
       window.THREE = THREE_NS;
-      window.THREE.OrbitControls = OrbitControls;
-      window.THREE.OBJLoader = OBJLoader;
-      window.THREE.MTLLoader = MTLLoader;
+      window.OrbitControls = OrbitControls;
+      window.OBJLoader = OBJLoader;
+      window.MTLLoader = MTLLoader;
+      window.__threePreviewReady = true;
     </script>
     <script>
       const STATUS_LABELS = {
@@ -616,8 +617,9 @@ STATUS_TEMPLATE = """
 
       function ensureThreeContext() {
         if (previewState.initialized) return true;
-        if (!window.THREE || !THREE.OBJLoader || !THREE.OrbitControls || !THREE.MTLLoader) {
-          setPreviewMessage('3D renderer failed to load.');
+        const OrbitControlsCtor = window.OrbitControls;
+        if (!window.THREE || !window.OBJLoader || !OrbitControlsCtor || !window.MTLLoader) {
+          setPreviewMessage('Loading 3D renderer...');
           return false;
         }
         const container = document.getElementById('preview-container');
@@ -635,7 +637,7 @@ STATUS_TEMPLATE = """
         renderer.domElement.style.height = '100%';
         container.appendChild(renderer.domElement);
 
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        const controls = new OrbitControlsCtor(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.07;
         controls.screenSpacePanning = true;
@@ -723,7 +725,7 @@ STATUS_TEMPLATE = """
         });
 
         return new Promise((resolve, reject) => {
-          const objLoader = new THREE.OBJLoader(manager);
+          const objLoader = new window.OBJLoader(manager);
           const objUrl = buildDownloadUrl(model.obj);
 
           const onObjReady = () => {
@@ -740,7 +742,7 @@ STATUS_TEMPLATE = """
             return;
           }
 
-          const mtlLoader = new THREE.MTLLoader(manager);
+          const mtlLoader = new window.MTLLoader(manager);
           mtlLoader.setResourcePath(`/jobs/${previewState.jobId}/download/`);
           mtlLoader.load(
             buildDownloadUrl(model.mtl),
@@ -800,7 +802,11 @@ STATUS_TEMPLATE = """
         }
 
         showPreviewCard();
-        if (!ensureThreeContext()) return;
+        if (!ensureThreeContext()) {
+          previewState.activationStarted = false;
+          setTimeout(activatePreview, 600);
+          return;
+        }
 
         const select = document.getElementById('preview-file');
         if (!select) return;
