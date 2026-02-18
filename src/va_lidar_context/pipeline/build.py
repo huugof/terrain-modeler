@@ -537,19 +537,32 @@ def build(cfg: BuildConfig) -> int:
     terrain_meta = None
     dtm_use_path = dtm_path
     if cfg.force or not dtm_path.exists():
-        _, dtm_meta = make_dtm(laz_processing_path, dtm_path, cfg.resolution)
+        _, dtm_meta = make_dtm(
+            laz_processing_path,
+            dtm_path,
+            cfg.resolution,
+            crs_wkt_fallback=laz_wkt,
+        )
         if not raster_has_data(dtm_path, dtm_meta):
             logger.warning(
                 "DTM contains no ground data; falling back to unclassified min raster"
             )
             _, dtm_meta = make_dtm_unclassified(
-                laz_processing_path, dtm_path, cfg.resolution
+                laz_processing_path,
+                dtm_path,
+                cfg.resolution,
+                crs_wkt_fallback=laz_wkt,
             )
     else:
         try:
             dtm_meta = load_raster_meta(dtm_path)
         except Exception:
-            _, dtm_meta = make_dtm(laz_processing_path, dtm_path, cfg.resolution)
+            _, dtm_meta = make_dtm(
+                laz_processing_path,
+                dtm_path,
+                cfg.resolution,
+                crs_wkt_fallback=laz_wkt,
+            )
     dtm_use_meta = dtm_meta
     if cfg.fill_dtm:
         if cfg.force or not dtm_filled_path.exists():
@@ -580,12 +593,22 @@ def build(cfg: BuildConfig) -> int:
     needs_heights = export_buildings
     if needs_heights and not override_heights:
         if cfg.force or not dsm_path.exists():
-            _, dsm_meta = make_dsm(laz_processing_path, dsm_path, cfg.resolution)
+            _, dsm_meta = make_dsm(
+                laz_processing_path,
+                dsm_path,
+                cfg.resolution,
+                crs_wkt_fallback=laz_wkt,
+            )
         else:
             try:
                 dsm_meta = load_raster_meta(dsm_path)
             except Exception:
-                _, dsm_meta = make_dsm(laz_processing_path, dsm_path, cfg.resolution)
+                _, dsm_meta = make_dsm(
+                    laz_processing_path,
+                    dsm_path,
+                    cfg.resolution,
+                    crs_wkt_fallback=laz_wkt,
+                )
         if cfg.force or not ndsm_path.exists():
             _, ndsm_meta = make_ndsm(
                 dsm_path,

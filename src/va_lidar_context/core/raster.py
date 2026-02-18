@@ -345,6 +345,7 @@ def _rasterize_laz(
     resolution: float,
     *,
     kind: str,
+    crs_wkt_fallback: str | None = None,
 ) -> tuple[Path, RasterMeta]:
     if resolution <= 0:
         raise ValueError("resolution must be > 0")
@@ -420,11 +421,19 @@ def _rasterize_laz(
         untouched = ~np.isfinite(grid)
     grid[untouched] = nodata
 
+    try:
+        crs_wkt = _laz_crs_wkt(las)
+    except ValueError:
+        if crs_wkt_fallback:
+            crs_wkt = crs_wkt_fallback
+        else:
+            raise
+
     meta = RasterMeta(
         transform=(resolution, 0.0, x_min, 0.0, -resolution, y_top),
         width=width,
         height=height,
-        crs_wkt=_laz_crs_wkt(las),
+        crs_wkt=crs_wkt,
         nodata=nodata,
     )
     write_raster(out_path, grid, meta)
@@ -432,15 +441,35 @@ def _rasterize_laz(
 
 
 def make_dtm(
-    laz_path: Path, dtm_path: Path, resolution: float
+    laz_path: Path,
+    dtm_path: Path,
+    resolution: float,
+    *,
+    crs_wkt_fallback: str | None = None,
 ) -> tuple[Path, RasterMeta]:
-    return _rasterize_laz(laz_path, dtm_path, resolution, kind="ground")
+    return _rasterize_laz(
+        laz_path,
+        dtm_path,
+        resolution,
+        kind="ground",
+        crs_wkt_fallback=crs_wkt_fallback,
+    )
 
 
 def make_dtm_unclassified(
-    laz_path: Path, dtm_path: Path, resolution: float
+    laz_path: Path,
+    dtm_path: Path,
+    resolution: float,
+    *,
+    crs_wkt_fallback: str | None = None,
 ) -> tuple[Path, RasterMeta]:
-    return _rasterize_laz(laz_path, dtm_path, resolution, kind="dtm_unclassified")
+    return _rasterize_laz(
+        laz_path,
+        dtm_path,
+        resolution,
+        kind="dtm_unclassified",
+        crs_wkt_fallback=crs_wkt_fallback,
+    )
 
 
 def raster_has_data(path: Path, meta: RasterMeta | None = None) -> bool:
@@ -450,9 +479,19 @@ def raster_has_data(path: Path, meta: RasterMeta | None = None) -> bool:
 
 
 def make_dsm(
-    laz_path: Path, dsm_path: Path, resolution: float
+    laz_path: Path,
+    dsm_path: Path,
+    resolution: float,
+    *,
+    crs_wkt_fallback: str | None = None,
 ) -> tuple[Path, RasterMeta]:
-    return _rasterize_laz(laz_path, dsm_path, resolution, kind="dsm")
+    return _rasterize_laz(
+        laz_path,
+        dsm_path,
+        resolution,
+        kind="dsm",
+        crs_wkt_fallback=crs_wkt_fallback,
+    )
 
 
 def make_ndsm(
