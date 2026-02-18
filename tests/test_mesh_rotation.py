@@ -1,11 +1,9 @@
 import math
 
 import numpy as np
-import pytest
-import rasterio
-from rasterio.transform import Affine
 
 from va_lidar_context.core.mesh import DxfExporter, export_terrain_xyz
+from va_lidar_context.core.raster import RasterMeta, write_raster
 
 
 def _round_point(pt, ndigits=6):
@@ -15,19 +13,14 @@ def _round_point(pt, ndigits=6):
 def test_export_terrain_xyz_rotation(tmp_path):
     raster_path = tmp_path / "raster.tif"
     data = np.ones((2, 2), dtype=np.float32)
-    transform = Affine(1.0, 0.0, 100.0, 0.0, 1.0, 200.0)
-
-    with rasterio.open(
-        raster_path,
-        "w",
-        driver="GTiff",
-        height=2,
+    meta = RasterMeta(
+        transform=(1.0, 0.0, 100.0, 0.0, 1.0, 200.0),
         width=2,
-        count=1,
-        dtype="float32",
-        transform=transform,
-    ) as ds:
-        ds.write(data, 1)
+        height=2,
+        crs_wkt="EPSG:3857",
+        nodata=-9999.0,
+    )
+    write_raster(raster_path, data, meta)
 
     base_path = tmp_path / "base.xyz"
     export_terrain_xyz(

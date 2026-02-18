@@ -36,9 +36,7 @@ DEFAULT_DXF_CONTOUR_SPACING = 0.0
 DEFAULT_DXF_INCLUDE_PARCELS = True
 DEFAULT_DXF_INCLUDE_BUILDINGS = True
 DEFAULT_ALLOW_MULTI_TILE = False
-DEFAULT_PREFER_EPT = True
 DEFAULT_PROVIDER = "va"
-DEFAULT_EPT_ONLY = False
 DEFAULT_CLEANUP_INTERMEDIATES = False
 DEFAULT_OUTPUTS: Tuple[str, ...] = ("contours", "xyz")
 
@@ -88,7 +86,5 @@ class BuildConfig:
     dxf_include_buildings: bool = DEFAULT_DXF_INCLUDE_BUILDINGS
     contour_interval: float | None = None
     allow_multi_tile: bool = DEFAULT_ALLOW_MULTI_TILE
-    prefer_ept: bool = DEFAULT_PREFER_EPT
     provider: str = DEFAULT_PROVIDER
-    ept_only: bool = DEFAULT_EPT_ONLY
     cleanup_intermediates: bool = DEFAULT_CLEANUP_INTERMEDIATES

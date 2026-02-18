@@ -23,7 +23,7 @@ class ClipSpec:
 class LidarSource:
     """Resolved point-cloud source for a given bbox."""
 
-    source_type: Literal["laz", "ept"]
+    source_type: Literal["laz"]
     uri: str
     bbox_wgs84: BBoxWGS84
     crs_wkt: str | None = None

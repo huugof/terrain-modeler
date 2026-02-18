@@ -8,7 +8,6 @@ from .config import (
     DEFAULT_ALLOW_MULTI_TILE,
     DEFAULT_COMBINE_OUTPUT,
     DEFAULT_DXF_CONTOUR_SPACING,
-    DEFAULT_EPT_ONLY,
     DEFAULT_FILL_DTM,
     DEFAULT_FILL_HARD,
     DEFAULT_FILL_MAX_DIST,
@@ -24,7 +23,6 @@ from .config import (
     DEFAULT_OUT_DIR,
     DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
-    DEFAULT_PREFER_EPT,
     DEFAULT_PROVIDER,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RESOLUTION,
@@ -81,24 +79,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PROVIDER,
         help="Data provider to use (va=VGIN, national=USGS 3DEP).",
     )
-    build_cmd.add_argument(
-        "--ept-only",
-        action="store_true",
-        help="National mode only: require EPT coverage and skip LAZ fallback.",
-    )
-    build_cmd.add_argument(
-        "--prefer-ept",
-        dest="prefer_ept",
-        action="store_true",
-        help="Prefer USGS EPT for point clouds (falls back to VGIN/LAZ).",
-    )
-    build_cmd.add_argument(
-        "--no-prefer-ept",
-        dest="prefer_ept",
-        action="store_false",
-        help="Disable EPT preference and use VGIN/LAZ directly.",
-    )
-    build_cmd.set_defaults(prefer_ept=DEFAULT_PREFER_EPT)
     build_cmd.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
     build_cmd.add_argument("--force", action="store_true")
     build_cmd.add_argument(
@@ -265,7 +245,6 @@ def main() -> int:
             combine_output=args.combine_output,
             contour_interval=args.contours,
             allow_multi_tile=args.allow_multi_tile,
-            prefer_ept=args.prefer_ept,
             flip_y=args.flip_y,
             flip_x=args.flip_x,
             terrain_flip_y=args.terrain_flip_y,
@@ -274,7 +253,6 @@ def main() -> int:
             xyz_contour_spacing=args.xyz_contour_spacing,
             dxf_contour_spacing=args.dxf_contour_spacing,
             provider=args.provider,
-            ept_only=args.ept_only,
             outputs=outputs,
         )
         return build(cfg)

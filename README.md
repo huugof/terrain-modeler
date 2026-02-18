@@ -34,7 +34,6 @@ va-lidar-context build \
 ```bash
 va-lidar-context build \
   --provider national \
-  --ept-only \
   --center 38.03344644806424 -78.46451371473545 \
   --size 500 \
   --out ./out \
@@ -44,44 +43,25 @@ va-lidar-context build \
 Parcels are resolved from a small registry of public parcel sources in
 `src/va_lidar_context/parcels/sources.json`. If no source matches the clip area,
 parcels are skipped and the web UI shows an alert when Parcels is checked.
-Use `--ept-only` if the USGS LAZ host is unreachable (will fail if EPT is missing).
 
 Note: `--center` expects `lat, lon` (Google Maps order).
 
 ## Requirements
 - macOS
 - Python 3.11+
-- Homebrew
-- System deps: `pdal`, `gdal`, `geos`, `proj`
 - Python deps installed via `pip install -e .` (includes `mapbox-earcut`)
 
 ## Setup
 ```bash
-brew install pdal gdal geos proj
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
 
 ## Ubuntu/Droplet Setup (No Docker)
-If you are installing directly on Ubuntu (for example a DigitalOcean droplet), use `apt` instead of Homebrew.
+If you are installing directly on Ubuntu (for example a DigitalOcean droplet):
 
-### 1) Install system dependencies (including PDAL)
-```bash
-sudo apt update
-sudo apt install -y software-properties-common
-sudo add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable
-sudo apt update
-sudo apt install -y pdal gdal-bin libgdal-dev libgeos-dev proj-bin
-```
-
-Verify:
-```bash
-pdal --version
-gdalinfo --version
-```
-
-### 2) Install Python + virtual environment
+### 1) Install Python + virtual environment
 For Ubuntu 24.04 (default Python 3.12):
 ```bash
 sudo apt install -y python3-venv python3-pip
@@ -91,7 +71,7 @@ pip install -U pip
 pip install -e .
 ```
 
-If you specifically want Python 3.11:
+### 2) (Optional) Use Python 3.11 specifically
 ```bash
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update

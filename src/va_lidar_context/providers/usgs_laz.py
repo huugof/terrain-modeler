@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
+from urllib.parse import urlparse
 
+import laspy
 import requests
 from pyproj import CRS, Transformer
 
@@ -63,26 +65,55 @@ def list_laz_urls(
 
 
 def _extract_wkt(metadata: Dict[str, Any]) -> str | None:
-    if metadata.get("comp_spatialreference"):
-        return metadata.get("comp_spatialreference")
-    if metadata.get("spatialreference"):
-        return metadata.get("spatialreference")
-    srs = metadata.get("srs")
-    if isinstance(srs, dict):
-        return srs.get("wkt") or srs.get("proj4")
-    if isinstance(srs, str):
-        return srs
+    parsed = metadata.get("parsed_crs")
+    if parsed is not None:
+        try:
+            return parsed.to_wkt()
+        except Exception:
+            pass
+    vlr_text = metadata.get("vlr_wkt")
+    if isinstance(vlr_text, str) and vlr_text.strip():
+        return vlr_text.strip()
     return None
 
 
-def _pdal_info(url: str) -> Dict[str, Any]:
-    proc = subprocess.run(
-        ["pdal", "info", "--metadata", url],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(proc.stdout)
+def _header_metadata(url: str) -> Dict[str, Any]:
+    suffix = Path(urlparse(url).path).suffix or ".laz"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        with requests.get(url, stream=True, timeout=180) as resp:
+            resp.raise_for_status()
+            with tmp_path.open("wb") as out:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        out.write(chunk)
+        with laspy.open(tmp_path) as reader:
+            header = reader.header
+            metadata: Dict[str, Any] = {
+                "minx": float(header.mins[0]),
+                "miny": float(header.mins[1]),
+                "maxx": float(header.maxs[0]),
+                "maxy": float(header.maxs[1]),
+                "parsed_crs": header.parse_crs(),
+            }
+            for vlr in header.vlrs:
+                if getattr(vlr, "string", None):
+                    text = str(vlr.string).strip()
+                    if text:
+                        metadata["vlr_wkt"] = text
+                        break
+                raw = getattr(vlr, "record_data", None)
+                if isinstance(raw, bytes):
+                    text = raw.decode("utf-8", errors="ignore").strip()
+                    if text and (
+                        "GEOGCS" in text or "PROJCRS" in text or "COMPD_CS" in text
+                    ):
+                        metadata["vlr_wkt"] = text
+                        break
+            return metadata
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _bbox_to_wgs84(
@@ -152,8 +183,7 @@ def build_laz_index(
     for idx, url in enumerate(laz_urls, start=1):
         if logger:
             logger.info(f"Indexing LAZ metadata {idx}/{len(laz_urls)}")
-        data = _pdal_info(url)
-        md = data.get("metadata", {})
+        md = _header_metadata(url)
         crs_wkt = _extract_wkt(md)
         if not crs_wkt:
             continue

@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Tuple
 
 import matplotlib
 import numpy as np
+import tifffile
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -14,6 +15,7 @@ from shapely.affinity import scale as scale_geom
 from shapely.validation import make_valid
 
 from .heights import FootprintHeight
+from .raster import RasterMeta, load_raster_meta
 
 
 def extrude_footprints(
@@ -135,29 +137,29 @@ def apply_scene_transform(
 
 def terrain_mesh_from_raster(
     raster_path: str,
+    raster_meta: RasterMeta | None = None,
     xy_scale: float = 1.0,
     z_scale: float = 1.0,
     sample: int = 1,
 ) -> Optional[trimesh.Trimesh]:
     """Generate a terrain mesh from a raster heightmap."""
-    try:
-        import numpy as np
-        import rasterio
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("numpy and rasterio are required for terrain mesh") from exc
-
     if sample < 1:
         raise ValueError("sample must be >= 1")
 
-    with rasterio.open(raster_path) as ds:
-        data = ds.read(1)
-        nodata = ds.nodata if ds.nodata is not None else -9999
-        transform = ds.transform
+    meta = raster_meta or load_raster_meta(Path(raster_path))
+    data = tifffile.imread(raster_path)
+    if data.ndim == 3:
+        data = data[0]
+    data = np.asarray(data, dtype=np.float32)
+    nodata = float(meta.nodata)
+    ta, tb, tc, td, te, tf = meta.transform
 
     if sample > 1:
         data = data[::sample, ::sample]
-
-        transform = transform * rasterio.Affine.scale(sample, sample)
+        ta *= sample
+        tb *= sample
+        td *= sample
+        te *= sample
 
     rows, cols = data.shape
     if rows < 2 or cols < 2:
@@ -172,8 +174,8 @@ def terrain_mesh_from_raster(
         for c in range(cols):
             if not mask_valid[r, c]:
                 continue
-            x = transform.a * (c + 0.5) + transform.b * (r + 0.5) + transform.c
-            y = transform.d * (c + 0.5) + transform.e * (r + 0.5) + transform.f
+            x = ta * (c + 0.5) + tb * (r + 0.5) + tc
+            y = td * (c + 0.5) + te * (r + 0.5) + tf
             z = float(data[r, c])
             vertices.append([x * xy_scale, y * xy_scale, z * z_scale])
             idx_grid[r, c] = len(vertices) - 1
@@ -199,6 +201,7 @@ def terrain_mesh_from_raster(
 def export_terrain_xyz(
     raster_path: str,
     output_path: str,
+    raster_meta: RasterMeta | None = None,
     xy_scale: float = 1.0,
     z_scale: float = 1.0,
     sample: int = 1,
@@ -214,19 +217,23 @@ def export_terrain_xyz(
     after centering.
     Returns the number of points written.
     """
-    import rasterio
-
     if sample < 1:
         raise ValueError("sample must be >= 1")
 
-    with rasterio.open(raster_path) as ds:
-        data = ds.read(1)
-        nodata = ds.nodata if ds.nodata is not None else -9999
-        transform = ds.transform
+    meta = raster_meta or load_raster_meta(Path(raster_path))
+    data = tifffile.imread(raster_path)
+    if data.ndim == 3:
+        data = data[0]
+    data = np.asarray(data, dtype=np.float32)
+    nodata = float(meta.nodata)
+    ta, tb, tc, td, te, tf = meta.transform
 
     if sample > 1:
         data = data[::sample, ::sample]
-        transform = transform * rasterio.Affine.scale(sample, sample)
+        ta *= sample
+        tb *= sample
+        td *= sample
+        te *= sample
 
     rows, cols = data.shape
     mask_valid = (data != nodata) & np.isfinite(data)
@@ -243,8 +250,8 @@ def export_terrain_xyz(
             for col in range(cols):
                 if not mask_valid[r, col]:
                     continue
-                x = transform.a * (col + 0.5) + transform.b * (r + 0.5) + transform.c
-                y = transform.d * (col + 0.5) + transform.e * (r + 0.5) + transform.f
+                x = ta * (col + 0.5) + tb * (r + 0.5) + tc
+                y = td * (col + 0.5) + te * (r + 0.5) + tf
                 z = float(data[r, col])
                 px = x * xy_scale - ox
                 py = y * xy_scale - oy
@@ -344,6 +351,7 @@ def export_scene_with_terrain_texture(
 def generate_contours_from_raster(
     raster_path: str,
     interval: float,
+    raster_meta: RasterMeta | None = None,
     xy_scale: float = 1.0,
     z_scale: float = 1.0,
     sample: int = 1,
@@ -361,16 +369,20 @@ def generate_contours_from_raster(
     Returns a list of (elevation, [polylines]) tuples where each polyline
     is an Nx2 or Nx3 numpy array of coordinates.
     """
-    import rasterio
-
-    with rasterio.open(raster_path) as ds:
-        data = ds.read(1)
-        nodata = ds.nodata if ds.nodata is not None else -9999
-        transform = ds.transform
+    meta = raster_meta or load_raster_meta(Path(raster_path))
+    data = tifffile.imread(raster_path)
+    if data.ndim == 3:
+        data = data[0]
+    data = np.asarray(data, dtype=np.float32)
+    nodata = float(meta.nodata)
+    ta, tb, tc, td, te, tf = meta.transform
 
     if sample > 1:
         data = data[::sample, ::sample]
-        transform = transform * rasterio.Affine.scale(sample, sample)
+        ta *= sample
+        tb *= sample
+        td *= sample
+        te *= sample
 
     # Mask nodata
     data = np.where((data == nodata) | ~np.isfinite(data), np.nan, data)
@@ -385,12 +397,8 @@ def generate_contours_from_raster(
     col_grid, row_grid = np.meshgrid(col_indices, row_indices)
 
     # Transform to world coordinates
-    x_grid = (
-        transform.a * (col_grid + 0.5) + transform.b * (row_grid + 0.5) + transform.c
-    )
-    y_grid = (
-        transform.d * (col_grid + 0.5) + transform.e * (row_grid + 0.5) + transform.f
-    )
+    x_grid = ta * (col_grid + 0.5) + tb * (row_grid + 0.5) + tc
+    y_grid = td * (col_grid + 0.5) + te * (row_grid + 0.5) + tf
 
     # Determine contour levels
     valid_data = data[np.isfinite(data)]

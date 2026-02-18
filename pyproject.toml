@@ -11,14 +11,16 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Hugo Fenaux" }]
 
-# Core runtime deps. System deps: PDAL/GDAL/GEOS must be installed separately.
+# Core runtime deps.
 dependencies = [
   "requests>=2.31",
   "PyJWT[crypto]>=2.8",
   "numpy>=1.26",
   "shapely>=2.0",
   "pyproj>=3.6",
-  "rasterio>=1.3",
+  "laspy[lazrs]>=2.5",
+  "tifffile>=2024.1",
+  "Pillow>=10.0",
   "trimesh>=4.0",
   "mapbox-earcut>=1.0.1",
   "matplotlib>=3.8",

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from typing import Dict, Tuple
 
 import numpy as np
-import rasterio
 import requests
-from rasterio.io import MemoryFile
+from PIL import Image
 
 NAIP_EXPORT_URL = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage"
 
@@ -93,23 +93,18 @@ def _validate_png(path: Path) -> None:
         if len(tail) != 12 or tail[4:8] != b"IEND":
             raise RuntimeError("PNG download failed: missing IEND chunk")
     try:
-        with rasterio.open(path) as ds:
-            _ = ds.width
-            _ = ds.height
+        with Image.open(path) as img:
+            img.verify()
     except Exception as exc:
         raise RuntimeError(f"PNG download failed: unreadable ({exc})") from exc
 
 
-def _ensure_band_count(tile: np.ndarray, bands: int) -> np.ndarray:
-    if tile.shape[0] == bands:
+def _normalize_mode(tile: Image.Image, mode: str) -> Image.Image:
+    if tile.mode == mode:
         return tile
-    if tile.shape[0] > bands:
-        return tile[:bands, :, :]
-    # tile has fewer bands than mosaic, add opaque alpha if needed
-    if bands == 4 and tile.shape[0] == 3:
-        alpha = np.full((1, tile.shape[1], tile.shape[2]), 255, dtype=tile.dtype)
-        return np.vstack([tile, alpha])
-    return tile
+    if mode == "RGBA" and tile.mode == "RGB":
+        return tile.convert("RGBA")
+    return tile.convert(mode)
 
 
 def download_naip_image(
@@ -182,9 +177,8 @@ def download_naip_image_tiled(
         tile_width_px = int(np.ceil(total_width_px / tiles_x))
         tile_height_px = int(np.ceil(total_height_px / tiles_y))
 
-        mosaic = None
-        bands = None
-        dtype = None
+        mosaic: Image.Image | None = None
+        mosaic_mode = "RGB"
 
         try:
             for ty in range(tiles_y):
@@ -211,10 +205,9 @@ def download_naip_image_tiled(
                     for _ in range(3):
                         try:
                             data = _fetch_naip_png(params)
-                            with MemoryFile(data) as mem:
-                                with mem.open() as ds:
-                                    tile = ds.read()
-                                    tile = tile.astype(np.uint8, copy=False)
+                            with Image.open(io.BytesIO(data)) as img:
+                                img.load()
+                                tile = img.copy()
                             last_err = None
                             break
                         except Exception as exc:
@@ -224,13 +217,14 @@ def download_naip_image_tiled(
                             f"NAIP tile decode failed at {tx + 1}/{tiles_x}, {ty + 1}/{tiles_y}: {last_err}"
                         )
                     if mosaic is None:
-                        bands = tile.shape[0]
-                        dtype = tile.dtype
-                        mosaic = np.zeros(
-                            (bands, total_height_px, total_width_px), dtype=dtype
+                        mosaic_mode = "RGBA" if "A" in tile.mode else "RGB"
+                        mosaic = Image.new(
+                            mosaic_mode, (total_width_px, total_height_px)
                         )
-                    tile = _ensure_band_count(tile, bands)
-                    mosaic[:, y0_px:y1_px, x0_px:x1_px] = tile[:, :tile_h, :tile_w]
+                    tile = _normalize_mode(tile, mosaic_mode)
+                    if tile.size != (tile_w, tile_h):
+                        tile = tile.crop((0, 0, tile_w, tile_h))
+                    mosaic.paste(tile, (x0_px, y0_px))
         except Exception:
             attempts += 1
             if attempts >= 3:
@@ -245,16 +239,9 @@ def download_naip_image_tiled(
             continue
 
         out_png.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(
-            out_png,
-            "w",
-            driver="PNG",
-            width=total_width_px,
-            height=total_height_px,
-            count=bands or 3,
-            dtype=dtype or "uint8",
-        ) as dst:
-            dst.write(mosaic)
+        if mosaic is None:
+            raise RuntimeError("NAIP tiled download produced no image tiles")
+        mosaic.save(out_png, format="PNG")
 
         _validate_png(out_png)
 

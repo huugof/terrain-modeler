@@ -10,14 +10,14 @@ import secrets
 import shutil
 import threading
 import time
-from functools import wraps
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-import requests
 import jwt
+import requests
 from flask import (
     Flask,
     g,
@@ -72,9 +72,9 @@ app = Flask(__name__)
 app.secret_key = os.getenv("VA_SESSION_SECRET", secrets.token_hex(32))
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = (
-    os.getenv("VA_SESSION_COOKIE_SECURE", "1").lower() not in ("0", "false", "no")
-)
+app.config["SESSION_COOKIE_SECURE"] = os.getenv(
+    "VA_SESSION_COOKIE_SECURE", "1"
+).lower() not in ("0", "false", "no")
 
 
 OUT_DIR = Path(os.getenv("VA_OUT_DIR", str(DEFAULT_OUT_DIR)))
@@ -100,7 +100,9 @@ REQUIRE_LOCAL_ALLOWLIST = os.getenv("VA_REQUIRE_LOCAL_ALLOWLIST", "0").lower() i
     "yes",
 )
 CLERK_AUTHORIZED_PARTIES = [
-    p.strip() for p in os.getenv("VA_CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
+    p.strip()
+    for p in os.getenv("VA_CLERK_AUTHORIZED_PARTIES", "").split(",")
+    if p.strip()
 ]
 SESSION_TTL_SECONDS = int(os.getenv("VA_SESSION_TTL_SECONDS", str(7 * 86400)))
 SESSION_COOKIE_SECURE = os.getenv("VA_SESSION_COOKIE_SECURE", "1").lower() not in (
@@ -434,21 +436,11 @@ STATUS_TEMPLATE = """
       <div class="meta"><a href="{{ url_for('index') }}">Back to form</a></div>
     </header>
     <main>
-      {% if job.error or job.summary.get('coverage') or job.summary.get('warnings') %}
+      {% if job.error or job.summary.get('warnings') %}
       <div class="card">
         <h3>Job Notes</h3>
         {% if job.error %}
           <p><strong>This job did not complete.</strong> {{ job.error }}</p>
-        {% endif %}
-        {% if job.summary.get('coverage') %}
-          {% set coverage = job.summary.get('coverage') %}
-          {% if coverage.get('status') %}
-            <p><strong>EPT coverage:</strong> {{ coverage.get('status') }}
-              {% if coverage.get('ratio') is not none %}
-                (~{{ '%.1f'|format(coverage.get('ratio') * 100) }}%)
-              {% endif %}
-            </p>
-          {% endif %}
         {% endif %}
         {% if job.summary.get('warnings') %}
           <p><strong>Warnings:</strong></p>
@@ -620,7 +612,11 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
         raw_dir = outputs.get("dir")
         if isinstance(raw_dir, str) and raw_dir.strip():
             candidate = Path(raw_dir).expanduser()
-            if candidate.exists() and candidate.is_dir() and _is_path_within(OUT_DIR, candidate):
+            if (
+                candidate.exists()
+                and candidate.is_dir()
+                and _is_path_within(OUT_DIR, candidate)
+            ):
                 return candidate
 
     report_path = job.summary.get("report_path")
@@ -632,7 +628,11 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
                 return candidate
 
     default_dir = OUT_DIR / job.job_id
-    if default_dir.exists() and default_dir.is_dir() and _is_path_within(OUT_DIR, default_dir):
+    if (
+        default_dir.exists()
+        and default_dir.is_dir()
+        and _is_path_within(OUT_DIR, default_dir)
+    ):
         return default_dir
     return None
 
@@ -658,7 +658,9 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
         if not path.is_file():
             continue
         stat = path.stat()
-        artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+        artifacts.append(
+            {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+        )
         seen.add(name)
 
     if not artifacts:
@@ -669,7 +671,9 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
             if name in seen:
                 continue
             stat = path.stat()
-            artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+            artifacts.append(
+                {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+            )
             seen.add(name)
 
     return artifacts
@@ -1053,7 +1057,9 @@ def recent_jobs():
         item["downloads"] = [
             {
                 "name": artifact["name"],
-                "url": url_for("job_download", job_id=job.job_id, name=artifact["name"]),
+                "url": url_for(
+                    "job_download", job_id=job.job_id, name=artifact["name"]
+                ),
             }
             for artifact in artifacts
         ]
@@ -1148,7 +1154,6 @@ def run_job():
     lat = parse_float(parts[0]) if len(parts) > 0 else None
     lon = parse_float(parts[1]) if len(parts) > 1 else None
     provider = resolve_provider(lat, lon)
-    ept_only = False
     clip_size = parse_float(form.get("size"))
     if lat is None or lon is None:
         return jsonify({"error": "Provide coordinates as lat, lon."}), 400
@@ -1289,7 +1294,6 @@ def run_job():
         contour_interval=contour_interval,
         size=clip_size,
         allow_multi_tile=allow_multi_tile,
-        prefer_ept=True,
         flip_y=flip_y,
         flip_x=flip_x,
         terrain_flip_y=terrain_flip_y,
@@ -1301,7 +1305,6 @@ def run_job():
         dxf_include_parcels=dxf_include_parcels,
         dxf_include_buildings=dxf_include_buildings,
         provider=provider,
-        ept_only=ept_only,
         cleanup_intermediates=True,
         outputs=tuple(outputs),
     )
@@ -1448,7 +1451,9 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     if AUTH_ENABLED:
         auth_store.set_job_status(DB_PATH, job.job_id, "running")
         if job.user_id is not None:
-            auth_store.set_active_job(DB_PATH, job.job_id, job.user_id, status="running")
+            auth_store.set_active_job(
+                DB_PATH, job.job_id, job.user_id, status="running"
+            )
     logger = get_logger()
     handler = JobLogHandler(job)
     logger.addHandler(handler)
@@ -1479,7 +1484,6 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                 if report.get("output_dir"):
                     job.summary["out"] = report.get("output_dir")
                 job.summary["job_id"] = report.get("job_id")
-                job.summary["coverage"] = report.get("coverage")
                 job.summary["warnings"] = report.get("warnings")
                 job.summary["source_type"] = report.get("source_type")
                 job.summary["outputs"] = _collect_outputs(report_path.parent)
