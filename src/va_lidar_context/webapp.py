@@ -389,10 +389,10 @@ STATUS_TEMPLATE = """
         color: #B39CD0;
         text-decoration: none;
       }
-          .hidden {
+      .hidden {
         display: none;
       }
-          input[type="range"] {
+      input[type="range"] {
         -webkit-appearance: none;
         width: 100%;
         height: 6px;
@@ -418,8 +418,52 @@ STATUS_TEMPLATE = """
       select {
         appearance: none;
       }
-      .hidden {
-        display: none;
+      #preview-container {
+        width: 100%;
+        height: 500px;
+        background: #1a1a1a;
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+      }
+      #preview-message {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #d9d9d9;
+        font-size: 14px;
+        pointer-events: none;
+      }
+      #preview-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      #preview-controls button,
+      #preview-controls select {
+        font: inherit;
+        border-radius: 6px;
+        border: 1px solid #d6d6d6;
+        background: #ffffff;
+        color: #1f1f1f;
+        padding: 8px 10px;
+      }
+      #preview-controls button {
+        cursor: pointer;
+      }
+      #preview-controls button:hover {
+        border-color: #b39cd0;
+      }
+      #preview-file {
+        min-width: 160px;
+      }
+      @media (max-width: 700px) {
+        #preview-container {
+          height: 340px;
+        }
       }
     </style>
   </head>
@@ -452,11 +496,26 @@ STATUS_TEMPLATE = """
         {% endif %}
       </div>
       {% endif %}
+      <div class="card" id="preview-card" style="display:none;">
+        <h3>3D Preview</h3>
+        <div id="preview-container">
+          <div id="preview-message">Waiting for model files...</div>
+        </div>
+        <div id="preview-controls">
+          <button type="button" onclick="toggleWireframe()">Wireframe</button>
+          <button type="button" onclick="resetCamera()">Reset View</button>
+          <select id="preview-file"></select>
+        </div>
+      </div>
       <div class="card">
         <h3>Activity Log</h3>
         <pre id="logs"></pre>
       </div>
     </main>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/MTLLoader.js"></script>
     <script>
       const STATUS_LABELS = {
         queued: 'Queued',
@@ -464,6 +523,272 @@ STATUS_TEMPLATE = """
         done: 'Completed',
         error: 'Failed',
       };
+      const PREVIEW_MODEL_CONFIG = [
+        { key: 'combined', label: 'Combined', obj: 'combined.obj', mtl: 'combined.mtl' },
+        { key: 'terrain', label: 'Terrain', obj: 'terrain.obj', mtl: 'terrain.mtl' },
+        { key: 'buildings', label: 'Buildings', obj: 'buildings.obj', mtl: null },
+      ];
+      const previewState = {
+        jobId: '{{ job.job_id }}',
+        initialized: false,
+        activationStarted: false,
+        cardVisible: false,
+        wireframe: false,
+        filesByName: new Map(),
+        models: [],
+        currentModelKey: null,
+        scene: null,
+        camera: null,
+        renderer: null,
+        controls: null,
+        currentObject: null,
+      };
+
+      function setPreviewMessage(message) {
+        const msgEl = document.getElementById('preview-message');
+        if (msgEl) {
+          msgEl.textContent = message;
+          msgEl.style.display = message ? 'block' : 'none';
+        }
+      }
+
+      function showPreviewCard() {
+        const card = document.getElementById('preview-card');
+        if (card) {
+          card.style.display = 'block';
+          previewState.cardVisible = true;
+        }
+      }
+
+      function hidePreviewCard() {
+        const card = document.getElementById('preview-card');
+        if (card) {
+          card.style.display = 'none';
+          previewState.cardVisible = false;
+        }
+      }
+
+      function buildDownloadUrl(name) {
+        return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}`;
+      }
+
+      function pickAvailableModels(filesByName) {
+        const models = [];
+        for (const config of PREVIEW_MODEL_CONFIG) {
+          if (!filesByName.has(config.obj)) continue;
+          models.push({
+            key: config.key,
+            label: config.label,
+            obj: config.obj,
+            mtl: config.mtl && filesByName.has(config.mtl) ? config.mtl : null,
+          });
+        }
+        return models;
+      }
+
+      function ensureThreeContext() {
+        if (previewState.initialized) return true;
+        if (!window.THREE || !THREE.OBJLoader || !THREE.OrbitControls || !THREE.MTLLoader) {
+          setPreviewMessage('3D renderer failed to load.');
+          return false;
+        }
+        const container = document.getElementById('preview-container');
+        if (!container) return false;
+
+        container.innerHTML = '<div id="preview-message"></div>';
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.shadowMap.enabled = false;
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.07;
+        controls.screenSpacePanning = true;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const directional = new THREE.DirectionalLight(0xffffff, 1.0);
+        directional.position.set(200, -150, 300);
+        scene.add(directional);
+
+        previewState.scene = scene;
+        previewState.camera = camera;
+        previewState.renderer = renderer;
+        previewState.controls = controls;
+        previewState.initialized = true;
+
+        const resize = () => {
+          if (!previewState.renderer || !previewState.camera) return;
+          const width = Math.max(container.clientWidth, 1);
+          const height = Math.max(container.clientHeight, 1);
+          previewState.camera.aspect = width / height;
+          previewState.camera.updateProjectionMatrix();
+          previewState.renderer.setSize(width, height, false);
+        };
+        window.addEventListener('resize', resize);
+        resize();
+
+        const animate = () => {
+          if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
+          requestAnimationFrame(animate);
+          if (previewState.controls) previewState.controls.update();
+          previewState.renderer.render(previewState.scene, previewState.camera);
+        };
+        animate();
+        return true;
+      }
+
+      function applyWireframeMode(enabled) {
+        if (!previewState.currentObject) return;
+        previewState.currentObject.traverse((node) => {
+          if (!node.isMesh || !node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            material.wireframe = enabled;
+            material.needsUpdate = true;
+          }
+        });
+      }
+
+      function clearCurrentObject() {
+        if (!previewState.scene || !previewState.currentObject) return;
+        previewState.scene.remove(previewState.currentObject);
+        previewState.currentObject = null;
+      }
+
+      function centerAndPrepareObject(obj) {
+        obj.traverse((node) => {
+          if (!node.isMesh) return;
+          if (node.geometry) {
+            node.geometry.computeVertexNormals();
+          }
+          if (!node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            material.side = THREE.DoubleSide;
+          }
+        });
+        const box = new THREE.Box3().setFromObject(obj);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          obj.position.sub(center);
+        }
+      }
+
+      function loadObjModel(model) {
+        const manager = new THREE.LoadingManager();
+        manager.setURLModifier((url) => {
+          if (!url) return url;
+          if (url.startsWith('data:') || /^https?:\\/\\//i.test(url)) return url;
+          const clean = url.split('#')[0].split('?')[0];
+          const name = clean.slice(clean.lastIndexOf('/') + 1);
+          if (previewState.filesByName.has(name)) {
+            return buildDownloadUrl(name);
+          }
+          return url;
+        });
+
+        return new Promise((resolve, reject) => {
+          const objLoader = new THREE.OBJLoader(manager);
+          const objUrl = buildDownloadUrl(model.obj);
+
+          const onObjReady = () => {
+            objLoader.load(
+              objUrl,
+              (obj) => resolve(obj),
+              undefined,
+              (err) => reject(err)
+            );
+          };
+
+          if (!model.mtl) {
+            onObjReady();
+            return;
+          }
+
+          const mtlLoader = new THREE.MTLLoader(manager);
+          mtlLoader.setResourcePath(`/jobs/${previewState.jobId}/download/`);
+          mtlLoader.load(
+            buildDownloadUrl(model.mtl),
+            (materials) => {
+              materials.preload();
+              objLoader.setMaterials(materials);
+              onObjReady();
+            },
+            undefined,
+            () => onObjReady()
+          );
+        });
+      }
+
+      async function renderModel(modelKey) {
+        const model = previewState.models.find((m) => m.key === modelKey);
+        if (!model || !previewState.scene) return;
+        setPreviewMessage('Loading model...');
+        clearCurrentObject();
+        try {
+          const obj = await loadObjModel(model);
+          centerAndPrepareObject(obj);
+          previewState.scene.add(obj);
+          previewState.currentObject = obj;
+          previewState.currentModelKey = model.key;
+          applyWireframeMode(previewState.wireframe);
+          resetCamera();
+          setPreviewMessage('');
+        } catch (error) {
+          setPreviewMessage('Failed to load preview model.');
+        }
+      }
+
+      async function activatePreview() {
+        if (previewState.activationStarted) return;
+        previewState.activationStarted = true;
+
+        let artifactPayload;
+        try {
+          const resp = await fetch(`/jobs/${previewState.jobId}/artifacts`, { cache: 'no-store' });
+          if (!resp.ok) {
+            hidePreviewCard();
+            return;
+          }
+          artifactPayload = await resp.json();
+        } catch (error) {
+          hidePreviewCard();
+          return;
+        }
+
+        const files = Array.isArray(artifactPayload.files) ? artifactPayload.files : [];
+        previewState.filesByName = new Map(files.map((f) => [f.name, f]));
+        previewState.models = pickAvailableModels(previewState.filesByName);
+        if (!previewState.models.length) {
+          hidePreviewCard();
+          return;
+        }
+
+        showPreviewCard();
+        if (!ensureThreeContext()) return;
+
+        const select = document.getElementById('preview-file');
+        if (!select) return;
+        select.innerHTML = '';
+        for (const model of previewState.models) {
+          const option = document.createElement('option');
+          option.value = model.key;
+          option.textContent = model.label;
+          select.appendChild(option);
+        }
+        select.addEventListener('change', (event) => {
+          const value = event.target.value;
+          if (value) renderModel(value);
+        });
+        renderModel(previewState.models[0].key);
+      }
 
       async function pollLogs(jobId) {
         const logsEl = document.getElementById('logs');
@@ -481,6 +806,9 @@ STATUS_TEMPLATE = """
             offset = logData.offset;
           }
           statusEl.textContent = STATUS_LABELS[logData.status] || logData.status;
+          if (logData.status === 'done') {
+            activatePreview();
+          }
           if (logData.status === 'running' || logData.status === 'queued') {
             setTimeout(poll, 1500);
           }
@@ -488,7 +816,38 @@ STATUS_TEMPLATE = """
         poll();
       }
 
+      function toggleWireframe() {
+        previewState.wireframe = !previewState.wireframe;
+        applyWireframeMode(previewState.wireframe);
+      }
+
+      function resetCamera() {
+        if (!previewState.camera || !previewState.controls) return;
+        let radius = 100.0;
+        if (previewState.currentObject) {
+          const box = new THREE.Box3().setFromObject(previewState.currentObject);
+          if (!box.isEmpty()) {
+            const sphere = box.getBoundingSphere(new THREE.Sphere());
+            radius = Math.max(sphere.radius, 1.0);
+          }
+        }
+        previewState.camera.near = Math.max(radius / 1000.0, 0.01);
+        previewState.camera.far = Math.max(radius * 200.0, 1000.0);
+        previewState.camera.position.set(radius * 1.5, -radius * 1.5, radius * 1.1);
+        previewState.controls.target.set(0, 0, 0);
+        previewState.camera.updateProjectionMatrix();
+        previewState.controls.update();
+      }
+
+      window.toggleWireframe = toggleWireframe;
+      window.resetCamera = resetCamera;
+
       document.addEventListener('DOMContentLoaded', () => {
+        if ('{{ job.status }}' === 'done') {
+          activatePreview();
+        } else {
+          hidePreviewCard();
+        }
         pollLogs('{{ job.job_id }}');
       });
     </script>
