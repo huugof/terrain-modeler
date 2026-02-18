@@ -775,6 +775,14 @@ STATUS_TEMPLATE = """
                 const mtlPath = `/jobs/${previewState.jobId}/download/`;
                 const materials = mtlLoader.parse(mtlText, mtlPath);
                 materials.preload();
+                // OBJ UVs are exported in model space; keep texture orientation aligned.
+                for (const key of Object.keys(materials.materials)) {
+                  const material = materials.materials[key];
+                  if (material && material.map) {
+                    material.map.flipY = false;
+                    material.map.needsUpdate = true;
+                  }
+                }
                 objLoader.setMaterials(materials);
               }
             } catch (error) {
