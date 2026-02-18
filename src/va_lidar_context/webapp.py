@@ -559,11 +559,6 @@ STATUS_TEMPLATE = """
         done: 'Completed',
         error: 'Failed',
       };
-      const PREVIEW_MODEL_CONFIG = [
-        { key: 'combined', label: 'Combined', obj: 'combined.obj', mtl: 'combined.mtl' },
-        { key: 'terrain', label: 'Terrain', obj: 'terrain.obj', mtl: 'terrain.mtl' },
-        { key: 'buildings', label: 'Buildings', obj: 'buildings.obj', mtl: null },
-      ];
       const previewState = {
         jobId: '{{ job.job_id }}',
         initialized: false,
@@ -619,13 +614,41 @@ STATUS_TEMPLATE = """
 
       function pickAvailableModels(filesByName) {
         const models = [];
-        for (const config of PREVIEW_MODEL_CONFIG) {
-          if (!filesByName.has(config.obj)) continue;
+        const hasTerrain = filesByName.has('terrain.obj');
+        const hasBuildings = filesByName.has('buildings.obj');
+        const hasCombined = filesByName.has('combined.obj');
+        const terrainMtl = filesByName.has('terrain.mtl') ? 'terrain.mtl' : null;
+        const combinedMtl = filesByName.has('combined.mtl') ? 'combined.mtl' : null;
+
+        if (hasTerrain && hasBuildings) {
           models.push({
-            key: config.key,
-            label: config.label,
-            obj: config.obj,
-            mtl: config.mtl && filesByName.has(config.mtl) ? config.mtl : null,
+            key: 'scene',
+            label: 'Terrain + Buildings',
+            parts: [
+              { obj: 'terrain.obj', mtl: terrainMtl },
+              { obj: 'buildings.obj', mtl: null },
+            ],
+          });
+        }
+        if (hasCombined) {
+          models.push({
+            key: 'combined',
+            label: 'Combined',
+            parts: [{ obj: 'combined.obj', mtl: combinedMtl }],
+          });
+        }
+        if (hasTerrain) {
+          models.push({
+            key: 'terrain',
+            label: 'Terrain',
+            parts: [{ obj: 'terrain.obj', mtl: terrainMtl }],
+          });
+        }
+        if (hasBuildings) {
+          models.push({
+            key: 'buildings',
+            label: 'Buildings',
+            parts: [{ obj: 'buildings.obj', mtl: null }],
           });
         }
         return models;
@@ -645,6 +668,7 @@ STATUS_TEMPLATE = """
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
         const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000000);
+        camera.up.set(0, 0, 1);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -727,7 +751,7 @@ STATUS_TEMPLATE = """
         }
       }
 
-      function loadObjModel(model) {
+      function loadObjPart(part) {
         const manager = new THREE.LoadingManager();
         manager.setURLModifier((url) => {
           if (!url) return url;
@@ -742,9 +766,9 @@ STATUS_TEMPLATE = """
 
         return (async () => {
           const objLoader = new window.OBJLoader(manager);
-          if (model.mtl) {
+          if (part.mtl) {
             try {
-              const mtlResp = await fetch(buildDownloadUrl(model.mtl), { cache: 'no-store' });
+              const mtlResp = await fetch(buildDownloadUrl(part.mtl), { cache: 'no-store' });
               if (mtlResp.ok) {
                 const mtlText = await mtlResp.text();
                 const mtlLoader = new window.MTLLoader(manager);
@@ -758,10 +782,10 @@ STATUS_TEMPLATE = """
             }
           }
 
-          const objUrl = buildDownloadUrl(model.obj);
+          const objUrl = buildDownloadUrl(part.obj);
           const objResp = await fetch(objUrl, { cache: 'no-store' });
           if (!objResp.ok) {
-            throw new Error(`OBJ fetch failed (${objResp.status}) for ${model.obj}`);
+            throw new Error(`OBJ fetch failed (${objResp.status}) for ${part.obj}`);
           }
           const objText = await objResp.text();
           return objLoader.parse(objText);
@@ -774,10 +798,21 @@ STATUS_TEMPLATE = """
         setPreviewMessage('Loading model...');
         clearCurrentObject();
         try {
-          const obj = await loadObjModel(model);
-          centerAndPrepareObject(obj);
-          previewState.scene.add(obj);
-          previewState.currentObject = obj;
+          const group = new THREE.Group();
+          for (const part of model.parts) {
+            try {
+              const partObj = await loadObjPart(part);
+              group.add(partObj);
+            } catch (error) {
+              console.warn('Preview part failed', part.obj, error);
+            }
+          }
+          if (!group.children.length) {
+            throw new Error('No preview geometry could be loaded.');
+          }
+          centerAndPrepareObject(group);
+          previewState.scene.add(group);
+          previewState.currentObject = group;
           previewState.currentModelKey = model.key;
           applyWireframeMode(previewState.wireframe);
           resetCamera();
@@ -879,7 +914,7 @@ STATUS_TEMPLATE = """
         }
         previewState.camera.near = Math.max(radius / 1000.0, 0.01);
         previewState.camera.far = Math.max(radius * 200.0, 1000.0);
-        previewState.camera.position.set(radius * 1.5, -radius * 1.5, radius * 1.1);
+        previewState.camera.position.set(radius * 1.35, radius * 1.35, radius * 0.95);
         previewState.controls.target.set(0, 0, 0);
         previewState.camera.updateProjectionMatrix();
         previewState.controls.update();
@@ -993,8 +1028,10 @@ def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
         return {"dir": str(tile_dir), "files": []}
     candidates = [
         "terrain.obj",
+        "terrain.mtl",
         "buildings.obj",
         "combined.obj",
+        "combined.mtl",
         "terrain.png",
         "contours.dxf",
         "terrain.xyz",
@@ -1058,6 +1095,19 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
 
     for name in summary_files:
         if not name or "/" in name or "\\" in name or name in seen:
+            continue
+        path = output_dir / name
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        artifacts.append(
+            {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+        )
+        seen.add(name)
+
+    # Ensure preview support files are available even for older summaries.
+    for name in ("terrain.mtl", "combined.mtl"):
+        if name in seen:
             continue
         path = output_dir / name
         if not path.is_file():
