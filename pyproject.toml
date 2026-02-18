@@ -32,6 +32,11 @@ dependencies = [
 va-lidar-context = "va_lidar_context.cli:main"
 va-lidar-context-web = "va_lidar_context.webapp:main"
 
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.10",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -10,3 +10,7 @@ out/
 *.png
 src/*.egg-info/
 .env.local
+build/
+dist/
+desktop/node_modules/
+desktop/src-tauri/target/

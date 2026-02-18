@@ -1,0 +1,21 @@
+[package]
+name = "terrain-modeler"
+version = "0.1.0"
+description = "Terrain Modeler desktop shell"
+authors = ["Hugo Fenaux"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

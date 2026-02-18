@@ -34,6 +34,11 @@ from flask import (
 from . import auth_store
 from .config import (
     DEFAULT_COMBINE_OUTPUT,
+    DEFAULT_DESKTOP_HOST,
+    DEFAULT_DESKTOP_MODE,
+    DEFAULT_DESKTOP_OUT_DIR,
+    DEFAULT_DESKTOP_PORT,
+    DEFAULT_DESKTOP_RETENTION_DAYS,
     DEFAULT_DXF_CONTOUR_SPACING,
     DEFAULT_DXF_INCLUDE_BUILDINGS,
     DEFAULT_DXF_INCLUDE_PARCELS,
@@ -77,15 +82,32 @@ app.config["SESSION_COOKIE_SECURE"] = os.getenv(
 ).lower() not in ("0", "false", "no")
 
 
-OUT_DIR = Path(os.getenv("VA_OUT_DIR", str(DEFAULT_OUT_DIR)))
-RETENTION_DAYS = int(os.getenv("VA_RETENTION_DAYS", "7"))
+DESKTOP_MODE = os.getenv(
+    "VA_DESKTOP_MODE", "1" if DEFAULT_DESKTOP_MODE else "0"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+OUT_DIR = Path(
+    os.getenv(
+        "VA_OUT_DIR",
+        str(DEFAULT_DESKTOP_OUT_DIR if DESKTOP_MODE else DEFAULT_OUT_DIR),
+    )
+)
+RETENTION_DAYS = int(
+    os.getenv(
+        "VA_RETENTION_DAYS",
+        str(DEFAULT_DESKTOP_RETENTION_DAYS if DESKTOP_MODE else 7),
+    )
+)
 CLEANUP_INTERVAL_SECONDS = int(os.getenv("VA_CLEANUP_INTERVAL", "3600"))
 DEFAULT_RANDOM_MIN_HEIGHT = 15.0
 DEFAULT_RANDOM_MAX_HEIGHT = 40.0
 COVERAGE_CACHE_TTL_SECONDS = int(os.getenv("VA_COVERAGE_CACHE_TTL", "600"))
 DB_PATH = Path(os.getenv("VA_DB_PATH", "./data/app.db"))
 AUTH_PROVIDER = os.getenv("VA_AUTH_PROVIDER", "").strip().lower()
-AUTH_ENABLED = AUTH_PROVIDER == "clerk"
+AUTH_ENABLED = (not DESKTOP_MODE) and AUTH_PROVIDER == "clerk"
 CLERK_PUBLISHABLE_KEY = os.getenv("VA_CLERK_PUBLISHABLE_KEY", "").strip()
 CLERK_SECRET_KEY = os.getenv("VA_CLERK_SECRET_KEY", "").strip()
 CLERK_SIGN_IN_URL = os.getenv("VA_CLERK_SIGN_IN_URL", "").strip()
@@ -1292,6 +1314,7 @@ def inject_user_context():
     return {
         "current_user": current_user(),
         "auth_enabled": AUTH_ENABLED,
+        "desktop_mode": DESKTOP_MODE,
         "csrf_token": get_csrf_token,
     }
 
@@ -1851,9 +1874,15 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
 
 
 def main() -> int:
+    default_host = DEFAULT_DESKTOP_HOST if DESKTOP_MODE else "127.0.0.1"
+    default_port = DEFAULT_DESKTOP_PORT if DESKTOP_MODE else 5000
     parser = argparse.ArgumentParser(prog="va-lidar-context-web")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--host", default=os.getenv("VA_WEB_HOST", default_host))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("VA_WEB_PORT", str(default_port))),
+    )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 

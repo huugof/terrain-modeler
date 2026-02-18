@@ -110,6 +110,28 @@ On a remote host, bind to all interfaces:
 va-lidar-context-web --host 0.0.0.0 --port 8000
 ```
 
+## Desktop App (macOS, Tauri + Python sidecar)
+Desktop mode runs the same Flask app locally with auth/rate limits disabled and
+defaults output to `~/Documents/TerrainModeler`.
+
+### Build sidecar binary
+```bash
+./desktop/build-sidecar.sh
+```
+
+### Build Tauri shell
+```bash
+cd desktop
+npm install
+npm run tauri:build
+```
+
+Desktop runtime env behavior:
+- `VA_DESKTOP_MODE=1` (set by the Tauri shell)
+- Default port `8000`
+- Default retention `0` (no automatic cleanup)
+- Default out dir `~/Documents/TerrainModeler`
+
 
 ## Deploy (DigitalOcean)
 **Recommended**: Docker on a small Ubuntu droplet.
