@@ -604,7 +604,16 @@ STATUS_TEMPLATE = """
         }
       }
 
+      function addInlineMode(url) {
+        if (!url) return '';
+        return url.includes('?') ? `${url}&inline=1` : `${url}?inline=1`;
+      }
+
       function buildDownloadUrl(name) {
+        const fileMeta = previewState.filesByName.get(name);
+        if (fileMeta && fileMeta.download_url) {
+          return addInlineMode(fileMeta.download_url);
+        }
         return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}?inline=1`;
       }
 
@@ -1818,9 +1827,8 @@ def job_download(job_id: str, name: str):
     output_dir = _resolve_job_output_dir(job)
     if output_dir is None:
         return ("No artifacts available for this job.", 404)
-    artifacts = _list_job_artifacts(job)
-    allowed_names = {item["name"] for item in artifacts}
-    if name not in allowed_names:
+    file_path = output_dir / name
+    if not file_path.is_file():
         return ("File not found", 404)
     inline = request.args.get("inline", "").lower() in ("1", "true", "yes")
     return send_from_directory(
