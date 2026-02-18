@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import json
 import logging
 import os
@@ -10,14 +11,15 @@ import secrets
 import shutil
 import threading
 import time
-from functools import wraps
+import zipfile
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-import requests
 import jwt
+import requests
 from flask import (
     Flask,
     g,
@@ -26,6 +28,7 @@ from flask import (
     render_template,
     render_template_string,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -34,9 +37,15 @@ from flask import (
 from . import auth_store
 from .config import (
     DEFAULT_COMBINE_OUTPUT,
+    DEFAULT_DESKTOP_HOST,
+    DEFAULT_DESKTOP_MODE,
+    DEFAULT_DESKTOP_OUT_DIR,
+    DEFAULT_DESKTOP_PORT,
+    DEFAULT_DESKTOP_RETENTION_DAYS,
     DEFAULT_DXF_CONTOUR_SPACING,
     DEFAULT_DXF_INCLUDE_BUILDINGS,
     DEFAULT_DXF_INCLUDE_PARCELS,
+    DEFAULT_EPT_ONLY,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
     DEFAULT_FLOOR_TO_FLOOR,
@@ -48,6 +57,7 @@ from .config import (
     DEFAULT_OUT_DIR,
     DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
+    DEFAULT_PREFER_EPT,
     DEFAULT_PROJECT_ZERO,
     DEFAULT_PROVIDER,
     DEFAULT_RESOLUTION,
@@ -72,20 +82,37 @@ app = Flask(__name__)
 app.secret_key = os.getenv("VA_SESSION_SECRET", secrets.token_hex(32))
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = (
-    os.getenv("VA_SESSION_COOKIE_SECURE", "1").lower() not in ("0", "false", "no")
+app.config["SESSION_COOKIE_SECURE"] = os.getenv(
+    "VA_SESSION_COOKIE_SECURE", "1"
+).lower() not in ("0", "false", "no")
+
+
+DESKTOP_MODE = os.getenv(
+    "VA_DESKTOP_MODE", "1" if DEFAULT_DESKTOP_MODE else "0"
+).lower() in (
+    "1",
+    "true",
+    "yes",
 )
-
-
-OUT_DIR = Path(os.getenv("VA_OUT_DIR", str(DEFAULT_OUT_DIR)))
-RETENTION_DAYS = int(os.getenv("VA_RETENTION_DAYS", "7"))
+OUT_DIR = Path(
+    os.getenv(
+        "VA_OUT_DIR",
+        str(DEFAULT_DESKTOP_OUT_DIR if DESKTOP_MODE else DEFAULT_OUT_DIR),
+    )
+)
+RETENTION_DAYS = int(
+    os.getenv(
+        "VA_RETENTION_DAYS",
+        str(DEFAULT_DESKTOP_RETENTION_DAYS if DESKTOP_MODE else 7),
+    )
+)
 CLEANUP_INTERVAL_SECONDS = int(os.getenv("VA_CLEANUP_INTERVAL", "3600"))
 DEFAULT_RANDOM_MIN_HEIGHT = 15.0
 DEFAULT_RANDOM_MAX_HEIGHT = 40.0
 COVERAGE_CACHE_TTL_SECONDS = int(os.getenv("VA_COVERAGE_CACHE_TTL", "600"))
 DB_PATH = Path(os.getenv("VA_DB_PATH", "./data/app.db"))
 AUTH_PROVIDER = os.getenv("VA_AUTH_PROVIDER", "").strip().lower()
-AUTH_ENABLED = AUTH_PROVIDER == "clerk"
+AUTH_ENABLED = (not DESKTOP_MODE) and AUTH_PROVIDER == "clerk"
 CLERK_PUBLISHABLE_KEY = os.getenv("VA_CLERK_PUBLISHABLE_KEY", "").strip()
 CLERK_SECRET_KEY = os.getenv("VA_CLERK_SECRET_KEY", "").strip()
 CLERK_SIGN_IN_URL = os.getenv("VA_CLERK_SIGN_IN_URL", "").strip()
@@ -100,7 +127,9 @@ REQUIRE_LOCAL_ALLOWLIST = os.getenv("VA_REQUIRE_LOCAL_ALLOWLIST", "0").lower() i
     "yes",
 )
 CLERK_AUTHORIZED_PARTIES = [
-    p.strip() for p in os.getenv("VA_CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
+    p.strip()
+    for p in os.getenv("VA_CLERK_AUTHORIZED_PARTIES", "").split(",")
+    if p.strip()
 ]
 SESSION_TTL_SECONDS = int(os.getenv("VA_SESSION_TTL_SECONDS", str(7 * 86400)))
 SESSION_COOKIE_SECURE = os.getenv("VA_SESSION_COOKIE_SECURE", "1").lower() not in (
@@ -270,8 +299,6 @@ def _user_can_access_job(job_id: str) -> bool:
     user = current_user()
     if user is None:
         return False
-    if user.get("is_admin"):
-        return True
     owner_id = auth_store.get_job_owner_id(DB_PATH, job_id)
     return owner_id is not None and owner_id == user["id"]
 
@@ -378,77 +405,105 @@ STATUS_TEMPLATE = """
       header { padding: 20px 24px; }
       main { padding: 0 24px 32px; }
       .card { background:#fff; border:1px solid #e4ded4; border-radius:12px; padding:16px; margin-bottom:16px; }
-      pre { background:#0f1410; color:#bde7c0; padding:14px; border-radius:8px; height:420px; overflow:auto; }
-      a {
-        color: #B39CD0;
-        text-decoration: none;
-      }
-      .meta {
-        color: #B39CD0;
-        text-decoration: none;
-      }
-          .hidden {
-        display: none;
-      }
-          input[type="range"] {
-        -webkit-appearance: none;
-        width: 100%;
-        height: 6px;
+      .meta { color: #666; margin-top: 6px; }
+      .actions { margin-top: 10px; }
+      a { color: #B39CD0; text-decoration: none; }
+      .status-chip {
+        display: inline-block;
         border-radius: 999px;
-        background: #3f3f3f;
-        outline: none;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 600;
       }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
+      .status-running { background: #3f2f1b; color: #ffd58e; }
+      .status-done { background: #203328; color: #b8f2c9; }
+      .status-error { background: #3b1f1f; color: #ffd4d4; }
+      .status-unknown { background: #2f2f2f; color: #d4d4d4; }
+      .tab-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
       }
-      input[type="range"]::-moz-range-thumb {
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
+      .tab-btn {
+        border: 1px solid #d6d6d6;
+        border-radius: 8px;
+        background: #fff;
+        color: #1f1f1f;
+        padding: 8px 12px;
+        cursor: pointer;
       }
-      select {
-        appearance: none;
+      .tab-btn.active {
+        border-color: #b39cd0;
+        background: #f5f1fb;
       }
-      .hidden {
+      .tab-panel.hidden {
         display: none;
+      }
+      pre { background:#0f1410; color:#bde7c0; padding:14px; border-radius:8px; height:420px; overflow:auto; margin: 0; }
+      #preview-container {
+        width: 100%;
+        height: 500px;
+        background: #1a1a1a;
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+      }
+      #preview-message {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #d9d9d9;
+        font-size: 14px;
+        pointer-events: none;
+      }
+      #preview-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      #preview-controls button,
+      #preview-controls select {
+        font: inherit;
+        border-radius: 6px;
+        border: 1px solid #d6d6d6;
+        background: #ffffff;
+        color: #1f1f1f;
+        padding: 8px 10px;
+      }
+      #preview-controls button { cursor: pointer; }
+      #preview-controls button:hover { border-color: #b39cd0; }
+      #preview-file { min-width: 180px; }
+      @media (max-width: 700px) {
+        #preview-container { height: 340px; }
       }
     </style>
   </head>
   <body>
     <header>
-      <h2>Job {{ job.job_id }}</h2>
-      <div class="meta">Status: <span id="status">{{ status_label(job.status) }}</span></div>
+      <h2>{{ job.summary.get('name') or job.job_id }}</h2>
+      <div class="meta">Job ID: {{ job.job_id }}</div>
+      <div class="meta">Status: <span id="status" class="status-chip {{ status_class(job.status) }}">{{ status_label(job.status) }}</span></div>
       <div class="meta">Provider: {{ job.summary.get('provider_label') or job.summary.get('provider') }}</div>
       <div class="meta">Output folder: {{ job.summary.get('out') }}</div>
       <div class="meta">Target: {{ job.summary.get('target') }}</div>
       {% if job.summary.get('tile') %}
         <div class="meta">Tile: {{ job.summary.get('tile') }}</div>
       {% endif %}
-      <div class="meta"><a href="{{ url_for('index') }}">Back to form</a></div>
+      <div class="meta actions">
+        <a href="{{ url_for('index', from_job=job.job_id) }}">Reuse settings in main form</a>
+        ·
+        <a href="{{ url_for('index') }}">Back to form</a>
+      </div>
     </header>
     <main>
-      {% if job.error or job.summary.get('coverage') or job.summary.get('warnings') %}
+      {% if job.error or job.summary.get('warnings') %}
       <div class="card">
         <h3>Job Notes</h3>
         {% if job.error %}
           <p><strong>This job did not complete.</strong> {{ job.error }}</p>
-        {% endif %}
-        {% if job.summary.get('coverage') %}
-          {% set coverage = job.summary.get('coverage') %}
-          {% if coverage.get('status') %}
-            <p><strong>EPT coverage:</strong> {{ coverage.get('status') }}
-              {% if coverage.get('ratio') is not none %}
-                (~{{ '%.1f'|format(coverage.get('ratio') * 100) }}%)
-              {% endif %}
-            </p>
-          {% endif %}
         {% endif %}
         {% if job.summary.get('warnings') %}
           <p><strong>Warnings:</strong></p>
@@ -461,10 +516,43 @@ STATUS_TEMPLATE = """
       </div>
       {% endif %}
       <div class="card">
-        <h3>Activity Log</h3>
-        <pre id="logs"></pre>
+        <h3>3D Preview & Activity</h3>
+        <div class="tab-row">
+          <button type="button" class="tab-btn" data-tab="preview" id="tab-preview">Preview</button>
+          <button type="button" class="tab-btn" data-tab="log" id="tab-log">Activity Log</button>
+        </div>
+        <div id="panel-preview" class="tab-panel">
+          <div id="preview-container">
+            <div id="preview-message">Waiting for model files...</div>
+          </div>
+          <div id="preview-controls">
+            <button type="button" onclick="toggleWireframe()">Wireframe</button>
+            <button type="button" onclick="resetCamera()">Reset View</button>
+            <select id="preview-file"></select>
+          </div>
+        </div>
+        <div id="panel-log" class="tab-panel">
+          <pre id="logs"></pre>
+        </div>
       </div>
     </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE_NS from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+      import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+      import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+      import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+      window.THREE = THREE_NS;
+      window.OrbitControls = OrbitControls;
+      window.OBJLoader = OBJLoader;
+      window.MTLLoader = MTLLoader;
+    </script>
     <script>
       const STATUS_LABELS = {
         queued: 'Queued',
@@ -472,11 +560,344 @@ STATUS_TEMPLATE = """
         done: 'Completed',
         error: 'Failed',
       };
+      const STATUS_CLASSES = {
+        queued: 'status-running',
+        running: 'status-running',
+        done: 'status-done',
+        error: 'status-error',
+      };
+      const previewState = {
+        jobId: '{{ job.job_id }}',
+        initialized: false,
+        activationStarted: false,
+        wireframe: false,
+        filesByName: new Map(),
+        models: [],
+        currentModelKey: null,
+        scene: null,
+        camera: null,
+        renderer: null,
+        controls: null,
+        currentObject: null,
+      };
+
+      function setActiveTab(tabName) {
+        const isPreview = tabName === 'preview';
+        const previewPanel = document.getElementById('panel-preview');
+        const logPanel = document.getElementById('panel-log');
+        const previewBtn = document.getElementById('tab-preview');
+        const logBtn = document.getElementById('tab-log');
+        if (previewPanel) previewPanel.classList.toggle('hidden', !isPreview);
+        if (logPanel) logPanel.classList.toggle('hidden', isPreview);
+        if (previewBtn) previewBtn.classList.toggle('active', isPreview);
+        if (logBtn) logBtn.classList.toggle('active', !isPreview);
+      }
+
+      function initTabs() {
+        document.querySelectorAll('.tab-btn[data-tab]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const tab = button.dataset.tab === 'preview' ? 'preview' : 'log';
+            setActiveTab(tab);
+          });
+        });
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get('tab');
+        setActiveTab(requested === 'preview' ? 'preview' : 'log');
+      }
+
+      function setStatusBadge(status) {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return;
+        const label = STATUS_LABELS[status] || status;
+        const className = STATUS_CLASSES[status] || 'status-unknown';
+        statusEl.textContent = label;
+        statusEl.className = `status-chip ${className}`;
+      }
+
+      function setPreviewMessage(message) {
+        const msgEl = document.getElementById('preview-message');
+        if (msgEl) {
+          msgEl.textContent = message;
+          msgEl.style.display = message ? 'block' : 'none';
+        }
+      }
+
+      function addInlineMode(url) {
+        if (!url) return '';
+        return url.includes('?') ? `${url}&inline=1` : `${url}?inline=1`;
+      }
+
+      function buildDownloadUrl(name) {
+        const fileMeta = previewState.filesByName.get(name);
+        if (fileMeta && fileMeta.download_url) {
+          return addInlineMode(fileMeta.download_url);
+        }
+        return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}?inline=1`;
+      }
+
+      function pickAvailableModels(filesByName) {
+        const models = [];
+        const hasTerrain = filesByName.has('terrain.obj');
+        const hasBuildings = filesByName.has('buildings.obj');
+        const hasCombined = filesByName.has('combined.obj');
+        const terrainMtl = filesByName.has('terrain.mtl') ? 'terrain.mtl' : null;
+        const combinedMtl = filesByName.has('combined.mtl') ? 'combined.mtl' : null;
+
+        if (hasTerrain && hasBuildings) {
+          models.push({
+            key: 'scene',
+            label: 'Terrain + Buildings',
+            parts: [
+              { obj: 'terrain.obj', mtl: terrainMtl },
+              { obj: 'buildings.obj', mtl: null },
+            ],
+          });
+        }
+        if (hasCombined) {
+          models.push({
+            key: 'combined',
+            label: 'Combined',
+            parts: [{ obj: 'combined.obj', mtl: combinedMtl }],
+          });
+        }
+        if (hasTerrain) {
+          models.push({
+            key: 'terrain',
+            label: 'Terrain',
+            parts: [{ obj: 'terrain.obj', mtl: terrainMtl }],
+          });
+        }
+        if (hasBuildings) {
+          models.push({
+            key: 'buildings',
+            label: 'Buildings',
+            parts: [{ obj: 'buildings.obj', mtl: null }],
+          });
+        }
+        return models;
+      }
+
+      function ensureThreeContext() {
+        if (previewState.initialized) return true;
+        const OrbitControlsCtor = window.OrbitControls;
+        if (!window.THREE || !window.OBJLoader || !OrbitControlsCtor || !window.MTLLoader) {
+          setPreviewMessage('Loading 3D renderer...');
+          return false;
+        }
+        const container = document.getElementById('preview-container');
+        if (!container) return false;
+
+        container.innerHTML = '<div id="preview-message"></div>';
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000000);
+        camera.up.set(0, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.shadowMap.enabled = false;
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControlsCtor(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.07;
+        controls.screenSpacePanning = true;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const directional = new THREE.DirectionalLight(0xffffff, 1.0);
+        directional.position.set(200, -150, 300);
+        scene.add(directional);
+
+        previewState.scene = scene;
+        previewState.camera = camera;
+        previewState.renderer = renderer;
+        previewState.controls = controls;
+        previewState.initialized = true;
+
+        const resize = () => {
+          if (!previewState.renderer || !previewState.camera) return;
+          const width = Math.max(container.clientWidth, 1);
+          const height = Math.max(container.clientHeight, 1);
+          previewState.camera.aspect = width / height;
+          previewState.camera.updateProjectionMatrix();
+          previewState.renderer.setSize(width, height, false);
+        };
+        window.addEventListener('resize', resize);
+        resize();
+
+        const animate = () => {
+          if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
+          requestAnimationFrame(animate);
+          if (previewState.controls) previewState.controls.update();
+          previewState.renderer.render(previewState.scene, previewState.camera);
+        };
+        animate();
+        return true;
+      }
+
+      function applyWireframeMode(enabled) {
+        if (!previewState.currentObject) return;
+        previewState.currentObject.traverse((node) => {
+          if (!node.isMesh || !node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            material.wireframe = enabled;
+            material.needsUpdate = true;
+          }
+        });
+      }
+
+      function clearCurrentObject() {
+        if (!previewState.scene || !previewState.currentObject) return;
+        previewState.scene.remove(previewState.currentObject);
+        previewState.currentObject = null;
+      }
+
+      function centerAndPrepareObject(obj) {
+        obj.traverse((node) => {
+          if (!node.isMesh) return;
+          if (node.geometry) node.geometry.computeVertexNormals();
+          if (!node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) material.side = THREE.DoubleSide;
+        });
+        const box = new THREE.Box3().setFromObject(obj);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          obj.position.sub(center);
+        }
+      }
+
+      function loadObjPart(part) {
+        const manager = new THREE.LoadingManager();
+        manager.setURLModifier((url) => {
+          if (!url) return url;
+          if (url.startsWith('data:') || /^https?:\\/\\//i.test(url)) return url;
+          const clean = url.split('#')[0].split('?')[0];
+          const name = clean.slice(clean.lastIndexOf('/') + 1);
+          if (previewState.filesByName.has(name)) return buildDownloadUrl(name);
+          return url;
+        });
+
+        return (async () => {
+          const objLoader = new window.OBJLoader(manager);
+          if (part.mtl) {
+            try {
+              const mtlResp = await fetch(buildDownloadUrl(part.mtl), { cache: 'no-store' });
+              if (mtlResp.ok) {
+                const mtlText = await mtlResp.text();
+                const mtlLoader = new window.MTLLoader(manager);
+                const mtlPath = `/jobs/${previewState.jobId}/download/`;
+                const materials = mtlLoader.parse(mtlText, mtlPath);
+                materials.preload();
+                for (const key of Object.keys(materials.materials)) {
+                  const material = materials.materials[key];
+                  if (material && material.map) {
+                    material.map.flipY = false;
+                    material.map.needsUpdate = true;
+                  }
+                }
+                objLoader.setMaterials(materials);
+              }
+            } catch (error) {
+              // Continue without MTL if it cannot be loaded.
+            }
+          }
+
+          const objUrl = buildDownloadUrl(part.obj);
+          const objResp = await fetch(objUrl, { cache: 'no-store' });
+          if (!objResp.ok) throw new Error(`OBJ fetch failed (${objResp.status}) for ${part.obj}`);
+          const objText = await objResp.text();
+          return objLoader.parse(objText);
+        })();
+      }
+
+      async function renderModel(modelKey) {
+        const model = previewState.models.find((m) => m.key === modelKey);
+        if (!model || !previewState.scene) return;
+        setPreviewMessage('Loading model...');
+        clearCurrentObject();
+        try {
+          const group = new THREE.Group();
+          for (const part of model.parts) {
+            try {
+              const partObj = await loadObjPart(part);
+              group.add(partObj);
+            } catch (error) {
+              console.warn('Preview part failed', part.obj, error);
+            }
+          }
+          if (!group.children.length) throw new Error('No preview geometry could be loaded.');
+          centerAndPrepareObject(group);
+          previewState.scene.add(group);
+          previewState.currentObject = group;
+          previewState.currentModelKey = model.key;
+          applyWireframeMode(previewState.wireframe);
+          resetCamera();
+          setPreviewMessage('');
+        } catch (error) {
+          const msg = (error && error.message) ? error.message : 'Failed to load preview model.';
+          setPreviewMessage(msg);
+        }
+      }
+
+      async function activatePreview() {
+        if (previewState.activationStarted) return;
+        previewState.activationStarted = true;
+        let artifactPayload;
+        try {
+          const resp = await fetch(`/jobs/${previewState.jobId}/artifacts`, { cache: 'no-store' });
+          if (!resp.ok) {
+            previewState.activationStarted = false;
+            setPreviewMessage('Preview will be available when model files are generated.');
+            return;
+          }
+          artifactPayload = await resp.json();
+        } catch (error) {
+          previewState.activationStarted = false;
+          setPreviewMessage('Preview could not be loaded.');
+          return;
+        }
+
+        const files = Array.isArray(artifactPayload.files) ? artifactPayload.files : [];
+        previewState.filesByName = new Map(files.map((f) => [f.name, f]));
+        previewState.models = pickAvailableModels(previewState.filesByName);
+        if (!previewState.models.length) {
+          previewState.activationStarted = false;
+          setPreviewMessage('No 3D model artifacts found for this job.');
+          return;
+        }
+
+        if (!ensureThreeContext()) {
+          previewState.activationStarted = false;
+          setTimeout(activatePreview, 600);
+          return;
+        }
+
+        const select = document.getElementById('preview-file');
+        if (!select) return;
+        select.innerHTML = '';
+        for (const model of previewState.models) {
+          const option = document.createElement('option');
+          option.value = model.key;
+          option.textContent = model.label;
+          select.appendChild(option);
+        }
+        if (select.dataset.bound !== 'true') {
+          select.addEventListener('change', (event) => {
+            const value = event.target.value;
+            if (value) renderModel(value);
+          });
+          select.dataset.bound = 'true';
+        }
+        renderModel(previewState.models[0].key);
+      }
 
       async function pollLogs(jobId) {
         const logsEl = document.getElementById('logs');
-        const statusEl = document.getElementById('status');
-        if (!logsEl || !statusEl) return;
+        if (!logsEl) return;
         let offset = 0;
 
         async function poll() {
@@ -488,15 +909,49 @@ STATUS_TEMPLATE = """
             logsEl.scrollTop = logsEl.scrollHeight;
             offset = logData.offset;
           }
-          statusEl.textContent = STATUS_LABELS[logData.status] || logData.status;
-          if (logData.status === 'running' || logData.status === 'queued') {
-            setTimeout(poll, 1500);
-          }
+          setStatusBadge(logData.status);
+          if (logData.status === 'done') activatePreview();
+          if (logData.status === 'running' || logData.status === 'queued') setTimeout(poll, 1500);
         }
         poll();
       }
 
+      function toggleWireframe() {
+        previewState.wireframe = !previewState.wireframe;
+        applyWireframeMode(previewState.wireframe);
+      }
+
+      function resetCamera() {
+        if (!previewState.camera || !previewState.controls) return;
+        let radius = 100.0;
+        if (previewState.currentObject) {
+          const box = new THREE.Box3().setFromObject(previewState.currentObject);
+          if (!box.isEmpty()) {
+            const sphere = box.getBoundingSphere(new THREE.Sphere());
+            radius = Math.max(sphere.radius, 1.0);
+          }
+        }
+        previewState.camera.near = Math.max(radius / 1000.0, 0.01);
+        previewState.camera.far = Math.max(radius * 200.0, 1000.0);
+        previewState.camera.position.set(radius * 1.35, radius * 1.35, radius * 0.95);
+        previewState.controls.target.set(0, 0, 0);
+        previewState.camera.updateProjectionMatrix();
+        previewState.controls.update();
+      }
+
+      window.toggleWireframe = toggleWireframe;
+      window.resetCamera = resetCamera;
+
       document.addEventListener('DOMContentLoaded', () => {
+        initTabs();
+        setStatusBadge('{{ job.status }}');
+        if ('{{ job.status }}' === 'done') {
+          activatePreview();
+        } else if ('{{ job.status }}' === 'error') {
+          setPreviewMessage('Build failed. Preview unavailable.');
+        } else {
+          setPreviewMessage('Preview will be available when the build completes.');
+        }
         pollLogs('{{ job.job_id }}');
       });
     </script>
@@ -557,6 +1012,16 @@ def status_label(status: str) -> str:
     return mapping.get(status, status.title())
 
 
+def status_class(status: str) -> str:
+    if status in ("queued", "running"):
+        return "status-running"
+    if status == "done":
+        return "status-done"
+    if status == "error":
+        return "status-error"
+    return "status-unknown"
+
+
 def _coverage_cache_key(lon: float, lat: float) -> str:
     return f"{round(lon, 4)},{round(lat, 4)}"
 
@@ -596,8 +1061,10 @@ def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
         return {"dir": str(tile_dir), "files": []}
     candidates = [
         "terrain.obj",
+        "terrain.mtl",
         "buildings.obj",
         "combined.obj",
+        "combined.mtl",
         "terrain.png",
         "contours.dxf",
         "terrain.xyz",
@@ -620,7 +1087,11 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
         raw_dir = outputs.get("dir")
         if isinstance(raw_dir, str) and raw_dir.strip():
             candidate = Path(raw_dir).expanduser()
-            if candidate.exists() and candidate.is_dir() and _is_path_within(OUT_DIR, candidate):
+            if (
+                candidate.exists()
+                and candidate.is_dir()
+                and _is_path_within(OUT_DIR, candidate)
+            ):
                 return candidate
 
     report_path = job.summary.get("report_path")
@@ -632,7 +1103,11 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
                 return candidate
 
     default_dir = OUT_DIR / job.job_id
-    if default_dir.exists() and default_dir.is_dir() and _is_path_within(OUT_DIR, default_dir):
+    if (
+        default_dir.exists()
+        and default_dir.is_dir()
+        and _is_path_within(OUT_DIR, default_dir)
+    ):
         return default_dir
     return None
 
@@ -658,7 +1133,22 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
         if not path.is_file():
             continue
         stat = path.stat()
-        artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+        artifacts.append(
+            {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+        )
+        seen.add(name)
+
+    # Ensure preview support files are available even for older summaries.
+    for name in ("terrain.mtl", "combined.mtl"):
+        if name in seen:
+            continue
+        path = output_dir / name
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        artifacts.append(
+            {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+        )
         seen.add(name)
 
     if not artifacts:
@@ -669,7 +1159,9 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
             if name in seen:
                 continue
             stat = path.stat()
-            artifacts.append({"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)})
+            artifacts.append(
+                {"name": name, "size": int(stat.st_size), "mtime": float(stat.st_mtime)}
+            )
             seen.add(name)
 
     return artifacts
@@ -794,6 +1286,7 @@ def snapshot_defaults() -> Dict[str, Any]:
         "provider_label": "VGIN (Virginia)",
         "center1": 37.5390116184146,
         "center2": -77.43353162833343,
+        "job_name": "",
         "clip_size": 1500.0,
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 5,
@@ -816,6 +1309,92 @@ def snapshot_defaults() -> Dict[str, Any]:
         "contour_interval": 2.0,
         "image_quality": "standard",
     }
+
+
+def _extract_form_defaults(
+    *,
+    coords: str,
+    clip_size: float,
+    units: str,
+    terrain_complexity: int,
+    rotate_z: float,
+    project_zero: float,
+    contour_interval: Optional[float],
+    dxf_contour_spacing: Optional[float],
+    dxf_include_parcels: bool,
+    dxf_include_buildings: bool,
+    xyz_mode: str,
+    image_quality: str,
+    random_min_height: float,
+    random_max_height: float,
+    output_terrain: bool,
+    output_buildings: bool,
+    output_contours: bool,
+    output_naip: bool,
+    output_xyz: bool,
+    custom_name: str,
+) -> Dict[str, Any]:
+    return {
+        "center1": coords.split(",")[0].strip() if "," in coords else coords,
+        "center2": coords.split(",")[1].strip() if "," in coords else "",
+        "job_name": custom_name,
+        "clip_size": clip_size,
+        "units": units,
+        "terrain_complexity": terrain_complexity,
+        "rotate_z": rotate_z,
+        "project_zero": project_zero,
+        "contour_interval": contour_interval if contour_interval is not None else 2.0,
+        "dxf_contour_spacing": (
+            dxf_contour_spacing
+            if dxf_contour_spacing is not None
+            else DEFAULT_DXF_CONTOUR_SPACING
+        ),
+        "dxf_include_parcels": dxf_include_parcels,
+        "dxf_include_buildings": dxf_include_buildings,
+        "xyz_mode": xyz_mode,
+        "image_quality": image_quality,
+        "random_min_height": random_min_height,
+        "random_max_height": random_max_height,
+        "output_terrain": output_terrain,
+        "output_buildings": output_buildings,
+        "output_contours": output_contours,
+        "output_naip": output_naip,
+        "output_xyz": output_xyz,
+    }
+
+
+def _merge_prefill_defaults(
+    defaults: Dict[str, Any], saved: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    if not isinstance(saved, dict):
+        return defaults
+    allowed = {
+        "center1",
+        "center2",
+        "job_name",
+        "clip_size",
+        "units",
+        "terrain_complexity",
+        "rotate_z",
+        "project_zero",
+        "contour_interval",
+        "dxf_contour_spacing",
+        "dxf_include_parcels",
+        "dxf_include_buildings",
+        "xyz_mode",
+        "image_quality",
+        "random_min_height",
+        "random_max_height",
+        "output_terrain",
+        "output_buildings",
+        "output_contours",
+        "output_naip",
+        "output_xyz",
+    }
+    for key in allowed:
+        if key in saved:
+            defaults[key] = saved[key]
+    return defaults
 
 
 def parcel_sources_payload() -> List[Dict[str, Any]]:
@@ -929,6 +1508,7 @@ def inject_user_context():
     return {
         "current_user": current_user(),
         "auth_enabled": AUTH_ENABLED,
+        "desktop_mode": DESKTOP_MODE,
         "csrf_token": get_csrf_token,
     }
 
@@ -1003,6 +1583,14 @@ def auth_logout():
 @app.route("/")
 def index():
     defaults = snapshot_defaults()
+    prefill_job_id = (request.args.get("from_job") or "").strip()
+    if prefill_job_id and _user_can_access_job(prefill_job_id):
+        with JOBS_LOCK:
+            prefill_job = JOBS.get(prefill_job_id)
+        if prefill_job is not None:
+            defaults = _merge_prefill_defaults(
+                defaults, prefill_job.summary.get("form_defaults")
+            )
     parcel_sources = parcel_sources_payload()
     data_sources = data_sources_payload(parcel_sources)
     user = current_user()
@@ -1012,7 +1600,7 @@ def index():
         if AUTH_ENABLED:
             if user is None:
                 jobs = []
-            elif not user.get("is_admin"):
+            else:
                 jobs = [job for job in jobs if job.user_id == user["id"]]
         jobs = jobs[-8:][::-1]
     return render_template(
@@ -1024,6 +1612,7 @@ def index():
         can_build=can_build,
         retention_days=RETENTION_DAYS,
         status_label=status_label,
+        status_class=status_class,
     )
 
 
@@ -1033,14 +1622,21 @@ def recent_jobs():
     user = current_user()
     with JOBS_LOCK:
         jobs = list(JOBS.values())
-        if AUTH_ENABLED and user and not user.get("is_admin"):
-            jobs = [job for job in jobs if job.user_id == user["id"]]
+        if AUTH_ENABLED:
+            if user is None:
+                jobs = []
+            else:
+                jobs = [job for job in jobs if job.user_id == user["id"]]
         jobs = jobs[-8:][::-1]
     payload = [
         {
             "job_id": job.job_id,
+            "name": str(job.summary.get("name") or job.job_id),
             "status": job.status,
             "status_label": status_label(job.status),
+            "status_class": status_class(job.status),
+            "preview_url": url_for("job_status", job_id=job.job_id, tab="preview"),
+            "log_url": url_for("job_status", job_id=job.job_id),
         }
         for job in jobs
     ]
@@ -1050,14 +1646,8 @@ def recent_jobs():
         artifacts = _list_job_artifacts(job)
         if not artifacts:
             continue
-        item["downloads"] = [
-            {
-                "name": artifact["name"],
-                "url": url_for("job_download", job_id=job.job_id, name=artifact["name"]),
-            }
-            for artifact in artifacts
-        ]
         item["artifact_count"] = len(artifacts)
+        item["download_all_url"] = url_for("job_download_all", job_id=job.job_id)
     return jsonify({"jobs": payload})
 
 
@@ -1140,6 +1730,9 @@ def run_job():
             return jsonify({"error": limit_error}), 429
 
     form = request.form
+    custom_name = (form.get("job_name") or "").strip()
+    if len(custom_name) > 120:
+        return jsonify({"error": "Name must be 120 characters or fewer."}), 400
     out_dir = OUT_DIR
     ensure_dir(out_dir)
     units = form.get("units") or DEFAULT_UNITS
@@ -1148,7 +1741,6 @@ def run_job():
     lat = parse_float(parts[0]) if len(parts) > 0 else None
     lon = parse_float(parts[1]) if len(parts) > 1 else None
     provider = resolve_provider(lat, lon)
-    ept_only = False
     clip_size = parse_float(form.get("size"))
     if lat is None or lon is None:
         return jsonify({"error": "Provide coordinates as lat, lon."}), 400
@@ -1209,6 +1801,11 @@ def run_job():
         outputs.append("xyz")
     if not outputs:
         return jsonify({"error": "Select at least one output."}), 400
+    output_terrain = "terrain" in outputs
+    output_buildings = "buildings" in outputs
+    output_contours = "contours" in outputs
+    output_naip = "naip" in outputs
+    output_xyz = "xyz" in outputs
 
     combine_output = parse_bool(form.get("output_combined"))
     if combine_output and not ("terrain" in outputs and "buildings" in outputs):
@@ -1289,7 +1886,7 @@ def run_job():
         contour_interval=contour_interval,
         size=clip_size,
         allow_multi_tile=allow_multi_tile,
-        prefer_ept=True,
+        prefer_ept=DEFAULT_PREFER_EPT,
         flip_y=flip_y,
         flip_x=flip_x,
         terrain_flip_y=terrain_flip_y,
@@ -1301,7 +1898,7 @@ def run_job():
         dxf_include_parcels=dxf_include_parcels,
         dxf_include_buildings=dxf_include_buildings,
         provider=provider,
-        ept_only=ept_only,
+        ept_only=DEFAULT_EPT_ONLY,
         cleanup_intermediates=True,
         outputs=tuple(outputs),
     )
@@ -1315,6 +1912,30 @@ def run_job():
         "target": target_summary or "(tile lookup)",
         "provider": provider,
         "provider_label": provider_label(provider),
+        "name": custom_name or job_id,
+        "custom_name": custom_name,
+        "form_defaults": _extract_form_defaults(
+            coords=f"{lat},{lon}",
+            clip_size=clip_size,
+            units=units,
+            terrain_complexity=terrain_complexity,
+            rotate_z=rotate_z,
+            project_zero=project_zero,
+            contour_interval=contour_interval,
+            dxf_contour_spacing=dxf_contour_spacing,
+            dxf_include_parcels=dxf_include_parcels,
+            dxf_include_buildings=dxf_include_buildings,
+            xyz_mode=xyz_mode,
+            image_quality=(form.get("image_quality") or "standard").strip().lower(),
+            random_min_height=random_min,
+            random_max_height=random_max,
+            output_terrain=output_terrain,
+            output_buildings=output_buildings,
+            output_contours=output_contours,
+            output_naip=output_naip,
+            output_xyz=output_xyz,
+            custom_name=custom_name,
+        ),
     }
 
     job = Job(
@@ -1350,7 +1971,9 @@ def job_status(job_id: str):
         job = JOBS.get(job_id)
     if job is None:
         return "Job not found", 404
-    return render_template_string(STATUS_TEMPLATE, job=job, status_label=status_label)
+    return render_template_string(
+        STATUS_TEMPLATE, job=job, status_label=status_label, status_class=status_class
+    )
 
 
 @app.route("/logs/<job_id>")
@@ -1414,11 +2037,49 @@ def job_download(job_id: str, name: str):
     output_dir = _resolve_job_output_dir(job)
     if output_dir is None:
         return ("No artifacts available for this job.", 404)
-    artifacts = _list_job_artifacts(job)
-    allowed_names = {item["name"] for item in artifacts}
-    if name not in allowed_names:
+    file_path = output_dir / name
+    if not file_path.is_file():
         return ("File not found", 404)
-    return send_from_directory(output_dir, name, as_attachment=True, download_name=name)
+    inline = request.args.get("inline", "").lower() in ("1", "true", "yes")
+    output_dir_abs = output_dir.resolve()
+    return send_from_directory(
+        str(output_dir_abs),
+        name,
+        as_attachment=not inline,
+        download_name=name,
+    )
+
+
+@app.route("/jobs/<job_id>/download-all")
+@require_login
+def job_download_all(job_id: str):
+    if not _user_can_access_job(job_id):
+        return _forbidden_response("Not allowed to access this job.")
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return ("Job not found", 404)
+    output_dir = _resolve_job_output_dir(job)
+    if output_dir is None:
+        return ("No artifacts available for this job.", 404)
+    artifacts = _list_job_artifacts(job)
+    if not artifacts:
+        return ("No artifacts available for this job.", 404)
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for artifact in artifacts:
+            name = artifact["name"]
+            path = output_dir / name
+            if path.is_file():
+                archive.write(path, arcname=name)
+    data.seek(0)
+    return send_file(
+        data,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{job_id}_artifacts.zip",
+    )
 
 
 @app.route("/internal/worker/jobs/<job_id>/complete", methods=["POST"])
@@ -1448,7 +2109,9 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     if AUTH_ENABLED:
         auth_store.set_job_status(DB_PATH, job.job_id, "running")
         if job.user_id is not None:
-            auth_store.set_active_job(DB_PATH, job.job_id, job.user_id, status="running")
+            auth_store.set_active_job(
+                DB_PATH, job.job_id, job.user_id, status="running"
+            )
     logger = get_logger()
     handler = JobLogHandler(job)
     logger.addHandler(handler)
@@ -1479,7 +2142,6 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                 if report.get("output_dir"):
                     job.summary["out"] = report.get("output_dir")
                 job.summary["job_id"] = report.get("job_id")
-                job.summary["coverage"] = report.get("coverage")
                 job.summary["warnings"] = report.get("warnings")
                 job.summary["source_type"] = report.get("source_type")
                 job.summary["outputs"] = _collect_outputs(report_path.parent)
@@ -1488,9 +2150,15 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
 
 
 def main() -> int:
+    default_host = DEFAULT_DESKTOP_HOST if DESKTOP_MODE else "127.0.0.1"
+    default_port = DEFAULT_DESKTOP_PORT if DESKTOP_MODE else 5000
     parser = argparse.ArgumentParser(prog="va-lidar-context-web")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--host", default=os.getenv("VA_WEB_HOST", default_host))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("VA_WEB_PORT", str(default_port))),
+    )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 

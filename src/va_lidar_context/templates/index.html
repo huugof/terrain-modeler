@@ -57,13 +57,23 @@
                 <div class="form-body">
                     <div class="section-title">Location</div>
                     <div class="grid">
-                        <div style="grid-column: 1 / -1">
+                        <div>
                             <label>Coordinates</label>
                             <input
                                 type="text"
                                 name="coords"
                                 value="{{ defaults.center1 }}, {{ defaults.center2 }}"
                                 placeholder="lat, lon"
+                            />
+                        </div>
+                        <div>
+                            <label>Name (Optional)</label>
+                            <input
+                                type="text"
+                                name="job_name"
+                                value="{{ defaults.job_name }}"
+                                placeholder="Custom name"
+                                maxlength="120"
                             />
                         </div>
                         <div>
@@ -440,17 +450,23 @@
                     <ul>
                         {% for job in jobs %}
                         <li>
-                            <a
-                                href="{{ url_for('job_status', job_id=job.job_id) }}"
-                                >{{ job.job_id }}</a
-                            >
-                            — {{ status_label(job.status) }}
-                            {% if job.status == 'done' and job.summary.get('outputs') and job.summary.get('outputs').get('files') %}
-                            —
-                            {% for name in job.summary.get('outputs').get('files') %}
-                            <a href="{{ url_for('job_download', job_id=job.job_id, name=name) }}">Download {{ name }}</a>{% if not loop.last %}, {% endif %}
-                            {% endfor %}
-                            {% endif %}
+                            <div>
+                                {{ job.summary.get('name') or job.job_id }}
+                                -
+                                <span class="recent-status {{ status_class(job.status) }}">{{ status_label(job.status) }}</span>
+                            </div>
+                            <div>
+                                <a
+                                    href="{{ url_for('job_status', job_id=job.job_id, tab='preview') }}"
+                                    data-preview-modal="1"
+                                    data-preview-url="{{ url_for('job_status', job_id=job.job_id, tab='preview') }}"
+                                    data-preview-title="{{ job.summary.get('name') or job.job_id }}"
+                                >Preview</a>
+                                {% if job.status == 'done' and job.summary.get('outputs') and job.summary.get('outputs').get('files') %}
+                                , <a href="{{ url_for('job_download_all', job_id=job.job_id) }}">Download</a>
+                                {% endif %}
+                                , <a href="{{ url_for('job_status', job_id=job.job_id) }}">Log</a>
+                            </div>
                         </li>
                         {% endfor %}
                     </ul>
@@ -460,6 +476,16 @@
                 </div>
             </div>
         </main>
+        <div id="previewModal" class="preview-modal hidden" aria-hidden="true">
+            <div class="preview-modal-backdrop" data-preview-close="1"></div>
+            <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="previewModalTitle">
+                <div class="preview-modal-header">
+                    <strong id="previewModalTitle">Job Preview</strong>
+                    <button type="button" class="btn secondary preview-modal-close" data-preview-close="1">Close</button>
+                </div>
+                <iframe id="previewModalFrame" class="preview-modal-frame" title="Job Preview"></iframe>
+            </div>
+        </div>
         <i
             id="faviconSource"
             class="visually-hidden"
@@ -489,6 +515,12 @@
             const PARCEL_SOURCES = {{ parcel_sources | tojson }};
             const RECENT_JOBS_POLL_MS = 5000;
             const CAN_BUILD = {{ can_build | tojson }};
+            const RECENT_STATUS_CLASS = {
+              queued: 'status-running',
+              running: 'status-running',
+              done: 'status-done',
+              error: 'status-error',
+            };
             let buildErrorMessage = '';
             let coverageStatus = null;
             let coverageKey = null;
@@ -661,27 +693,85 @@
               const list = document.createElement('ul');
               jobs.forEach((job) => {
                 const item = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = `/jobs/${job.job_id}`;
-                link.textContent = job.job_id;
-                item.appendChild(link);
                 const label = job.status_label || job.status;
-                item.appendChild(document.createTextNode(` — ${label}`));
-                if (Array.isArray(job.downloads) && job.downloads.length > 0) {
-                  item.appendChild(document.createTextNode(' — '));
-                  job.downloads.forEach((download, idx) => {
-                    const dl = document.createElement('a');
-                    dl.href = download.url;
-                    dl.textContent = `Download ${download.name}`;
-                    item.appendChild(dl);
-                    if (idx < job.downloads.length - 1) {
-                      item.appendChild(document.createTextNode(', '));
-                    }
-                  });
+                const name = job.name || job.job_id;
+                const cssClass = job.status_class || RECENT_STATUS_CLASS[job.status] || 'status-unknown';
+                const line1 = document.createElement('div');
+                line1.appendChild(document.createTextNode(`${name} - `));
+                const statusTag = document.createElement('span');
+                statusTag.className = `recent-status ${cssClass}`;
+                statusTag.textContent = label;
+                line1.appendChild(statusTag);
+                item.appendChild(line1);
+
+                const line2 = document.createElement('div');
+                const previewLink = document.createElement('a');
+                const previewUrl = job.preview_url || `/jobs/${job.job_id}?tab=preview`;
+                previewLink.href = previewUrl;
+                previewLink.textContent = 'Preview';
+                previewLink.dataset.previewModal = '1';
+                previewLink.dataset.previewUrl = previewUrl;
+                previewLink.dataset.previewTitle = name;
+                line2.appendChild(previewLink);
+                if (job.download_all_url) {
+                  line2.appendChild(document.createTextNode(', '));
+                  const downloadLink = document.createElement('a');
+                  downloadLink.href = job.download_all_url;
+                  downloadLink.textContent = 'Download';
+                  line2.appendChild(downloadLink);
                 }
+                line2.appendChild(document.createTextNode(', '));
+                const logLink = document.createElement('a');
+                logLink.href = job.log_url || `/jobs/${job.job_id}`;
+                logLink.textContent = 'Log';
+                line2.appendChild(logLink);
+                item.appendChild(line2);
                 list.appendChild(item);
               });
               container.appendChild(list);
+            }
+
+            function openPreviewModal(url, title) {
+              const modal = document.getElementById('previewModal');
+              const frame = document.getElementById('previewModalFrame');
+              const titleEl = document.getElementById('previewModalTitle');
+              if (!modal || !frame || !titleEl) return;
+              titleEl.textContent = title ? `${title} Preview` : 'Job Preview';
+              frame.src = url;
+              modal.classList.remove('hidden');
+              modal.setAttribute('aria-hidden', 'false');
+              document.body.classList.add('modal-open');
+            }
+
+            function closePreviewModal() {
+              const modal = document.getElementById('previewModal');
+              const frame = document.getElementById('previewModalFrame');
+              if (!modal || !frame) return;
+              modal.classList.add('hidden');
+              modal.setAttribute('aria-hidden', 'true');
+              frame.src = 'about:blank';
+              document.body.classList.remove('modal-open');
+            }
+
+            function initPreviewModal() {
+              document.addEventListener('click', (event) => {
+                const previewLink = event.target.closest('a[data-preview-modal="1"]');
+                if (previewLink) {
+                  event.preventDefault();
+                  const url = previewLink.dataset.previewUrl || previewLink.href;
+                  const title = previewLink.dataset.previewTitle || 'Job';
+                  openPreviewModal(url, title);
+                  return;
+                }
+                const closeTarget = event.target.closest('[data-preview-close="1"]');
+                if (closeTarget) {
+                  event.preventDefault();
+                  closePreviewModal();
+                }
+              });
+              document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') closePreviewModal();
+              });
             }
 
             async function refreshRecentJobs() {
@@ -895,6 +985,7 @@
             }
 
             document.addEventListener('DOMContentLoaded', () => {
+              initPreviewModal();
               const profileShell = document.getElementById('profileShell');
               const profileButton = document.getElementById('profileButton');
               const profileDropdown = document.getElementById('profileDropdown');
