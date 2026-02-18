@@ -598,7 +598,7 @@ STATUS_TEMPLATE = """
       }
 
       function buildDownloadUrl(name) {
-        return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}`;
+        return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}?inline=1`;
       }
 
       function pickAvailableModels(filesByName) {
@@ -1815,7 +1815,13 @@ def job_download(job_id: str, name: str):
     allowed_names = {item["name"] for item in artifacts}
     if name not in allowed_names:
         return ("File not found", 404)
-    return send_from_directory(output_dir, name, as_attachment=True, download_name=name)
+    inline = request.args.get("inline", "").lower() in ("1", "true", "yes")
+    return send_from_directory(
+        output_dir,
+        name,
+        as_attachment=not inline,
+        download_name=name,
+    )
 
 
 @app.route("/internal/worker/jobs/<job_id>/complete", methods=["POST"])
