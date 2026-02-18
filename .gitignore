@@ -8,9 +8,12 @@ out/
 *.obj
 *.mtl
 *.png
+!desktop/src-tauri/icons/icon.png
 src/*.egg-info/
 .env.local
 build/
 dist/
 desktop/node_modules/
 desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/

@@ -1,4 +1,5 @@
 use std::{
+    io,
     net::TcpStream,
     path::PathBuf,
     sync::Mutex,
@@ -33,16 +34,18 @@ fn wait_for_backend(timeout: Duration) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(250));
     }
-    Err(format!("Backend did not start within {}s", timeout.as_secs()))
+    Err(format!(
+        "Backend did not start within {}s",
+        timeout.as_secs()
+    ))
 }
 
 fn stop_sidecar(app: &AppHandle) {
     if let Some(state) = app.try_state::<SidecarState>() {
         if let Ok(mut guard) = state.0.lock() {
-            if let Some(child) = guard.as_mut() {
+            if let Some(child) = guard.take() {
                 let _ = child.kill();
             }
-            *guard = None;
         }
     }
 }
@@ -67,8 +70,7 @@ fn main() {
             let (_receiver, child) = sidecar.spawn()?;
             app.manage(SidecarState(Mutex::new(Some(child))));
 
-            wait_for_backend(Duration::from_secs(25))
-                .map_err(|err| tauri::Error::Setup(err.into()))?;
+            wait_for_backend(Duration::from_secs(25)).map_err(io::Error::other)?;
 
             if let Some(window) = app.get_webview_window("main") {
                 let js = format!("window.location.replace('{}');", BACKEND_URL);
@@ -76,10 +78,11 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!(), |app_handle, event| {
+        .build(tauri::generate_context!())
+        .expect("error building terrain-modeler shell")
+        .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 stop_sidecar(app_handle);
             }
         })
-        .expect("error while running terrain-modeler shell");
 }

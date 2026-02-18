@@ -5,7 +5,13 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 BINARY_DIR="$ROOT_DIR/desktop/src-tauri/binaries"
 SPEC_FILE="$ROOT_DIR/desktop/terrain-modeler.spec"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  PYTHON_CMD="$PYTHON_BIN"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON_CMD="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_CMD="python3"
+fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This script currently targets macOS sidecar builds only." >&2
@@ -27,8 +33,8 @@ esac
 
 cd "$ROOT_DIR"
 
-"$PYTHON_BIN" -m pip install -e ".[dev]"
-"$PYTHON_BIN" -m PyInstaller "$SPEC_FILE" --noconfirm --clean
+"$PYTHON_CMD" -m pip install -e ".[dev]"
+"$PYTHON_CMD" -m PyInstaller "$SPEC_FILE" --noconfirm --clean
 
 mkdir -p "$BINARY_DIR"
 cp "$DIST_DIR/terrain-modeler-backend" "$BINARY_DIR/terrain-modeler-backend"

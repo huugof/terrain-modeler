@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(SPECPATH).resolve().parent if "SPECPATH" in globals() else Path(os.getcwd())
 
 entry_script = ROOT / "desktop" / "sidecar_entry.py"
 

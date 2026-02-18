@@ -126,6 +126,12 @@ npm install
 npm run tauri:build
 ```
 
+For a local verification build (macOS app only, skips DMG packaging):
+```bash
+cd desktop
+npm run tauri:build:app
+```
+
 Desktop runtime env behavior:
 - `VA_DESKTOP_MODE=1` (set by the Tauri shell)
 - Default port `8000`
