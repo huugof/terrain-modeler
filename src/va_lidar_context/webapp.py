@@ -1827,8 +1827,9 @@ def job_download(job_id: str, name: str):
     if not file_path.is_file():
         return ("File not found", 404)
     inline = request.args.get("inline", "").lower() in ("1", "true", "yes")
+    output_dir_abs = output_dir.resolve()
     return send_from_directory(
-        output_dir,
+        str(output_dir_abs),
         name,
         as_attachment=not inline,
         download_name=name,
