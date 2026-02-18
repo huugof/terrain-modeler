@@ -9,3 +9,5 @@
 - [x] user to input coordinates and size only and script to select correct tile programmatically
 - [x] enable selecting more than one tile and tiling them correctly
 - [ ] how do i host this?
+- [ ] what exactly does contour smoothing do
+- [ ] what exactly does output resolution do?

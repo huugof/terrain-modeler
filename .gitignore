@@ -9,3 +9,4 @@ out/
 *.mtl
 *.png
 src/*.egg-info/
+.env.local

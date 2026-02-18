@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Terrain Sign In</title>
+        <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+        <style>
+            body.auth-shell {
+                margin: 0;
+                min-height: 100vh;
+                display: grid;
+                place-items: center;
+                padding: 24px 16px;
+                background: var(--bg);
+            }
+            .auth-main {
+                width: min(420px, calc(100vw - 32px));
+                margin: 0;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 14px;
+            }
+            .auth-main > * {
+                width: 100%;
+            }
+            .auth-brand {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                color: var(--ink);
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                font-size: 14px;
+            }
+            .auth-main > .auth-brand {
+                width: auto;
+            }
+            .auth-logo {
+                width: 20px;
+                height: 20px;
+                color: var(--accent);
+                flex: 0 0 auto;
+            }
+            #clerk-container {
+                display: flex;
+                justify-content: center;
+            }
+            #loginStatus {
+                margin: 0;
+                text-align: center;
+                color: var(--muted);
+                font-size: 12px;
+                display: none;
+            }
+        </style>
+    </head>
+    <body class="auth-shell">
+        <main class="auth-main">
+            <div class="auth-brand" aria-label="Terrain">
+                <svg
+                    class="auth-logo"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="M3 20h18"></path>
+                    <path d="m6 20 6-10 3 5 3-5 3 5"></path>
+                </svg>
+                <span>Terrain</span>
+            </div>
+            <div id="clerk-container"></div>
+            <p id="loginStatus"></p>
+        </main>
+        <script>
+            const NEXT_PATH = {{ next_path|tojson }};
+            const FORCE_SIGN_OUT = {{ force_sign_out|tojson }};
+            const CLERK_PUBLISHABLE_KEY = {{ clerk_publishable_key|tojson }};
+            const CLERK_FRONTEND_API_URL = {{ clerk_frontend_api_url|tojson }};
+            const CLERK_APPEARANCE = {
+                variables: {
+                    colorPrimary: '#a8dadc',
+                    colorBackground: '#353535',
+                    colorInputBackground: '#2f2f2f',
+                    colorInputText: '#e4e4e4',
+                    colorText: '#e4e4e4',
+                    colorTextSecondary: '#bcbcbc',
+                    colorNeutral: '#444444',
+                    colorDanger: '#ff6b6b',
+                    borderRadius: '10px',
+                    fontFamily: '"Avenir Next", "Avenir", "Futura", "Trebuchet MS", sans-serif',
+                },
+            };
+            let exchangeInFlight = false;
+            function setStatus(message) {
+                const status = document.getElementById('loginStatus');
+                if (!status) return;
+                const text = String(message || '').trim();
+                status.textContent = text;
+                status.style.display = text ? 'block' : 'none';
+            }
+
+            async function finalizeSession(clerk) {
+                if (exchangeInFlight) {
+                    return;
+                }
+                if (!clerk.session) {
+                    setStatus('');
+                    return;
+                }
+                exchangeInFlight = true;
+                setStatus('Finalizing sign-in...');
+                try {
+                    const token = await clerk.session.getToken();
+                    const resp = await fetch('/auth/clerk/exchange', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token, next: NEXT_PATH }),
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok) {
+                        throw new Error(data.error || 'Unable to establish session.');
+                    }
+                    window.location.href = data.next || '/';
+                } catch (err) {
+                    exchangeInFlight = false;
+                    setStatus(String(err.message || err));
+                }
+            }
+
+            async function boot() {
+                if (!CLERK_PUBLISHABLE_KEY) {
+                    setStatus('Missing VA_CLERK_PUBLISHABLE_KEY.');
+                    return;
+                }
+                try {
+                    const clerk = await loadClerk();
+                    await clerk.load();
+                    if (FORCE_SIGN_OUT && clerk.session) {
+                        setStatus('Signing out...');
+                        await clerk.signOut();
+                        exchangeInFlight = false;
+                    }
+                    if (clerk.user && clerk.session) {
+                        await finalizeSession(clerk);
+                        return;
+                    }
+                    clerk.mountSignIn(document.getElementById('clerk-container'), {
+                        afterSignInUrl: window.location.href,
+                        appearance: CLERK_APPEARANCE,
+                    });
+                    if (typeof clerk.addListener === 'function') {
+                        clerk.addListener((state) => {
+                            if (state && state.session) {
+                                finalizeSession(clerk);
+                            }
+                        });
+                    }
+                    // Some Clerk widget flows do not force a full redirect. Poll briefly
+                    // so we exchange the session token as soon as one is available.
+                    const startedAt = Date.now();
+                    const poll = window.setInterval(() => {
+                        if (clerk.session) {
+                            window.clearInterval(poll);
+                            finalizeSession(clerk);
+                            return;
+                        }
+                        if (Date.now() - startedAt > 120000) {
+                            window.clearInterval(poll);
+                        }
+                    }, 750);
+                    setStatus('');
+                } catch (err) {
+                    setStatus(`Clerk failed to load: ${String(err.message || err)}`);
+                }
+            }
+
+            function loadClerk() {
+                return new Promise((resolve, reject) => {
+                    if (window.__terrainClerkGlobal) {
+                        resolve(window.__terrainClerkGlobal);
+                        return;
+                    }
+                    if (window.Clerk) {
+                        window.__terrainClerkGlobal = window.Clerk;
+                        resolve(window.__terrainClerkGlobal);
+                        return;
+                    }
+                    const frontendApi = normalizeFrontendApiUrl(CLERK_FRONTEND_API_URL) || frontendApiFromPublishableKey(CLERK_PUBLISHABLE_KEY);
+                    const sources = [
+                        frontendApi ? `${frontendApi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js` : '',
+                        'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js',
+                        'https://unpkg.com/@clerk/clerk-js@5/dist/clerk.browser.js',
+                    ].filter(Boolean);
+                    if (!sources.length) {
+                        reject(new Error('Unable to determine Clerk JS source. Set VA_CLERK_FRONTEND_API_URL.'));
+                        return;
+                    }
+                    const loaded = new Set();
+                    document.querySelectorAll('script[src]').forEach((node) => {
+                        if (node.src) loaded.add(node.src);
+                    });
+                    const loadFrom = (idx) => {
+                        if (idx >= sources.length) {
+                            reject(new Error('Failed to load Clerk browser bundle from CDN.'));
+                            return;
+                        }
+                        const script = document.createElement('script');
+                        script.src = sources[idx];
+                        if (loaded.has(script.src)) {
+                            if (window.Clerk) {
+                                window.__terrainClerkGlobal = window.Clerk;
+                                resolve(window.__terrainClerkGlobal);
+                                return;
+                            }
+                            loadFrom(idx + 1);
+                            return;
+                        }
+                        script.type = 'text/javascript';
+                        script.setAttribute('data-clerk-publishable-key', CLERK_PUBLISHABLE_KEY);
+                        script.async = true;
+                        script.crossOrigin = 'anonymous';
+                        script.onload = () => {
+                            if (!window.Clerk) {
+                                loadFrom(idx + 1);
+                                return;
+                            }
+                            window.__terrainClerkGlobal = window.Clerk;
+                            resolve(window.__terrainClerkGlobal);
+                        };
+                        script.onerror = () => loadFrom(idx + 1);
+                        document.head.appendChild(script);
+                    };
+                    loadFrom(0);
+                });
+            }
+
+            function normalizeFrontendApiUrl(value) {
+                const raw = String(value || '').trim();
+                if (!raw) return '';
+                if (raw.startsWith('http://') || raw.startsWith('https://')) {
+                    return raw.replace(/\/+$/, '');
+                }
+                return `https://${raw.replace(/\/+$/, '')}`;
+            }
+
+            function frontendApiFromPublishableKey(key) {
+                const raw = String(key || '').trim();
+                const firstUnderscore = raw.indexOf('_', raw.indexOf('_') + 1);
+                if (firstUnderscore < 0) return '';
+                const encoded = raw.slice(firstUnderscore + 1);
+                if (!encoded) return '';
+                let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+                while (base64.length % 4 !== 0) base64 += '=';
+                try {
+                    const decoded = atob(base64);
+                    const hostOrUrl = decoded.split('$')[0].trim();
+                    return normalizeFrontendApiUrl(hostOrUrl);
+                } catch (_) {
+                    return '';
+                }
+            }
+
+            boot();
+        </script>
+    </body>
+</html>
