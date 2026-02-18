@@ -128,7 +128,12 @@ def _laz_crs_wkt(las: laspy.LasData) -> str:
             return parsed.to_wkt()
         except Exception:
             pass
-    for vlr in las.header.vlrs:
+    records = list(las.header.vlrs)
+    try:
+        records.extend(list(las.header.evlrs or []))
+    except Exception:
+        pass
+    for vlr in records:
         if getattr(vlr, "string", None):
             text = str(vlr.string).strip()
             if "GEOGCS" in text or "PROJCRS" in text or "COMPD_CS" in text:
@@ -142,6 +147,16 @@ def _laz_crs_wkt(las: laspy.LasData) -> str:
             if "GEOGCS" in text or "PROJCRS" in text or "COMPD_CS" in text:
                 return text
     raise ValueError("LAZ CRS not found in header")
+
+
+def _las_crs(las: laspy.LasData) -> CRS | None:
+    parsed = las.header.parse_crs()
+    if parsed is not None:
+        return parsed
+    try:
+        return CRS.from_wkt(_laz_crs_wkt(las))
+    except Exception:
+        return None
 
 
 def fill_nodata_raster(
@@ -507,7 +522,7 @@ def merge_lazs(
         x = np.asarray(las.x, dtype=np.float64)
         y = np.asarray(las.y, dtype=np.float64)
         z = np.asarray(las.z, dtype=np.float64)
-        src_crs = las.header.parse_crs()
+        src_crs = _las_crs(las)
         if source_crs_for_output is None and src_crs is not None:
             source_crs_for_output = src_crs
         if (

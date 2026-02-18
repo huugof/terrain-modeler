@@ -35,7 +35,12 @@ def get_laz_crs_wkt(laz_path: str) -> str:
             return parsed.to_wkt()
         except Exception:
             pass
-    for vlr in las.header.vlrs:
+    records = list(las.header.vlrs)
+    try:
+        records.extend(list(las.header.evlrs or []))
+    except Exception:
+        pass
+    for vlr in records:
         if getattr(vlr, "string", None):
             text = str(vlr.string).strip()
             if "GEOGCS" in text or "PROJCRS" in text or "COMPD_CS" in text:
