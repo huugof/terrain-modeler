@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import random
+import shutil
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, Dict, Iterable
@@ -11,6 +13,7 @@ from shapely.geometry import box
 from shapely.ops import transform as shp_transform
 
 from ..config import BuildConfig
+from ..core.ept import ept_to_laz, laz_point_count
 from ..core.geo import bbox_contains, bbox_from_center_wgs84
 from ..core.heights import (
     FEET_PER_METER,
@@ -58,8 +61,10 @@ from ..pipeline.report import write_report
 from ..providers import (
     national_footprints,
     rockyweb_health,
+    usgs_ept,
     usgs_index,
     usgs_laz,
+    usgs_products,
     vgin,
 )
 from ..util import download_file, ensure_dir, get_logger, write_json
@@ -113,6 +118,25 @@ def _image_job_name(lat: float, lon: float, size: float, units: str) -> str:
     return f"image_{lat:.5f}_{lon:.5f}_{suffix}"
 
 
+def _project_wgs84_bbox_to_crs_bounds(
+    bbox_wgs84: tuple[float, float, float, float], to_crs: Transformer
+) -> tuple[float, float, float, float]:
+    min_lon, min_lat, max_lon, max_lat = bbox_wgs84
+    corners = [
+        (min_lon, min_lat),
+        (min_lon, max_lat),
+        (max_lon, min_lat),
+        (max_lon, max_lat),
+    ]
+    xs: list[float] = []
+    ys: list[float] = []
+    for lon, lat in corners:
+        x, y = to_crs.transform(lon, lat)
+        xs.append(float(x))
+        ys.append(float(y))
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def build(cfg: BuildConfig) -> int:
     """Run the full build pipeline for a configuration."""
 
@@ -121,6 +145,7 @@ def build(cfg: BuildConfig) -> int:
     warnings: list[str] = []
     source_type_used: str | None = None
     naip_tiled_used: bool | None = cfg.naip_tiled
+    pdal_available = shutil.which("pdal") is not None
 
     outputs = _validate_outputs(cfg.outputs)
     export_buildings = "buildings" in outputs
@@ -304,7 +329,49 @@ def build(cfg: BuildConfig) -> int:
     else:
         if cfg.size is None:
             raise ValueError("National provider requires --size")
-        tile_info = _build_laz_fallback_tile_info()
+        tile_info = None
+        prefer_ept = cfg.prefer_ept
+        if cfg.prefer_ept and not pdal_available:
+            if cfg.ept_only:
+                raise ValueError(
+                    "EPT mode requires PDAL, but `pdal` was not found on PATH."
+                )
+            prefer_ept = False
+            msg = "PDAL not found; skipping EPT and using LAZ fallback."
+            logger.warning(msg)
+            warnings.append(msg)
+        if prefer_ept:
+            ept_source = None
+            if clip_bbox_wgs84_hint is not None:
+                ept_source = usgs_ept.resolve_ept_from_bbox(
+                    clip_bbox_wgs84_hint, logger=logger, cache_dir=cache_dir
+                )
+            if ept_source is None:
+                ept_source = usgs_ept.resolve_ept_from_point(
+                    lon, lat, logger=logger, cache_dir=cache_dir
+                )
+            if ept_source is not None:
+                tile_info = {
+                    "tile_name": tile_name,
+                    "provider": "national",
+                    "source_type": "ept",
+                    "ept_url": ept_source.uri,
+                    "crs_wkt": ept_source.crs_wkt,
+                    "bbox_wgs84": {
+                        "xmin": ept_source.bbox_wgs84[0],
+                        "ymin": ept_source.bbox_wgs84[1],
+                        "xmax": ept_source.bbox_wgs84[2],
+                        "ymax": ept_source.bbox_wgs84[3],
+                    },
+                    **ept_source.metadata,
+                }
+        if tile_info is None:
+            if cfg.ept_only:
+                raise ValueError(
+                    "EPT coverage not available for this location "
+                    "(use another location or disable --ept-only)"
+                )
+            tile_info = _build_laz_fallback_tile_info()
 
     job_center = None
     if lat is not None and lon is not None:
@@ -352,7 +419,24 @@ def build(cfg: BuildConfig) -> int:
         bbox_wgs84=tile_info.get("bbox_wgs84") if tile_info else None,
     )
 
-    logger.info("Stage 2/6: download LAZ")
+    if provider != "va" and tile_info:
+        coverage_status = tile_info.get("coverage_status")
+        if coverage_status == "partial":
+            ratio = tile_info.get("coverage_ratio")
+            if ratio is not None:
+                msg = (
+                    "EPT coverage is partial for the requested clip "
+                    f"(~{ratio * 100:.1f}% covered). Output may be incomplete."
+                )
+            else:
+                msg = (
+                    "EPT coverage is partial for the requested clip. "
+                    "Output may be incomplete."
+                )
+            logger.warning(msg)
+            warnings.append(msg)
+
+    logger.info("Stage 2/6: download point cloud")
     tile_infos = [tile_info]
     laz_paths = [laz_path]
     laz_processing_path = laz_path
@@ -363,49 +447,170 @@ def build(cfg: BuildConfig) -> int:
         download_file(laz_url, laz_path, force=cfg.force)
         source_type_used = "laz"
     else:
-        health = rockyweb_health.check_rockyweb(
-            cache_dir / "rockyweb_health.json", logger=logger
-        )
-        if not health.get("ok"):
-            raise ValueError(
-                "rockyweb is unavailable for USGS LAZ download. "
-                f"status={health.get('status')} error={health.get('error')}"
-            )
-        lpc_link = tile_info.get("lpc_link")
-        if not lpc_link:
-            raise ValueError("Missing LPC link for USGS LAZ download")
-        laz_urls = usgs_laz.list_laz_urls(lpc_link, logger=logger)
-        if not laz_urls:
-            raise ValueError("No LAZ URLs found for workunit")
         if cfg.size is None:
             raise ValueError("National provider requires --size")
         if clip_bbox_wgs84_hint is None:
             clip_bbox_wgs84_hint = bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
-        cache_dir = cfg.out_dir / "_cache" / "usgs_laz"
-        workunit = tile_info.get("workunit", "workunit")
-        cache_path = cache_dir / f"{workunit}.json"
-        tiles_index = usgs_laz.build_laz_index(
-            laz_urls, cache_path, force=cfg.force, logger=logger
-        )
-        selected = usgs_laz.select_laz_tiles(tiles_index, clip_bbox_wgs84_hint)
-        if not selected:
-            raise ValueError("No LAZ tiles intersect clip bbox")
-        tiles_dir = tile_dir / "tiles"
-        ensure_dir(tiles_dir)
-        laz_paths = []
-        for idx, tile in enumerate(selected):
-            local = laz_path if idx == 0 else tiles_dir / Path(tile.url).name
-            download_file(tile.url, local, force=cfg.force)
-            laz_paths.append(local)
-        if len(laz_paths) > 1:
-            merge_lazs(laz_paths, merged_laz_path)
-            laz_processing_path = merged_laz_path
-            multi_tile_used = True
+        source_type = tile_info.get("source_type")
+        if source_type == "ept":
+            ept_url = tile_info.get("ept_url")
+            ept_wkt = tile_info.get("crs_wkt")
+            if not ept_url:
+                raise ValueError("Missing EPT URL in tile info")
+            if not ept_wkt:
+                ept_source = usgs_ept.resolve_ept_from_bbox(
+                    clip_bbox_wgs84_hint, logger=logger, cache_dir=cache_dir
+                )
+                if ept_source is None:
+                    ept_source = usgs_ept.resolve_ept_from_point(
+                        lon, lat, logger=logger, cache_dir=cache_dir
+                    )
+                if ept_source is None or not ept_source.crs_wkt:
+                    raise ValueError("Failed to resolve EPT CRS")
+                ept_wkt = ept_source.crs_wkt
+                tile_info["crs_wkt"] = ept_wkt
+                write_json(tile_json, tile_info)
+            ept_crs = CRS.from_wkt(ept_wkt)
+            to_ept = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
+            wgs_bb = clip_bbox_wgs84_hint
+            bounds = _project_wgs84_bbox_to_crs_bounds(wgs_bb, to_ept)
+            try:
+                if cfg.force or not laz_path.exists():
+                    ept_to_laz(ept_url, laz_path, bounds)
+                elif laz_point_count(laz_path) <= 0:
+                    raise ValueError(
+                        "Cached EPT LAZ contains zero points; refreshing required."
+                    )
+                source_type_used = "ept"
+            except Exception as exc:
+                if cfg.ept_only:
+                    raise
+                msg = f"EPT fetch failed; falling back to LAZ ({exc})"
+                logger.warning(msg)
+                warnings.append(msg)
+                tile_info = _build_laz_fallback_tile_info()
+                write_json(tile_json, tile_info)
+                source_type = "laz"
+        if source_type == "laz":
+            health = rockyweb_health.check_rockyweb(
+                cache_dir / "rockyweb_health.json", logger=logger
+            )
+            if not health.get("ok"):
+                raise ValueError(
+                    "rockyweb is unavailable for USGS LAZ download. "
+                    f"status={health.get('status')} error={health.get('error')}"
+                )
+
+            selected_urls: list[str] = []
+            workunit = str(tile_info.get("workunit") or "").strip()
+            try:
+                tnm_tiles = usgs_products.query_laz_for_bbox(clip_bbox_wgs84_hint)
+                if tnm_tiles:
+                    workunit_token = f"/{workunit.lower()}/" if workunit else ""
+                    in_workunit = (
+                        [
+                            t
+                            for t in tnm_tiles
+                            if workunit_token in str(t.get("url", "")).lower()
+                        ]
+                        if workunit_token
+                        else []
+                    )
+                    chosen = in_workunit if in_workunit else tnm_tiles
+                    if in_workunit:
+                        logger.info(
+                            f"Using TNM tile API for LAZ discovery ({len(chosen)} tile(s) in workunit)"
+                        )
+                    else:
+                        logger.info(
+                            f"Using TNM tile API for LAZ discovery ({len(chosen)} tile(s))"
+                        )
+                        if workunit:
+                            warning = (
+                                "TNM tile results did not include the selected workunit; "
+                                "using intersecting LPC tiles returned by TNM API."
+                            )
+                            warnings.append(warning)
+                            logger.warning(warning)
+                    selected_urls = [
+                        str(item.get("url")) for item in chosen if item.get("url")
+                    ]
+            except Exception as exc:
+                logger.warning(
+                    f"TNM tile API lookup failed; falling back to workunit index: {exc}"
+                )
+
+            if selected_urls:
+                # Validate TNM candidates against actual LAZ header bounds before full download.
+                try:
+                    cache_dir_tnm = cfg.out_dir / "_cache" / "usgs_tnm"
+                    key_seed = "|".join(sorted(selected_urls)).encode("utf-8")
+                    key = hashlib.sha1(key_seed).hexdigest()[:20]
+                    cache_path_tnm = cache_dir_tnm / f"{key}.json"
+                    tnm_index = usgs_laz.build_laz_index(
+                        selected_urls, cache_path_tnm, force=cfg.force
+                    )
+                    selected = usgs_laz.select_laz_tiles(
+                        tnm_index, clip_bbox_wgs84_hint
+                    )
+                    selected_urls = [t.url for t in selected]
+                    if not selected_urls:
+                        logger.warning(
+                            "TNM tile candidates did not overlap clip after LAZ header validation; "
+                            "falling back to workunit index."
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        f"TNM tile validation failed; falling back to workunit index: {exc}"
+                    )
+                    selected_urls = []
+
+            if not selected_urls:
+                lpc_link = tile_info.get("lpc_link")
+                if not lpc_link:
+                    raise ValueError("Missing LPC link for USGS LAZ download")
+                laz_urls = usgs_laz.list_laz_urls(lpc_link, logger=logger)
+                if not laz_urls:
+                    raise ValueError("No LAZ URLs found for workunit")
+                cache_dir = cfg.out_dir / "_cache" / "usgs_laz"
+                cache_path = cache_dir / f"{workunit or 'workunit'}.json"
+                if cache_path.exists() and not cfg.force:
+                    logger.info("Using cached LAZ tile index for workunit")
+                else:
+                    logger.info(
+                        "Building LAZ tile index for workunit (first run may take a while)"
+                    )
+                tiles_index = usgs_laz.build_laz_index(
+                    laz_urls, cache_path, force=cfg.force, logger=logger
+                )
+                selected = usgs_laz.select_laz_tiles(tiles_index, clip_bbox_wgs84_hint)
+                if not selected:
+                    raise ValueError("No LAZ tiles intersect clip bbox")
+                selected_urls = [t.url for t in selected]
+
+            tiles_dir = tile_dir / "tiles"
+            ensure_dir(tiles_dir)
+            laz_paths = []
+            for idx, url in enumerate(selected_urls):
+                name = Path(url).name or f"tile_{idx:04d}.laz"
+                local = laz_path if idx == 0 else tiles_dir / f"{idx:04d}_{name}"
+                download_file(url, local, force=cfg.force)
+                laz_paths.append(local)
+            if len(laz_paths) > 1:
+                merge_lazs(laz_paths, merged_laz_path)
+                laz_processing_path = merged_laz_path
+                multi_tile_used = True
+            else:
+                laz_processing_path = laz_paths[0]
+                multi_tile_used = False
+            tile_infos = [tile_info]
+            source_type_used = "laz"
+        elif source_type == "ept":
+            pass
         else:
-            laz_processing_path = laz_paths[0]
-            multi_tile_used = False
-        tile_infos = [tile_info]
-        source_type_used = "laz"
+            raise ValueError(
+                f"Unknown source_type for national provider: {source_type}"
+            )
 
     laz_wkt = get_laz_crs_wkt(str(laz_processing_path))
     laz_crs = CRS.from_wkt(laz_wkt)

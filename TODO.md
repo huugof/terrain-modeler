@@ -11,3 +11,10 @@
 - [ ] how do i host this?
 - [ ] what exactly does contour smoothing do
 - [ ] what exactly does output resolution do?
+- [ ] set up proper HTTPS with domain + Caddy (`docker-compose.prod.yml`)
+- [ ] move from ad-hoc `docker run` to compose-managed deployment
+- [ ] add ops hardening: backups for `/data/app` + `/data/out`
+- [ ] add ops hardening: log rotation + monitoring/alerts
+- [ ] tighten firewall for production (public 80/443 only)
+- [ ] decide next architecture phase: single droplet only vs ephemeral worker droplets
+- [ ] if moving to ephemeral workers: implement create/run/destroy workflow with idle shutdown

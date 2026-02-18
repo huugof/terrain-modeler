@@ -24,6 +24,7 @@ USGS_LIDAR_INDEX_LAYER = (
 )
 
 USGS_LIDAR_INDEX_QUERY = f"{USGS_LIDAR_INDEX_LAYER}/query"
+USGS_TNM_PRODUCTS_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 
 USGS_LIDAR_PUBLIC_BUCKET = "https://usgs-lidar-public.s3.amazonaws.com"
 

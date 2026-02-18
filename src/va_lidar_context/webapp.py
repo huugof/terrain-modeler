@@ -45,6 +45,7 @@ from .config import (
     DEFAULT_DXF_CONTOUR_SPACING,
     DEFAULT_DXF_INCLUDE_BUILDINGS,
     DEFAULT_DXF_INCLUDE_PARCELS,
+    DEFAULT_EPT_ONLY,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
     DEFAULT_FLOOR_TO_FLOOR,
@@ -56,6 +57,7 @@ from .config import (
     DEFAULT_OUT_DIR,
     DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
+    DEFAULT_PREFER_EPT,
     DEFAULT_PROJECT_ZERO,
     DEFAULT_PROVIDER,
     DEFAULT_RESOLUTION,
@@ -403,44 +405,41 @@ STATUS_TEMPLATE = """
       header { padding: 20px 24px; }
       main { padding: 0 24px 32px; }
       .card { background:#fff; border:1px solid #e4ded4; border-radius:12px; padding:16px; margin-bottom:16px; }
-      pre { background:#0f1410; color:#bde7c0; padding:14px; border-radius:8px; height:420px; overflow:auto; }
-      a {
-        color: #B39CD0;
-        text-decoration: none;
+      .meta { color: #666; margin-top: 6px; }
+      .actions { margin-top: 10px; }
+      a { color: #B39CD0; text-decoration: none; }
+      .status-chip {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 600;
       }
-      .meta {
-        color: #B39CD0;
-        text-decoration: none;
+      .status-running { background: #3f2f1b; color: #ffd58e; }
+      .status-done { background: #203328; color: #b8f2c9; }
+      .status-error { background: #3b1f1f; color: #ffd4d4; }
+      .status-unknown { background: #2f2f2f; color: #d4d4d4; }
+      .tab-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
       }
-      .hidden {
+      .tab-btn {
+        border: 1px solid #d6d6d6;
+        border-radius: 8px;
+        background: #fff;
+        color: #1f1f1f;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .tab-btn.active {
+        border-color: #b39cd0;
+        background: #f5f1fb;
+      }
+      .tab-panel.hidden {
         display: none;
       }
-      input[type="range"] {
-        -webkit-appearance: none;
-        width: 100%;
-        height: 6px;
-        border-radius: 999px;
-        background: #3f3f3f;
-        outline: none;
-      }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
-      }
-      input[type="range"]::-moz-range-thumb {
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #B39CD0;
-        border: none;
-      }
-      select {
-        appearance: none;
-      }
+      pre { background:#0f1410; color:#bde7c0; padding:14px; border-radius:8px; height:420px; overflow:auto; margin: 0; }
       #preview-container {
         width: 100%;
         height: 500px;
@@ -474,37 +473,30 @@ STATUS_TEMPLATE = """
         color: #1f1f1f;
         padding: 8px 10px;
       }
-      #preview-controls button {
-        cursor: pointer;
-      }
-      #preview-controls button:hover {
-        border-color: #b39cd0;
-      }
-      #preview-file {
-        min-width: 160px;
-      }
+      #preview-controls button { cursor: pointer; }
+      #preview-controls button:hover { border-color: #b39cd0; }
+      #preview-file { min-width: 180px; }
       @media (max-width: 700px) {
-        #preview-container {
-          height: 340px;
-        }
-      }
-      #preview-section {
-        display: none;
-        margin-bottom: 14px;
+        #preview-container { height: 340px; }
       }
     </style>
   </head>
   <body>
     <header>
-      <h2>Job {{ job.job_id }}</h2>
-      <div class="meta">Status: <span id="status">{{ status_label(job.status) }}</span></div>
+      <h2>{{ job.summary.get('name') or job.job_id }}</h2>
+      <div class="meta">Job ID: {{ job.job_id }}</div>
+      <div class="meta">Status: <span id="status" class="status-chip {{ status_class(job.status) }}">{{ status_label(job.status) }}</span></div>
       <div class="meta">Provider: {{ job.summary.get('provider_label') or job.summary.get('provider') }}</div>
       <div class="meta">Output folder: {{ job.summary.get('out') }}</div>
       <div class="meta">Target: {{ job.summary.get('target') }}</div>
       {% if job.summary.get('tile') %}
         <div class="meta">Tile: {{ job.summary.get('tile') }}</div>
       {% endif %}
-      <div class="meta"><a href="{{ url_for('index') }}">Back to form</a></div>
+      <div class="meta actions">
+        <a href="{{ url_for('index', from_job=job.job_id) }}">Reuse settings in main form</a>
+        ·
+        <a href="{{ url_for('index') }}">Back to form</a>
+      </div>
     </header>
     <main>
       {% if job.error or job.summary.get('warnings') %}
@@ -523,9 +515,13 @@ STATUS_TEMPLATE = """
         {% endif %}
       </div>
       {% endif %}
-      <div class="card" id="preview-card">
+      <div class="card">
         <h3>3D Preview & Activity</h3>
-        <div id="preview-section">
+        <div class="tab-row">
+          <button type="button" class="tab-btn" data-tab="preview" id="tab-preview">Preview</button>
+          <button type="button" class="tab-btn" data-tab="log" id="tab-log">Activity Log</button>
+        </div>
+        <div id="panel-preview" class="tab-panel">
           <div id="preview-container">
             <div id="preview-message">Waiting for model files...</div>
           </div>
@@ -535,8 +531,9 @@ STATUS_TEMPLATE = """
             <select id="preview-file"></select>
           </div>
         </div>
-        <h4>Activity Log</h4>
-        <pre id="logs"></pre>
+        <div id="panel-log" class="tab-panel">
+          <pre id="logs"></pre>
+        </div>
       </div>
     </main>
     <script type="importmap">
@@ -555,7 +552,6 @@ STATUS_TEMPLATE = """
       window.OrbitControls = OrbitControls;
       window.OBJLoader = OBJLoader;
       window.MTLLoader = MTLLoader;
-      window.__threePreviewReady = true;
     </script>
     <script>
       const STATUS_LABELS = {
@@ -564,11 +560,16 @@ STATUS_TEMPLATE = """
         done: 'Completed',
         error: 'Failed',
       };
+      const STATUS_CLASSES = {
+        queued: 'status-running',
+        running: 'status-running',
+        done: 'status-done',
+        error: 'status-error',
+      };
       const previewState = {
         jobId: '{{ job.job_id }}',
         initialized: false,
         activationStarted: false,
-        cardVisible: false,
         wireframe: false,
         filesByName: new Map(),
         models: [],
@@ -580,27 +581,44 @@ STATUS_TEMPLATE = """
         currentObject: null,
       };
 
+      function setActiveTab(tabName) {
+        const isPreview = tabName === 'preview';
+        const previewPanel = document.getElementById('panel-preview');
+        const logPanel = document.getElementById('panel-log');
+        const previewBtn = document.getElementById('tab-preview');
+        const logBtn = document.getElementById('tab-log');
+        if (previewPanel) previewPanel.classList.toggle('hidden', !isPreview);
+        if (logPanel) logPanel.classList.toggle('hidden', isPreview);
+        if (previewBtn) previewBtn.classList.toggle('active', isPreview);
+        if (logBtn) logBtn.classList.toggle('active', !isPreview);
+      }
+
+      function initTabs() {
+        document.querySelectorAll('.tab-btn[data-tab]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const tab = button.dataset.tab === 'preview' ? 'preview' : 'log';
+            setActiveTab(tab);
+          });
+        });
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get('tab');
+        setActiveTab(requested === 'preview' ? 'preview' : 'log');
+      }
+
+      function setStatusBadge(status) {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return;
+        const label = STATUS_LABELS[status] || status;
+        const className = STATUS_CLASSES[status] || 'status-unknown';
+        statusEl.textContent = label;
+        statusEl.className = `status-chip ${className}`;
+      }
+
       function setPreviewMessage(message) {
         const msgEl = document.getElementById('preview-message');
         if (msgEl) {
           msgEl.textContent = message;
           msgEl.style.display = message ? 'block' : 'none';
-        }
-      }
-
-      function showPreviewCard() {
-        const section = document.getElementById('preview-section');
-        if (section) {
-          section.style.display = 'block';
-          previewState.cardVisible = true;
-        }
-      }
-
-      function hidePreviewCard() {
-        const section = document.getElementById('preview-section');
-        if (section) {
-          section.style.display = 'none';
-          previewState.cardVisible = false;
         }
       }
 
@@ -740,14 +758,10 @@ STATUS_TEMPLATE = """
       function centerAndPrepareObject(obj) {
         obj.traverse((node) => {
           if (!node.isMesh) return;
-          if (node.geometry) {
-            node.geometry.computeVertexNormals();
-          }
+          if (node.geometry) node.geometry.computeVertexNormals();
           if (!node.material) return;
           const materials = Array.isArray(node.material) ? node.material : [node.material];
-          for (const material of materials) {
-            material.side = THREE.DoubleSide;
-          }
+          for (const material of materials) material.side = THREE.DoubleSide;
         });
         const box = new THREE.Box3().setFromObject(obj);
         if (!box.isEmpty()) {
@@ -763,9 +777,7 @@ STATUS_TEMPLATE = """
           if (url.startsWith('data:') || /^https?:\\/\\//i.test(url)) return url;
           const clean = url.split('#')[0].split('?')[0];
           const name = clean.slice(clean.lastIndexOf('/') + 1);
-          if (previewState.filesByName.has(name)) {
-            return buildDownloadUrl(name);
-          }
+          if (previewState.filesByName.has(name)) return buildDownloadUrl(name);
           return url;
         });
 
@@ -780,7 +792,6 @@ STATUS_TEMPLATE = """
                 const mtlPath = `/jobs/${previewState.jobId}/download/`;
                 const materials = mtlLoader.parse(mtlText, mtlPath);
                 materials.preload();
-                // OBJ UVs are exported in model space; keep texture orientation aligned.
                 for (const key of Object.keys(materials.materials)) {
                   const material = materials.materials[key];
                   if (material && material.map) {
@@ -797,9 +808,7 @@ STATUS_TEMPLATE = """
 
           const objUrl = buildDownloadUrl(part.obj);
           const objResp = await fetch(objUrl, { cache: 'no-store' });
-          if (!objResp.ok) {
-            throw new Error(`OBJ fetch failed (${objResp.status}) for ${part.obj}`);
-          }
+          if (!objResp.ok) throw new Error(`OBJ fetch failed (${objResp.status}) for ${part.obj}`);
           const objText = await objResp.text();
           return objLoader.parse(objText);
         })();
@@ -820,9 +829,7 @@ STATUS_TEMPLATE = """
               console.warn('Preview part failed', part.obj, error);
             }
           }
-          if (!group.children.length) {
-            throw new Error('No preview geometry could be loaded.');
-          }
+          if (!group.children.length) throw new Error('No preview geometry could be loaded.');
           centerAndPrepareObject(group);
           previewState.scene.add(group);
           previewState.currentObject = group;
@@ -839,17 +846,18 @@ STATUS_TEMPLATE = """
       async function activatePreview() {
         if (previewState.activationStarted) return;
         previewState.activationStarted = true;
-
         let artifactPayload;
         try {
           const resp = await fetch(`/jobs/${previewState.jobId}/artifacts`, { cache: 'no-store' });
           if (!resp.ok) {
-            hidePreviewCard();
+            previewState.activationStarted = false;
+            setPreviewMessage('Preview will be available when model files are generated.');
             return;
           }
           artifactPayload = await resp.json();
         } catch (error) {
-          hidePreviewCard();
+          previewState.activationStarted = false;
+          setPreviewMessage('Preview could not be loaded.');
           return;
         }
 
@@ -857,11 +865,11 @@ STATUS_TEMPLATE = """
         previewState.filesByName = new Map(files.map((f) => [f.name, f]));
         previewState.models = pickAvailableModels(previewState.filesByName);
         if (!previewState.models.length) {
-          hidePreviewCard();
+          previewState.activationStarted = false;
+          setPreviewMessage('No 3D model artifacts found for this job.');
           return;
         }
 
-        showPreviewCard();
         if (!ensureThreeContext()) {
           previewState.activationStarted = false;
           setTimeout(activatePreview, 600);
@@ -877,17 +885,19 @@ STATUS_TEMPLATE = """
           option.textContent = model.label;
           select.appendChild(option);
         }
-        select.addEventListener('change', (event) => {
-          const value = event.target.value;
-          if (value) renderModel(value);
-        });
+        if (select.dataset.bound !== 'true') {
+          select.addEventListener('change', (event) => {
+            const value = event.target.value;
+            if (value) renderModel(value);
+          });
+          select.dataset.bound = 'true';
+        }
         renderModel(previewState.models[0].key);
       }
 
       async function pollLogs(jobId) {
         const logsEl = document.getElementById('logs');
-        const statusEl = document.getElementById('status');
-        if (!logsEl || !statusEl) return;
+        if (!logsEl) return;
         let offset = 0;
 
         async function poll() {
@@ -899,13 +909,9 @@ STATUS_TEMPLATE = """
             logsEl.scrollTop = logsEl.scrollHeight;
             offset = logData.offset;
           }
-          statusEl.textContent = STATUS_LABELS[logData.status] || logData.status;
-          if (logData.status === 'done') {
-            activatePreview();
-          }
-          if (logData.status === 'running' || logData.status === 'queued') {
-            setTimeout(poll, 1500);
-          }
+          setStatusBadge(logData.status);
+          if (logData.status === 'done') activatePreview();
+          if (logData.status === 'running' || logData.status === 'queued') setTimeout(poll, 1500);
         }
         poll();
       }
@@ -937,10 +943,14 @@ STATUS_TEMPLATE = """
       window.resetCamera = resetCamera;
 
       document.addEventListener('DOMContentLoaded', () => {
+        initTabs();
+        setStatusBadge('{{ job.status }}');
         if ('{{ job.status }}' === 'done') {
           activatePreview();
+        } else if ('{{ job.status }}' === 'error') {
+          setPreviewMessage('Build failed. Preview unavailable.');
         } else {
-          hidePreviewCard();
+          setPreviewMessage('Preview will be available when the build completes.');
         }
         pollLogs('{{ job.job_id }}');
       });
@@ -1000,6 +1010,16 @@ def status_label(status: str) -> str:
         "error": "Failed",
     }
     return mapping.get(status, status.title())
+
+
+def status_class(status: str) -> str:
+    if status in ("queued", "running"):
+        return "status-running"
+    if status == "done":
+        return "status-done"
+    if status == "error":
+        return "status-error"
+    return "status-unknown"
 
 
 def _coverage_cache_key(lon: float, lat: float) -> str:
@@ -1266,6 +1286,7 @@ def snapshot_defaults() -> Dict[str, Any]:
         "provider_label": "VGIN (Virginia)",
         "center1": 37.5390116184146,
         "center2": -77.43353162833343,
+        "job_name": "",
         "clip_size": 1500.0,
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 5,
@@ -1288,6 +1309,92 @@ def snapshot_defaults() -> Dict[str, Any]:
         "contour_interval": 2.0,
         "image_quality": "standard",
     }
+
+
+def _extract_form_defaults(
+    *,
+    coords: str,
+    clip_size: float,
+    units: str,
+    terrain_complexity: int,
+    rotate_z: float,
+    project_zero: float,
+    contour_interval: Optional[float],
+    dxf_contour_spacing: Optional[float],
+    dxf_include_parcels: bool,
+    dxf_include_buildings: bool,
+    xyz_mode: str,
+    image_quality: str,
+    random_min_height: float,
+    random_max_height: float,
+    output_terrain: bool,
+    output_buildings: bool,
+    output_contours: bool,
+    output_naip: bool,
+    output_xyz: bool,
+    custom_name: str,
+) -> Dict[str, Any]:
+    return {
+        "center1": coords.split(",")[0].strip() if "," in coords else coords,
+        "center2": coords.split(",")[1].strip() if "," in coords else "",
+        "job_name": custom_name,
+        "clip_size": clip_size,
+        "units": units,
+        "terrain_complexity": terrain_complexity,
+        "rotate_z": rotate_z,
+        "project_zero": project_zero,
+        "contour_interval": contour_interval if contour_interval is not None else 2.0,
+        "dxf_contour_spacing": (
+            dxf_contour_spacing
+            if dxf_contour_spacing is not None
+            else DEFAULT_DXF_CONTOUR_SPACING
+        ),
+        "dxf_include_parcels": dxf_include_parcels,
+        "dxf_include_buildings": dxf_include_buildings,
+        "xyz_mode": xyz_mode,
+        "image_quality": image_quality,
+        "random_min_height": random_min_height,
+        "random_max_height": random_max_height,
+        "output_terrain": output_terrain,
+        "output_buildings": output_buildings,
+        "output_contours": output_contours,
+        "output_naip": output_naip,
+        "output_xyz": output_xyz,
+    }
+
+
+def _merge_prefill_defaults(
+    defaults: Dict[str, Any], saved: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    if not isinstance(saved, dict):
+        return defaults
+    allowed = {
+        "center1",
+        "center2",
+        "job_name",
+        "clip_size",
+        "units",
+        "terrain_complexity",
+        "rotate_z",
+        "project_zero",
+        "contour_interval",
+        "dxf_contour_spacing",
+        "dxf_include_parcels",
+        "dxf_include_buildings",
+        "xyz_mode",
+        "image_quality",
+        "random_min_height",
+        "random_max_height",
+        "output_terrain",
+        "output_buildings",
+        "output_contours",
+        "output_naip",
+        "output_xyz",
+    }
+    for key in allowed:
+        if key in saved:
+            defaults[key] = saved[key]
+    return defaults
 
 
 def parcel_sources_payload() -> List[Dict[str, Any]]:
@@ -1476,6 +1583,14 @@ def auth_logout():
 @app.route("/")
 def index():
     defaults = snapshot_defaults()
+    prefill_job_id = (request.args.get("from_job") or "").strip()
+    if prefill_job_id and _user_can_access_job(prefill_job_id):
+        with JOBS_LOCK:
+            prefill_job = JOBS.get(prefill_job_id)
+        if prefill_job is not None:
+            defaults = _merge_prefill_defaults(
+                defaults, prefill_job.summary.get("form_defaults")
+            )
     parcel_sources = parcel_sources_payload()
     data_sources = data_sources_payload(parcel_sources)
     user = current_user()
@@ -1497,6 +1612,7 @@ def index():
         can_build=can_build,
         retention_days=RETENTION_DAYS,
         status_label=status_label,
+        status_class=status_class,
     )
 
 
@@ -1515,10 +1631,12 @@ def recent_jobs():
     payload = [
         {
             "job_id": job.job_id,
-            "name": str(job.summary.get("tile") or job.job_id),
+            "name": str(job.summary.get("name") or job.job_id),
             "status": job.status,
             "status_label": status_label(job.status),
-            "preview_url": url_for("job_status", job_id=job.job_id),
+            "status_class": status_class(job.status),
+            "preview_url": url_for("job_status", job_id=job.job_id, tab="preview"),
+            "log_url": url_for("job_status", job_id=job.job_id),
         }
         for job in jobs
     ]
@@ -1612,6 +1730,9 @@ def run_job():
             return jsonify({"error": limit_error}), 429
 
     form = request.form
+    custom_name = (form.get("job_name") or "").strip()
+    if len(custom_name) > 120:
+        return jsonify({"error": "Name must be 120 characters or fewer."}), 400
     out_dir = OUT_DIR
     ensure_dir(out_dir)
     units = form.get("units") or DEFAULT_UNITS
@@ -1680,6 +1801,11 @@ def run_job():
         outputs.append("xyz")
     if not outputs:
         return jsonify({"error": "Select at least one output."}), 400
+    output_terrain = "terrain" in outputs
+    output_buildings = "buildings" in outputs
+    output_contours = "contours" in outputs
+    output_naip = "naip" in outputs
+    output_xyz = "xyz" in outputs
 
     combine_output = parse_bool(form.get("output_combined"))
     if combine_output and not ("terrain" in outputs and "buildings" in outputs):
@@ -1760,6 +1886,7 @@ def run_job():
         contour_interval=contour_interval,
         size=clip_size,
         allow_multi_tile=allow_multi_tile,
+        prefer_ept=DEFAULT_PREFER_EPT,
         flip_y=flip_y,
         flip_x=flip_x,
         terrain_flip_y=terrain_flip_y,
@@ -1771,6 +1898,7 @@ def run_job():
         dxf_include_parcels=dxf_include_parcels,
         dxf_include_buildings=dxf_include_buildings,
         provider=provider,
+        ept_only=DEFAULT_EPT_ONLY,
         cleanup_intermediates=True,
         outputs=tuple(outputs),
     )
@@ -1784,6 +1912,30 @@ def run_job():
         "target": target_summary or "(tile lookup)",
         "provider": provider,
         "provider_label": provider_label(provider),
+        "name": custom_name or job_id,
+        "custom_name": custom_name,
+        "form_defaults": _extract_form_defaults(
+            coords=f"{lat},{lon}",
+            clip_size=clip_size,
+            units=units,
+            terrain_complexity=terrain_complexity,
+            rotate_z=rotate_z,
+            project_zero=project_zero,
+            contour_interval=contour_interval,
+            dxf_contour_spacing=dxf_contour_spacing,
+            dxf_include_parcels=dxf_include_parcels,
+            dxf_include_buildings=dxf_include_buildings,
+            xyz_mode=xyz_mode,
+            image_quality=(form.get("image_quality") or "standard").strip().lower(),
+            random_min_height=random_min,
+            random_max_height=random_max,
+            output_terrain=output_terrain,
+            output_buildings=output_buildings,
+            output_contours=output_contours,
+            output_naip=output_naip,
+            output_xyz=output_xyz,
+            custom_name=custom_name,
+        ),
     }
 
     job = Job(
@@ -1819,7 +1971,9 @@ def job_status(job_id: str):
         job = JOBS.get(job_id)
     if job is None:
         return "Job not found", 404
-    return render_template_string(STATUS_TEMPLATE, job=job, status_label=status_label)
+    return render_template_string(
+        STATUS_TEMPLATE, job=job, status_label=status_label, status_class=status_class
+    )
 
 
 @app.route("/logs/<job_id>")

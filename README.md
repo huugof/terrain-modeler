@@ -39,6 +39,9 @@ va-lidar-context build \
   --out ./out \
   --resolution 1
 ```
+National mode defaults to EPT-first with LAZ fallback.
+- `--ept-only` requires EPT coverage and fails fast if unavailable.
+- `--no-prefer-ept` skips EPT and uses LAZ workflow.
 
 Parcels are resolved from a small registry of public parcel sources in
 `src/va_lidar_context/parcels/sources.json`. If no source matches the clip area,
@@ -49,6 +52,7 @@ Note: `--center` expects `lat, lon` (Google Maps order).
 ## Requirements
 - macOS
 - Python 3.11+
+- PDAL (`pdal` on PATH) for EPT streaming in national mode
 - Python deps installed via `pip install -e .` (includes `mapbox-earcut`)
 
 ## Setup

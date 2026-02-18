@@ -350,6 +350,21 @@ select {
     color: #ffd4d4;
     background: #3b1f1f;
 }
+.recent-status {
+    font-weight: 600;
+}
+.recent-status.status-running {
+    color: #ffd58e;
+}
+.recent-status.status-done {
+    color: #b8f2c9;
+}
+.recent-status.status-error {
+    color: #ffd4d4;
+}
+.recent-status.status-unknown {
+    color: #d4d4d4;
+}
 a {
     color: #b39cd0;
     text-decoration: none;
@@ -406,9 +421,58 @@ select {
 .locked button {
     pointer-events: none;
 }
+body.modal-open {
+    overflow: hidden;
+}
+.preview-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+}
+.preview-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+}
+.preview-modal-dialog {
+    position: relative;
+    width: min(1100px, calc(100vw - 32px));
+    height: min(760px, calc(100vh - 32px));
+    margin: 16px auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.preview-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.preview-modal-close {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+.preview-modal-frame {
+    flex: 1;
+    width: 100%;
+    border: 0;
+    background: #f7f4ef;
+}
 @media (max-width: 640px) {
     .profile-shell {
         top: max(10px, env(safe-area-inset-top));
         right: max(10px, env(safe-area-inset-right));
+    }
+    .preview-modal-dialog {
+        width: calc(100vw - 12px);
+        height: calc(100vh - 12px);
+        margin: 6px auto;
+        border-radius: 10px;
     }
 }
