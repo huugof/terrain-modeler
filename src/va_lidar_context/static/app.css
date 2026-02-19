@@ -428,6 +428,13 @@ body.modal-open {
     position: fixed;
     inset: 0;
     z-index: 1400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+.preview-modal.hidden {
+    display: none;
 }
 .preview-modal-backdrop {
     position: absolute;
@@ -436,33 +443,43 @@ body.modal-open {
 }
 .preview-modal-dialog {
     position: relative;
-    width: min(1100px, calc(100vw - 32px));
-    height: min(760px, calc(100vh - 32px));
-    margin: 16px auto;
-    border: 1px solid var(--border);
+    z-index: 1;
+    width: min(920px, 100vw);
+    height: min(640px, 100vh);
+    border: 1px solid rgba(228, 228, 228, 0.02);
     border-radius: 12px;
-    background: var(--card);
+    background: transparent;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-shadow:
+        0 0 0 1px rgba(228, 228, 228, 0.015),
+        0 10px 20px rgba(0, 0, 0, 0.22);
 }
-.preview-modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-}
-.preview-modal-close {
-    padding: 8px 12px;
-    font-size: 13px;
+.preview-modal-dialog::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+        135deg,
+        rgba(179, 156, 208, 0.12),
+        rgba(168, 218, 220, 0.08)
+    );
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
 }
 .preview-modal-frame {
     flex: 1;
+    display: block;
     width: 100%;
     border: 0;
-    background: #f7f4ef;
+    background: transparent;
 }
 @media (max-width: 640px) {
     .profile-shell {
@@ -470,9 +487,8 @@ body.modal-open {
         right: max(10px, env(safe-area-inset-right));
     }
     .preview-modal-dialog {
-        width: calc(100vw - 12px);
-        height: calc(100vh - 12px);
-        margin: 6px auto;
+        width: 100vw;
+        height: 100vh;
         border-radius: 10px;
     }
 }

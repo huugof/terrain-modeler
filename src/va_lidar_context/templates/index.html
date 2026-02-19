@@ -478,11 +478,7 @@
         </main>
         <div id="previewModal" class="preview-modal hidden" aria-hidden="true">
             <div class="preview-modal-backdrop" data-preview-close="1"></div>
-            <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="previewModalTitle">
-                <div class="preview-modal-header">
-                    <strong id="previewModalTitle">Job Preview</strong>
-                    <button type="button" class="btn secondary preview-modal-close" data-preview-close="1">Close</button>
-                </div>
+            <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Job Preview">
                 <iframe id="previewModalFrame" class="preview-modal-frame" title="Job Preview"></iframe>
             </div>
         </div>
@@ -731,13 +727,20 @@
               container.appendChild(list);
             }
 
-            function openPreviewModal(url, title) {
+            function openPreviewModal(url) {
               const modal = document.getElementById('previewModal');
               const frame = document.getElementById('previewModalFrame');
-              const titleEl = document.getElementById('previewModalTitle');
-              if (!modal || !frame || !titleEl) return;
-              titleEl.textContent = title ? `${title} Preview` : 'Job Preview';
-              frame.src = url;
+              if (!modal || !frame) return;
+              let embedUrl = url;
+              try {
+                const parsed = new URL(url, window.location.origin);
+                parsed.searchParams.set('embed', '1');
+                embedUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+              } catch (err) {
+                const separator = url && url.includes('?') ? '&' : '?';
+                embedUrl = `${url}${separator}embed=1`;
+              }
+              frame.src = embedUrl;
               modal.classList.remove('hidden');
               modal.setAttribute('aria-hidden', 'false');
               document.body.classList.add('modal-open');
@@ -759,8 +762,7 @@
                 if (previewLink) {
                   event.preventDefault();
                   const url = previewLink.dataset.previewUrl || previewLink.href;
-                  const title = previewLink.dataset.previewTitle || 'Job';
-                  openPreviewModal(url, title);
+                  openPreviewModal(url);
                   return;
                 }
                 const closeTarget = event.target.closest('[data-preview-close="1"]');

@@ -185,3 +185,74 @@ def test_download_rejects_invalid_file_name(auth_webapp_env):
     client = _client_for_sid(auth_webapp_env["sid1"])
     resp = client.get("/jobs/job-safe/download/..%5Csecret.txt")
     assert resp.status_code == 400
+
+
+def test_recent_jobs_rehydrate_from_db(auth_webapp_env, monkeypatch):
+    job_id = "job-restored"
+    job_dir = auth_webapp_env["out_dir"] / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "terrain.obj").write_text("dummy terrain\n")
+
+    auth_store.upsert_job_snapshot(
+        auth_webapp_env["db_path"],
+        job_id,
+        user_id=int(auth_webapp_env["user1"]["id"]),
+        created_at=time.time(),
+        status="done",
+        summary={"name": "restored-job"},
+    )
+    auth_store.replace_job_artifacts(
+        auth_webapp_env["db_path"],
+        job_id,
+        [{"name": "terrain.obj", "size": 12, "mtime": time.time()}],
+    )
+
+    with webapp.JOBS_LOCK:
+        webapp.JOBS.clear()
+    monkeypatch.setattr(webapp, "_auth_started", False)
+    webapp.ensure_auth_store()
+
+    with webapp.JOBS_LOCK:
+        restored = webapp.JOBS.get(job_id)
+        assert restored is not None
+        assert restored.summary.get("name") == "restored-job"
+        outputs = restored.summary.get("outputs")
+        assert isinstance(outputs, dict)
+        assert "terrain.obj" in outputs.get("files", [])
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/recent-jobs")
+    assert resp.status_code == 200
+    jobs = resp.get_json()["jobs"]
+    assert jobs and jobs[0]["job_id"] == job_id
+
+
+def test_rehydrate_discovers_nested_output_dir_from_report(auth_webapp_env, monkeypatch):
+    job_id = "job-nested-output"
+    nested_dir = auth_webapp_env["out_dir"] / job_id / "tile-abc"
+    nested_dir.mkdir(parents=True, exist_ok=True)
+    (nested_dir / "terrain.obj").write_text("dummy terrain\n")
+    (nested_dir / "report.json").write_text(f'{{"output_dir": "{nested_dir}"}}')
+
+    auth_store.upsert_job_snapshot(
+        auth_webapp_env["db_path"],
+        job_id,
+        user_id=int(auth_webapp_env["user1"]["id"]),
+        created_at=time.time(),
+        status="done",
+        summary={"name": "nested"},
+    )
+    # Intentionally do not write job_artifacts rows to mimic legacy records.
+    auth_store.replace_job_artifacts(auth_webapp_env["db_path"], job_id, [])
+
+    with webapp.JOBS_LOCK:
+        webapp.JOBS.clear()
+    monkeypatch.setattr(webapp, "_auth_started", False)
+    webapp.ensure_auth_store()
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    artifacts_resp = client.get(f"/jobs/{job_id}/artifacts")
+    assert artifacts_resp.status_code == 200
+    files = artifacts_resp.get_json()["files"]
+    names = [item["name"] for item in files]
+    assert "terrain.obj" in names

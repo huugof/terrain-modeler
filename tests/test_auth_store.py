@@ -50,3 +50,42 @@ def test_nonce_consume_replay(tmp_path):
     auth_store.init_db(db_path)
     assert auth_store.consume_nonce(db_path, "abc", max_age_seconds=10) is True
     assert auth_store.consume_nonce(db_path, "abc", max_age_seconds=10) is False
+
+
+def test_job_snapshot_and_artifacts_roundtrip(tmp_path):
+    db_path = tmp_path / "auth.db"
+    auth_store.init_db(db_path)
+
+    auth_store.upsert_job_snapshot(
+        db_path,
+        "job-123",
+        user_id=7,
+        created_at=1234.0,
+        status="done",
+        started_at=1235.0,
+        finished_at=1240.0,
+        exit_code=0,
+        error=None,
+        summary={"name": "Example", "outputs": {"dir": "/tmp/out/job-123", "files": []}},
+    )
+    auth_store.replace_job_artifacts(
+        db_path,
+        "job-123",
+        [
+            {"name": "terrain.obj", "size": 42, "mtime": 100.0},
+            {"name": "buildings.obj", "size": 84, "mtime": 101.0},
+        ],
+    )
+
+    rows = auth_store.list_recent_jobs(db_path, limit=10)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["job_id"] == "job-123"
+    assert row["user_id"] == 7
+    assert row["status"] == "done"
+    assert row["exit_code"] == 0
+    assert row["summary"]["name"] == "Example"
+    assert [item["name"] for item in row["artifacts"]] == [
+        "buildings.obj",
+        "terrain.obj",
+    ]

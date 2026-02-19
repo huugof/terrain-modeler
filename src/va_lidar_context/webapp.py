@@ -142,6 +142,12 @@ RATE_LIMIT_HOURLY = int(os.getenv("VA_RATE_LIMIT_HOURLY", "3"))
 RATE_LIMIT_DAILY = int(os.getenv("VA_RATE_LIMIT_DAILY", "10"))
 MAX_ACTIVE_JOBS_PER_USER = int(os.getenv("VA_MAX_ACTIVE_JOBS_PER_USER", "1"))
 MAX_CLIP_SIZE = float(os.getenv("VA_MAX_CLIP_SIZE", "5000"))
+JOB_HISTORY_ENABLED = os.getenv("VA_JOB_HISTORY_ENABLED", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+JOB_REHYDRATE_LIMIT = int(os.getenv("VA_JOB_REHYDRATE_LIMIT", "500"))
 HMAC_KEYS_JSON = os.getenv("VA_HMAC_KEYS_JSON", "").strip()
 HMAC_MAX_SKEW_SECONDS = int(os.getenv("VA_HMAC_MAX_SKEW_SECONDS", "300"))
 HMAC_NONCE_TTL_SECONDS = int(os.getenv("VA_HMAC_NONCE_TTL_SECONDS", "600"))
@@ -202,12 +208,13 @@ def _forbidden_response(message: str = "Forbidden") -> Any:
 
 def ensure_auth_store() -> None:
     global _auth_started
-    if not AUTH_ENABLED and not HMAC_KEYS:
+    if not AUTH_ENABLED and not HMAC_KEYS and not JOB_HISTORY_ENABLED:
         return
     with _auth_lock:
         if _auth_started:
             return
         auth_store.init_db(DB_PATH, ADMIN_EMAIL or None)
+        _rehydrate_jobs_from_store()
         _auth_started = True
 
 
@@ -401,6 +408,7 @@ STATUS_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Job {{ job.job_id }}</title>
     <style>
+      html, body { height: 100%; }
       body { margin: 0; font-family: "Avenir Next", "Avenir", "Futura", sans-serif; background:#f7f4ef; color:#1f1f1f; }
       header { padding: 20px 24px; }
       main { padding: 0 24px 32px; }
@@ -476,12 +484,167 @@ STATUS_TEMPLATE = """
       #preview-controls button { cursor: pointer; }
       #preview-controls button:hover { border-color: #b39cd0; }
       #preview-file { min-width: 180px; }
+      body.embed-mode {
+        overflow: hidden;
+        background: #2c2c2c;
+        color: #e4e4e4;
+      }
+      body.embed-mode main {
+        padding: 0;
+        box-sizing: border-box;
+        height: 100%;
+      }
+      body.embed-mode .card {
+        height: 100%;
+        box-sizing: border-box;
+        margin-bottom: 0;
+        border: 0;
+        border-radius: 0;
+        background: #1a1a1a;
+        box-shadow: none;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      body.embed-mode h3 {
+        margin: 0 0 10px;
+        color: #e4e4e4;
+      }
+      body.embed-mode .tab-row {
+        margin-bottom: 12px;
+        gap: 8px;
+      }
+      body.embed-mode .tab-btn {
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: #2f2f2f;
+        color: #bcbcbc;
+        padding: 8px 12px;
+      }
+      body.embed-mode .tab-btn.active {
+        border-color: #b39cd0;
+        background: #464646;
+        color: #e4e4e4;
+      }
+      body.embed-mode #preview-container {
+        flex: 1;
+        min-height: 0;
+        height: auto;
+        border-radius: 0;
+        border: 0;
+      }
+      body.embed-mode #preview-controls {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        top: auto;
+        right: auto;
+        margin-top: 0;
+        gap: 10px;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        z-index: 6;
+      }
+      body.embed-mode #preview-controls button,
+      body.embed-mode #preview-controls select {
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: rgba(47, 47, 47, 0.72);
+        color: #e4e4e4;
+        padding: 10px 12px;
+      }
+      body.embed-mode #preview-controls button:hover {
+        border-color: #b39cd0;
+        background: #3a3a3a;
+      }
+      body.embed-mode #preview-controls button:disabled {
+        border-color: #3a3a3a;
+        background: rgba(47, 47, 47, 0.65);
+        color: #9a9a9a;
+        cursor: not-allowed;
+      }
+      body.embed-mode #preview-wireframe-btn.is-active {
+        border-color: #b39cd0;
+        background: #b39cd0;
+        color: #ffffff;
+      }
+      body.embed-mode #preview-file {
+        display: none;
+      }
+      body.embed-mode #preview-scene-select {
+        min-width: 220px;
+      }
+      #preview-zoom-controls {
+        display: none;
+      }
+      body.embed-mode #preview-zoom-controls {
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+        top: auto;
+        transform: none;
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        z-index: 7;
+      }
+      body.embed-mode #preview-zoom-controls button {
+        width: 36px;
+        height: 36px;
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: rgba(47, 47, 47, 0.92);
+        color: #e4e4e4;
+        font-size: 17px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      body.embed-mode #preview-zoom-controls button:hover {
+        border-color: #b39cd0;
+        background: #3a3a3a;
+      }
+      body.embed-mode pre {
+        background: #0f1410;
+        border: 1px solid #2f2f2f;
+        color: #b7e3c0;
+        border-radius: 8px;
+        padding: 14px;
+      }
+      body.embed-mode #preview-message {
+        color: #d9d9d9;
+      }
+      body.embed-mode .tab-panel {
+        flex: 1;
+        min-height: 0;
+      }
+      body.embed-mode #panel-preview {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        height: 100%;
+      }
+      body.embed-mode #panel-preview.hidden {
+        display: none;
+      }
+      body.embed-mode #panel-log {
+        height: 100%;
+      }
+      body.embed-mode pre {
+        height: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+      }
       @media (max-width: 700px) {
         #preview-container { height: 340px; }
       }
     </style>
   </head>
-  <body>
+  <body{% if embed_mode %} class="embed-mode"{% endif %}>
+    {% if not embed_mode %}
     <header>
       <h2>{{ job.summary.get('name') or job.job_id }}</h2>
       <div class="meta">Job ID: {{ job.job_id }}</div>
@@ -498,7 +661,9 @@ STATUS_TEMPLATE = """
         <a href="{{ url_for('index') }}">Back to form</a>
       </div>
     </header>
+    {% endif %}
     <main>
+      {% if not embed_mode %}
       {% if job.error or job.summary.get('warnings') %}
       <div class="card">
         <h3>Job Notes</h3>
@@ -515,20 +680,29 @@ STATUS_TEMPLATE = """
         {% endif %}
       </div>
       {% endif %}
+      {% endif %}
       <div class="card">
+        {% if not embed_mode %}
         <h3>3D Preview & Activity</h3>
         <div class="tab-row">
           <button type="button" class="tab-btn" data-tab="preview" id="tab-preview">Preview</button>
           <button type="button" class="tab-btn" data-tab="log" id="tab-log">Activity Log</button>
         </div>
+        {% endif %}
         <div id="panel-preview" class="tab-panel">
           <div id="preview-container">
             <div id="preview-message">Waiting for model files...</div>
           </div>
           <div id="preview-controls">
-            <button type="button" onclick="toggleWireframe()">Wireframe</button>
-            <button type="button" onclick="resetCamera()">Reset View</button>
+            <button id="preview-wireframe-btn" type="button" onclick="toggleWireframe()">Wireframe</button>
+            {% if embed_mode %}
+            <select id="preview-scene-select" aria-label="Preview model"></select>
+            {% endif %}
             <select id="preview-file"></select>
+          </div>
+          <div id="preview-zoom-controls" aria-label="Zoom controls">
+            <button type="button" onclick="zoomOut()" aria-label="Zoom out">-</button>
+            <button type="button" onclick="zoomIn()" aria-label="Zoom in">+</button>
           </div>
         </div>
         <div id="panel-log" class="tab-panel">
@@ -580,6 +754,7 @@ STATUS_TEMPLATE = """
         controls: null,
         currentObject: null,
       };
+      const EMBED_MODE = {{ embed_mode | tojson }};
 
       function setActiveTab(tabName) {
         const isPreview = tabName === 'preview';
@@ -593,7 +768,11 @@ STATUS_TEMPLATE = """
         if (logBtn) logBtn.classList.toggle('active', !isPreview);
       }
 
-      function initTabs() {
+      function initTabs(initialStatus) {
+        if (EMBED_MODE) {
+          setActiveTab(initialStatus === 'done' ? 'preview' : 'log');
+          return;
+        }
         document.querySelectorAll('.tab-btn[data-tab]').forEach((button) => {
           button.addEventListener('click', () => {
             const tab = button.dataset.tab === 'preview' ? 'preview' : 'log';
@@ -743,6 +922,20 @@ STATUS_TEMPLATE = """
           if (!node.isMesh || !node.material) return;
           const materials = Array.isArray(node.material) ? node.material : [node.material];
           for (const material of materials) {
+            if (enabled) {
+              if (material.map) {
+                material.userData = material.userData || {};
+                material.userData.savedMap = material.map;
+                material.map = null;
+              }
+            } else if (
+              material &&
+              material.userData &&
+              material.userData.savedMap &&
+              !material.map
+            ) {
+              material.map = material.userData.savedMap;
+            }
             material.wireframe = enabled;
             material.needsUpdate = true;
           }
@@ -795,7 +988,8 @@ STATUS_TEMPLATE = """
                 for (const key of Object.keys(materials.materials)) {
                   const material = materials.materials[key];
                   if (material && material.map) {
-                    material.map.flipY = false;
+                    // Keep TextureLoader's default flipY behavior; our OBJ UVs
+                    // are already exported in OBJ convention (v flipped once).
                     material.map.needsUpdate = true;
                   }
                 }
@@ -814,9 +1008,10 @@ STATUS_TEMPLATE = """
         })();
       }
 
-      async function renderModel(modelKey) {
+      async function renderModel(modelKey, options = {}) {
         const model = previewState.models.find((m) => m.key === modelKey);
         if (!model || !previewState.scene) return;
+        const shouldResetView = options.resetView !== false;
         setPreviewMessage('Loading model...');
         clearCurrentObject();
         try {
@@ -835,7 +1030,9 @@ STATUS_TEMPLATE = """
           previewState.currentObject = group;
           previewState.currentModelKey = model.key;
           applyWireframeMode(previewState.wireframe);
-          resetCamera();
+          updateWireframeButton();
+          updateSceneSelect();
+          if (shouldResetView) resetCamera();
           setPreviewMessage('');
         } catch (error) {
           const msg = (error && error.message) ? error.message : 'Failed to load preview model.';
@@ -888,11 +1085,15 @@ STATUS_TEMPLATE = """
         if (select.dataset.bound !== 'true') {
           select.addEventListener('change', (event) => {
             const value = event.target.value;
-            if (value) renderModel(value);
+            if (value) renderModel(value, { resetView: false });
           });
           select.dataset.bound = 'true';
         }
-        renderModel(previewState.models[0].key);
+        updateSceneSelect();
+        const defaultModel =
+          previewState.models.find((model) => model.key === 'scene') ||
+          previewState.models[0];
+        if (defaultModel) renderModel(defaultModel.key);
       }
 
       async function pollLogs(jobId) {
@@ -910,6 +1111,9 @@ STATUS_TEMPLATE = """
             offset = logData.offset;
           }
           setStatusBadge(logData.status);
+          if (EMBED_MODE) {
+            setActiveTab(logData.status === 'done' ? 'preview' : 'log');
+          }
           if (logData.status === 'done') activatePreview();
           if (logData.status === 'running' || logData.status === 'queued') setTimeout(poll, 1500);
         }
@@ -919,6 +1123,13 @@ STATUS_TEMPLATE = """
       function toggleWireframe() {
         previewState.wireframe = !previewState.wireframe;
         applyWireframeMode(previewState.wireframe);
+        updateWireframeButton();
+      }
+
+      function updateWireframeButton() {
+        const wireframeBtn = document.getElementById('preview-wireframe-btn');
+        if (!wireframeBtn) return;
+        wireframeBtn.classList.toggle('is-active', previewState.wireframe);
       }
 
       function resetCamera() {
@@ -939,15 +1150,83 @@ STATUS_TEMPLATE = """
         previewState.controls.update();
       }
 
+      function updateSceneSelect() {
+        const sceneSelect = document.getElementById('preview-scene-select');
+        if (!sceneSelect) return;
+        if (sceneSelect.dataset.bound !== 'true') {
+          sceneSelect.addEventListener('change', (event) => {
+            const modelKey = event.target.value;
+            if (modelKey) renderModel(modelKey, { resetView: false });
+          });
+          sceneSelect.dataset.bound = 'true';
+        }
+
+        const preferredKeys = new Set(['scene', 'terrain', 'buildings']);
+        let options = previewState.models.filter((model) => preferredKeys.has(model.key));
+        if (!options.length) options = previewState.models.slice();
+
+        sceneSelect.innerHTML = '';
+        for (const model of options) {
+          const option = document.createElement('option');
+          option.value = model.key;
+          option.textContent = model.label;
+          sceneSelect.appendChild(option);
+        }
+        sceneSelect.disabled = options.length === 0;
+
+        if (!options.length) return;
+        const hasCurrent = options.some((model) => model.key === previewState.currentModelKey);
+        sceneSelect.value = hasCurrent ? previewState.currentModelKey : options[0].key;
+      }
+
+      function zoomBy(scale) {
+        if (!previewState.camera || !previewState.controls) return;
+        const target = previewState.controls.target.clone();
+        const offset = previewState.camera.position.clone().sub(target);
+        const currentDistance = offset.length();
+        if (!Number.isFinite(currentDistance) || currentDistance <= 0) return;
+
+        let minDistance = 0.5;
+        let maxDistance = 1000000.0;
+        if (previewState.currentObject) {
+          const box = new THREE.Box3().setFromObject(previewState.currentObject);
+          if (!box.isEmpty()) {
+            const sphere = box.getBoundingSphere(new THREE.Sphere());
+            minDistance = Math.max(sphere.radius * 0.15, 0.5);
+            maxDistance = Math.max(sphere.radius * 25.0, minDistance * 4.0);
+          }
+        }
+        const nextDistance = Math.min(
+          maxDistance,
+          Math.max(minDistance, currentDistance * scale)
+        );
+        offset.setLength(nextDistance);
+        previewState.camera.position.copy(target.add(offset));
+        previewState.camera.updateProjectionMatrix();
+        previewState.controls.update();
+      }
+
+      function zoomIn() {
+        zoomBy(0.92);
+      }
+
+      function zoomOut() {
+        zoomBy(1.08);
+      }
+
       window.toggleWireframe = toggleWireframe;
       window.resetCamera = resetCamera;
+      window.zoomIn = zoomIn;
+      window.zoomOut = zoomOut;
 
       document.addEventListener('DOMContentLoaded', () => {
-        initTabs();
-        setStatusBadge('{{ job.status }}');
-        if ('{{ job.status }}' === 'done') {
+        const initialStatus = '{{ job.status }}';
+        updateWireframeButton();
+        initTabs(initialStatus);
+        setStatusBadge(initialStatus);
+        if (initialStatus === 'done') {
           activatePreview();
-        } else if ('{{ job.status }}' === 'error') {
+        } else if (initialStatus === 'error') {
           setPreviewMessage('Build failed. Preview unavailable.');
         } else {
           setPreviewMessage('Preview will be available when the build completes.');
@@ -1056,20 +1335,71 @@ def _find_latest_report(out_dir: Path, started_at: float) -> Optional[Path]:
     return latest_path
 
 
+OUTPUT_ARTIFACT_CANDIDATES = (
+    "terrain.obj",
+    "terrain.mtl",
+    "buildings.obj",
+    "combined.obj",
+    "combined.mtl",
+    "terrain.png",
+    "contours.dxf",
+    "terrain.xyz",
+)
+
+
+def _dir_has_known_outputs(path: Path) -> bool:
+    return any((path / name).is_file() for name in OUTPUT_ARTIFACT_CANDIDATES)
+
+
+def _discover_output_dir_for_job(job_id: str) -> Optional[Path]:
+    job_root = OUT_DIR / job_id
+    if not (job_root.exists() and job_root.is_dir()):
+        return None
+    if not _is_path_within(OUT_DIR, job_root):
+        return None
+    if _dir_has_known_outputs(job_root):
+        return job_root
+
+    reports: List[Path] = []
+    for report_path in job_root.rglob("report.json"):
+        if "_cache" in report_path.parts:
+            continue
+        if report_path.is_file():
+            reports.append(report_path)
+    reports.sort(
+        key=lambda p: (p.stat().st_mtime if p.exists() else 0.0), reverse=True
+    )
+
+    for report_path in reports:
+        try:
+            report = json.loads(report_path.read_text())
+        except Exception:
+            report = {}
+        if isinstance(report, dict):
+            output_dir = report.get("output_dir")
+            if isinstance(output_dir, str) and output_dir.strip():
+                candidate = Path(output_dir).expanduser()
+                if (
+                    candidate.exists()
+                    and candidate.is_dir()
+                    and _is_path_within(OUT_DIR, candidate)
+                ):
+                    return candidate
+        parent_dir = report_path.parent
+        if parent_dir.is_dir() and _dir_has_known_outputs(parent_dir):
+            return parent_dir
+
+    for child in sorted(job_root.iterdir(), key=lambda p: p.name.lower()):
+        if child.is_dir() and _dir_has_known_outputs(child):
+            return child
+
+    return None
+
+
 def _collect_outputs(tile_dir: Path) -> Dict[str, Any]:
     if not tile_dir.exists():
         return {"dir": str(tile_dir), "files": []}
-    candidates = [
-        "terrain.obj",
-        "terrain.mtl",
-        "buildings.obj",
-        "combined.obj",
-        "combined.mtl",
-        "terrain.png",
-        "contours.dxf",
-        "terrain.xyz",
-    ]
-    files = [name for name in candidates if (tile_dir / name).exists()]
+    files = [name for name in OUTPUT_ARTIFACT_CANDIDATES if (tile_dir / name).exists()]
     return {"dir": str(tile_dir), "files": files}
 
 
@@ -1103,6 +1433,9 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
                 return candidate
 
     default_dir = OUT_DIR / job.job_id
+    discovered = _discover_output_dir_for_job(job.job_id)
+    if discovered is not None:
+        return discovered
     if (
         default_dir.exists()
         and default_dir.is_dir()
@@ -1165,6 +1498,104 @@ def _list_job_artifacts(job: Job) -> List[Dict[str, Any]]:
             seen.add(name)
 
     return artifacts
+
+
+def _rehydrate_jobs_from_store() -> None:
+    if JOB_REHYDRATE_LIMIT <= 0:
+        return
+    try:
+        persisted = auth_store.list_recent_jobs(DB_PATH, limit=JOB_REHYDRATE_LIMIT)
+    except Exception:
+        return
+
+    restored: List[Job] = []
+    for item in persisted:
+        job_id = str(item.get("job_id"))
+        summary_raw = item.get("summary")
+        summary = summary_raw if isinstance(summary_raw, dict) else {}
+
+        artifacts_raw = item.get("artifacts")
+        if isinstance(artifacts_raw, list) and artifacts_raw:
+            outputs = summary.get("outputs")
+            if not isinstance(outputs, dict):
+                outputs = {}
+            output_files = outputs.get("files")
+            if not isinstance(output_files, list) or not output_files:
+                outputs["files"] = [
+                    str(entry.get("name"))
+                    for entry in artifacts_raw
+                    if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+                ]
+            raw_dir = outputs.get("dir")
+            if not isinstance(raw_dir, str) or not raw_dir.strip():
+                outputs["dir"] = str(OUT_DIR / job_id)
+            summary["outputs"] = outputs
+        elif not isinstance(summary.get("outputs"), dict):
+            discovered = _discover_output_dir_for_job(job_id)
+            if discovered is not None:
+                summary["outputs"] = _collect_outputs(discovered)
+
+        created_at = item.get("created_at")
+        if not isinstance(created_at, (int, float)):
+            created_at = time.time()
+        status = str(item.get("status") or "queued")
+        raw_user_id = item.get("user_id")
+        user_id = int(raw_user_id) if isinstance(raw_user_id, int) else None
+
+        restored.append(
+            Job(
+                job_id=job_id,
+                status=status,
+                created_at=float(created_at),
+                user_id=user_id,
+                started_at=(
+                    float(item["started_at"])
+                    if isinstance(item.get("started_at"), (int, float))
+                    else None
+                ),
+                finished_at=(
+                    float(item["finished_at"])
+                    if isinstance(item.get("finished_at"), (int, float))
+                    else None
+                ),
+                exit_code=(
+                    int(item["exit_code"])
+                    if isinstance(item.get("exit_code"), int)
+                    else None
+                ),
+                error=str(item["error"]) if item.get("error") is not None else None,
+                summary=summary,
+            )
+        )
+
+    restored.sort(key=lambda job: (job.created_at, job.job_id))
+    with JOBS_LOCK:
+        for job in restored:
+            if job.job_id not in JOBS:
+                JOBS[job.job_id] = job
+
+
+def _persist_job_snapshot(job: Job) -> None:
+    if not AUTH_ENABLED and not HMAC_KEYS and not JOB_HISTORY_ENABLED:
+        return
+    try:
+        ensure_auth_store()
+        summary = job.summary if isinstance(job.summary, dict) else {}
+        auth_store.upsert_job_snapshot(
+            DB_PATH,
+            job.job_id,
+            user_id=job.user_id,
+            created_at=job.created_at,
+            status=job.status,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            exit_code=job.exit_code,
+            error=job.error,
+            summary=summary,
+        )
+        auth_store.replace_job_artifacts(DB_PATH, job.job_id, _list_job_artifacts(job))
+    except Exception:
+        return
 
 
 def _clerk_auth_ready() -> bool:
@@ -1948,6 +2379,7 @@ def run_job():
 
     with JOBS_LOCK:
         JOBS[job_id] = job
+    _persist_job_snapshot(job)
     if AUTH_ENABLED:
         auth_store.record_job_owner(DB_PATH, job_id, user_id)
     if user_id is not None:
@@ -1971,8 +2403,13 @@ def job_status(job_id: str):
         job = JOBS.get(job_id)
     if job is None:
         return "Job not found", 404
+    embed_mode = request.args.get("embed", "").strip().lower() in ("1", "true", "yes")
     return render_template_string(
-        STATUS_TEMPLATE, job=job, status_label=status_label, status_class=status_class
+        STATUS_TEMPLATE,
+        job=job,
+        status_label=status_label,
+        status_class=status_class,
+        embed_mode=embed_mode,
     )
 
 
@@ -2100,6 +2537,7 @@ def worker_job_complete(job_id: str):
     if AUTH_ENABLED and job.status in ("done", "error"):
         auth_store.set_job_status(DB_PATH, job_id, job.status)
         auth_store.finish_active_job(DB_PATH, job_id, job.status)
+    _persist_job_snapshot(job)
     return jsonify({"ok": True})
 
 
@@ -2112,6 +2550,7 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
             auth_store.set_active_job(
                 DB_PATH, job.job_id, job.user_id, status="running"
             )
+    _persist_job_snapshot(job)
     logger = get_logger()
     handler = JobLogHandler(job)
     logger.addHandler(handler)
@@ -2147,6 +2586,7 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                 job.summary["outputs"] = _collect_outputs(report_path.parent)
             except Exception:
                 pass
+        _persist_job_snapshot(job)
 
 
 def main() -> int:

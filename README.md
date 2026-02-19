@@ -177,6 +177,8 @@ For production, use `docker-compose.prod.yml` and `deploy/Caddyfile`.
 - `VA_RATE_LIMIT_DAILY` (default `10`)
 - `VA_MAX_ACTIVE_JOBS_PER_USER` (default `1`)
 - `VA_DB_PATH` (default `./data/app.db`, set `/data/app/app.db` in container)
+- `VA_JOB_HISTORY_ENABLED` (default `1`; persists job metadata for restart rehydrate)
+- `VA_JOB_REHYDRATE_LIMIT` (default `500`; max jobs loaded into memory on startup)
 
 ### Start production stack
 ```bash
@@ -194,6 +196,8 @@ docker compose -f docker-compose.prod.yml up -d
 ### Output retention
 Outputs are stored in `/data/out` and cleaned automatically.
 Default retention: **7 days**.
+Job metadata and artifact manifests are stored in `VA_DB_PATH`, and recent jobs are
+rehydrated from that DB on server restart.
 Override with env vars:
 - `VA_OUT_DIR=/data/out`
 - `VA_RETENTION_DAYS=7`
