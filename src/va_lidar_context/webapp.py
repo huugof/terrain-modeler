@@ -148,6 +148,11 @@ JOB_HISTORY_ENABLED = os.getenv("VA_JOB_HISTORY_ENABLED", "1").lower() in (
     "yes",
 )
 JOB_REHYDRATE_LIMIT = int(os.getenv("VA_JOB_REHYDRATE_LIMIT", "500"))
+JOB_LOG_WAIT_MAX_SECONDS = float(os.getenv("VA_JOB_LOG_WAIT_MAX_SECONDS", "25"))
+RECENT_JOBS_WAIT_MAX_SECONDS = float(
+    os.getenv("VA_RECENT_JOBS_WAIT_MAX_SECONDS", "25")
+)
+RECENT_JOBS_LIMIT = int(os.getenv("VA_RECENT_JOBS_LIMIT", "5"))
 HMAC_KEYS_JSON = os.getenv("VA_HMAC_KEYS_JSON", "").strip()
 HMAC_MAX_SKEW_SECONDS = int(os.getenv("VA_HMAC_MAX_SKEW_SECONDS", "300"))
 HMAC_NONCE_TTL_SECONDS = int(os.getenv("VA_HMAC_NONCE_TTL_SECONDS", "600"))
@@ -179,12 +184,30 @@ class Job:
     error: Optional[str] = None
     logs: List[str] = field(default_factory=list)
     summary: Dict[str, Any] = field(default_factory=dict)
+    change_cond: threading.Condition = field(
+        default_factory=threading.Condition, repr=False
+    )
+    change_version: int = 0
 
 
 JOBS: Dict[str, Job] = {}
 JOBS_LOCK = threading.Lock()
 _auth_started = False
 _auth_lock = threading.Lock()
+_recent_jobs_change_cond = threading.Condition()
+_recent_jobs_change_version = 0
+
+
+def _notify_job_change_locked(job: Job) -> None:
+    job.change_version += 1
+    job.change_cond.notify_all()
+
+
+def _notify_recent_jobs_change() -> None:
+    global _recent_jobs_change_version
+    with _recent_jobs_change_cond:
+        _recent_jobs_change_version += 1
+        _recent_jobs_change_cond.notify_all()
 
 
 def _is_api_request() -> bool:
@@ -397,7 +420,23 @@ class JobLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = self.format(record)
-        self.job.logs.append(msg)
+        with self.job.change_cond:
+            self.job.logs.append(msg)
+            _notify_job_change_locked(self.job)
+
+
+def _job_logs_payload(job: Job, offset: int) -> Dict[str, Any]:
+    safe_offset = max(0, min(offset, len(job.logs)))
+    logs = job.logs[safe_offset:]
+    next_offset = safe_offset + len(logs)
+    return {
+        "status": job.status,
+        "logs": logs,
+        "offset": next_offset,
+        "error": job.error,
+        "exit_code": job.exit_code,
+        "summary": dict(job.summary) if isinstance(job.summary, dict) else {},
+    }
 
 
 STATUS_TEMPLATE = """
@@ -1100,24 +1139,37 @@ STATUS_TEMPLATE = """
         const logsEl = document.getElementById('logs');
         if (!logsEl) return;
         let offset = 0;
-
-        async function poll() {
-          const logResp = await fetch(`/logs/${jobId}?offset=${offset}`);
-          if (!logResp.ok) return;
-          const logData = await logResp.json();
-          if (logData.logs && logData.logs.length) {
-            logsEl.textContent += logData.logs.join('\\n') + '\\n';
-            logsEl.scrollTop = logsEl.scrollHeight;
-            offset = logData.offset;
+        let keepPolling = true;
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        while (keepPolling) {
+          try {
+            const logResp = await fetch(`/logs/${jobId}?offset=${offset}&wait=25`, {
+              cache: 'no-store',
+            });
+            if (!logResp.ok) {
+              if (logResp.status === 401 || logResp.status === 403 || logResp.status === 404) break;
+              await sleep(1500);
+              continue;
+            }
+            const logData = await logResp.json();
+            if (logData.logs && logData.logs.length) {
+              logsEl.textContent += logData.logs.join('\\n') + '\\n';
+              logsEl.scrollTop = logsEl.scrollHeight;
+            }
+            if (typeof logData.offset === 'number') {
+              offset = logData.offset;
+            }
+            const status = logData.status || 'unknown';
+            setStatusBadge(status);
+            if (EMBED_MODE) {
+              setActiveTab(status === 'done' ? 'preview' : 'log');
+            }
+            if (status === 'done') activatePreview();
+            keepPolling = status === 'running' || status === 'queued';
+          } catch (err) {
+            await sleep(1500);
           }
-          setStatusBadge(logData.status);
-          if (EMBED_MODE) {
-            setActiveTab(logData.status === 'done' ? 'preview' : 'log');
-          }
-          if (logData.status === 'done') activatePreview();
-          if (logData.status === 'running' || logData.status === 'queued') setTimeout(poll, 1500);
         }
-        poll();
       }
 
       function toggleWireframe() {
@@ -1345,10 +1397,20 @@ OUTPUT_ARTIFACT_CANDIDATES = (
     "contours.dxf",
     "terrain.xyz",
 )
+PREVIEW_ARTIFACT_CANDIDATES = ("terrain.obj", "buildings.obj", "combined.obj")
 
 
 def _dir_has_known_outputs(path: Path) -> bool:
     return any((path / name).is_file() for name in OUTPUT_ARTIFACT_CANDIDATES)
+
+
+def _has_preview_artifacts(artifacts: List[Dict[str, Any]]) -> bool:
+    names = {
+        str(item.get("name"))
+        for item in artifacts
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    return any(name in names for name in PREVIEW_ARTIFACT_CANDIDATES)
 
 
 def _discover_output_dir_for_job(job_id: str) -> Optional[Path]:
@@ -1596,6 +1658,48 @@ def _persist_job_snapshot(job: Job) -> None:
         auth_store.replace_job_artifacts(DB_PATH, job.job_id, _list_job_artifacts(job))
     except Exception:
         return
+
+
+def _jobs_for_user(user: Optional[Dict[str, Any]]) -> List[Job]:
+    with JOBS_LOCK:
+        jobs = list(JOBS.values())
+    if AUTH_ENABLED:
+        if user is None:
+            return []
+        jobs = [job for job in jobs if job.user_id == user["id"]]
+    jobs.sort(key=lambda job: (job.created_at, job.job_id))
+    return jobs
+
+
+def _recent_job_display_name(job: Job, sequence_number: int) -> str:
+    custom_name = str(job.summary.get("custom_name") or "").strip()
+    if custom_name:
+        return custom_name
+    legacy_name = str(job.summary.get("name") or "").strip()
+    if legacy_name and legacy_name != job.job_id:
+        return legacy_name
+    return f"Job {max(sequence_number, 1)}"
+
+
+def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
+    name = _recent_job_display_name(job, sequence_number)
+    is_done = job.status == "done"
+    payload: Dict[str, Any] = {
+        "job_id": job.job_id,
+        "name": name,
+        "status": job.status,
+        "display_title": name if is_done else "Job running...",
+    }
+    if not is_done:
+        return payload
+
+    artifacts = _list_job_artifacts(job)
+    if artifacts:
+        payload["download_all_url"] = url_for("job_download_all", job_id=job.job_id)
+    if _has_preview_artifacts(artifacts):
+        payload["preview_url"] = url_for("job_status", job_id=job.job_id, tab="preview")
+    payload["match_settings_url"] = url_for("index", from_job=job.job_id)
+    return payload
 
 
 def _clerk_auth_ready() -> bool:
@@ -2026,60 +2130,56 @@ def index():
     data_sources = data_sources_payload(parcel_sources)
     user = current_user()
     can_build = (not AUTH_ENABLED) or (user is not None)
-    with JOBS_LOCK:
-        jobs = list(JOBS.values())
-        if AUTH_ENABLED:
-            if user is None:
-                jobs = []
-            else:
-                jobs = [job for job in jobs if job.user_id == user["id"]]
-        jobs = jobs[-8:][::-1]
+    jobs = _jobs_for_user(user)
+    sequence_by_job_id = {job.job_id: idx + 1 for idx, job in enumerate(jobs)}
+    recent_jobs = jobs[-RECENT_JOBS_LIMIT:][::-1]
+    recent_jobs_data = [
+        _recent_job_payload(job, sequence_by_job_id.get(job.job_id, 0))
+        for job in recent_jobs
+    ]
     return render_template(
         "index.html",
         defaults=defaults,
         data_sources=data_sources,
         parcel_sources=parcel_sources,
-        jobs=jobs,
+        recent_jobs=recent_jobs_data,
         can_build=can_build,
         retention_days=RETENTION_DAYS,
-        status_label=status_label,
-        status_class=status_class,
     )
 
 
 @app.route("/recent-jobs")
 @require_login
 def recent_jobs():
+    since = parse_int(request.args.get("since")) or 0
+    wait_seconds = parse_float(request.args.get("wait")) or 0.0
+    since = max(0, since)
+    wait_seconds = max(0.0, min(wait_seconds, RECENT_JOBS_WAIT_MAX_SECONDS))
+    if wait_seconds > 0.0:
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            with _recent_jobs_change_cond:
+                current_version = _recent_jobs_change_version
+                if current_version != since:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                _recent_jobs_change_cond.wait(timeout=remaining)
+                if _recent_jobs_change_version == current_version:
+                    break
+    with _recent_jobs_change_cond:
+        current_version = _recent_jobs_change_version
+
     user = current_user()
-    with JOBS_LOCK:
-        jobs = list(JOBS.values())
-        if AUTH_ENABLED:
-            if user is None:
-                jobs = []
-            else:
-                jobs = [job for job in jobs if job.user_id == user["id"]]
-        jobs = jobs[-8:][::-1]
+    jobs = _jobs_for_user(user)
+    sequence_by_job_id = {job.job_id: idx + 1 for idx, job in enumerate(jobs)}
+    recent_jobs = jobs[-RECENT_JOBS_LIMIT:][::-1]
     payload = [
-        {
-            "job_id": job.job_id,
-            "name": str(job.summary.get("name") or job.job_id),
-            "status": job.status,
-            "status_label": status_label(job.status),
-            "status_class": status_class(job.status),
-            "preview_url": url_for("job_status", job_id=job.job_id, tab="preview"),
-            "log_url": url_for("job_status", job_id=job.job_id),
-        }
-        for job in jobs
+        _recent_job_payload(job, sequence_by_job_id.get(job.job_id, 0))
+        for job in recent_jobs
     ]
-    for item, job in zip(payload, jobs):
-        if job.status != "done":
-            continue
-        artifacts = _list_job_artifacts(job)
-        if not artifacts:
-            continue
-        item["artifact_count"] = len(artifacts)
-        item["download_all_url"] = url_for("job_download_all", job_id=job.job_id)
-    return jsonify({"jobs": payload})
+    return jsonify({"jobs": payload, "version": current_version})
 
 
 @app.route("/admin/users")
@@ -2380,6 +2480,7 @@ def run_job():
     with JOBS_LOCK:
         JOBS[job_id] = job
     _persist_job_snapshot(job)
+    _notify_recent_jobs_change()
     if AUTH_ENABLED:
         auth_store.record_job_owner(DB_PATH, job_id, user_id)
     if user_id is not None:
@@ -2419,21 +2520,31 @@ def job_logs(job_id: str):
     if not _user_can_access_job(job_id):
         return _forbidden_response("Not allowed to access this job.")
     offset = parse_int(request.args.get("offset")) or 0
+    wait_seconds = parse_float(request.args.get("wait")) or 0.0
+    offset = max(0, offset)
+    wait_seconds = max(0.0, min(wait_seconds, JOB_LOG_WAIT_MAX_SECONDS))
+
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-        if job is None:
-            return jsonify({"error": "Job not found"}), 404
-        logs = job.logs[offset:]
-        next_offset = offset + len(logs)
-        payload = {
-            "status": job.status,
-            "logs": logs,
-            "offset": next_offset,
-            "error": job.error,
-            "exit_code": job.exit_code,
-            "summary": job.summary,
-        }
-    return jsonify(payload)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        with job.change_cond:
+            payload = _job_logs_payload(job, offset)
+            status = str(payload.get("status") or "")
+            has_logs = bool(payload.get("logs"))
+            is_active = status in ("queued", "running")
+            if has_logs or wait_seconds <= 0.0 or not is_active:
+                return jsonify(payload)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return jsonify(payload)
+            observed_version = job.change_version
+            job.change_cond.wait(timeout=remaining)
+            if job.change_version == observed_version:
+                return jsonify(_job_logs_payload(job, offset))
 
 
 @app.route("/jobs/<job_id>/artifacts")
@@ -2526,14 +2637,18 @@ def worker_job_complete(job_id: str):
     payload = request.get_json(silent=True) or {}
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-        if job is None:
-            return jsonify({"error": "Job not found."}), 404
+    if job is None:
+        return jsonify({"error": "Job not found."}), 404
+
+    with job.change_cond:
         job.status = payload.get("status", job.status)
         job.exit_code = payload.get("exit_code", job.exit_code)
         job.error = payload.get("error", job.error)
         summary = payload.get("summary")
         if isinstance(summary, dict):
             job.summary.update(summary)
+        _notify_job_change_locked(job)
+    _notify_recent_jobs_change()
     if AUTH_ENABLED and job.status in ("done", "error"):
         auth_store.set_job_status(DB_PATH, job_id, job.status)
         auth_store.finish_active_job(DB_PATH, job_id, job.status)
@@ -2542,8 +2657,11 @@ def worker_job_complete(job_id: str):
 
 
 def _run_build_job(job: Job, cfg: BuildConfig) -> None:
-    job.status = "running"
-    job.started_at = time.time()
+    with job.change_cond:
+        job.status = "running"
+        job.started_at = time.time()
+        _notify_job_change_locked(job)
+    _notify_recent_jobs_change()
     if AUTH_ENABLED:
         auth_store.set_job_status(DB_PATH, job.job_id, "running")
         if job.user_id is not None:
@@ -2555,17 +2673,21 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     handler = JobLogHandler(job)
     logger.addHandler(handler)
     try:
-        job.exit_code = build_pipeline(cfg)
-        if job.exit_code == 0:
-            job.status = "done"
-        else:
-            job.status = "error"
+        exit_code = build_pipeline(cfg)
+        with job.change_cond:
+            job.exit_code = exit_code
+            if job.exit_code == 0:
+                job.status = "done"
+            else:
+                job.status = "error"
     except Exception as exc:  # pragma: no cover - surface to UI
-        job.status = "error"
-        job.error = str(exc)
+        with job.change_cond:
+            job.status = "error"
+            job.error = str(exc)
         logger.exception("Build failed")
     finally:
-        job.finished_at = time.time()
+        with job.change_cond:
+            job.finished_at = time.time()
         logger.removeHandler(handler)
         if AUTH_ENABLED:
             auth_store.set_job_status(DB_PATH, job.job_id, job.status)
@@ -2576,16 +2698,20 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
         if report_path:
             try:
                 report = json.loads(report_path.read_text())
-                job.summary["report_path"] = str(report_path)
-                job.summary["tile"] = report.get("tile")
-                if report.get("output_dir"):
-                    job.summary["out"] = report.get("output_dir")
-                job.summary["job_id"] = report.get("job_id")
-                job.summary["warnings"] = report.get("warnings")
-                job.summary["source_type"] = report.get("source_type")
-                job.summary["outputs"] = _collect_outputs(report_path.parent)
+                with job.change_cond:
+                    job.summary["report_path"] = str(report_path)
+                    job.summary["tile"] = report.get("tile")
+                    if report.get("output_dir"):
+                        job.summary["out"] = report.get("output_dir")
+                    job.summary["job_id"] = report.get("job_id")
+                    job.summary["warnings"] = report.get("warnings")
+                    job.summary["source_type"] = report.get("source_type")
+                    job.summary["outputs"] = _collect_outputs(report_path.parent)
             except Exception:
                 pass
+        with job.change_cond:
+            _notify_job_change_locked(job)
+        _notify_recent_jobs_change()
         _persist_job_snapshot(job)
 
 

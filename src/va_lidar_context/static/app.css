@@ -350,20 +350,66 @@ select {
     color: #ffd4d4;
     background: #3b1f1f;
 }
-.recent-status {
+.recent-job-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.recent-job-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid #4a4a4a;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: rgba(20, 20, 20, 0.16);
+}
+.recent-job-title {
+    font-size: 13px;
     font-weight: 600;
+    color: var(--ink);
 }
-.recent-status.status-running {
-    color: #ffd58e;
+.recent-job-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
 }
-.recent-status.status-done {
-    color: #b8f2c9;
+.recent-job-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid #575757;
+    background: #3e3e3e;
+    color: #ececec;
+    padding: 6px 12px;
+    font-size: 12px;
+    line-height: 1;
+    text-decoration: none;
 }
-.recent-status.status-error {
-    color: #ffd4d4;
+.recent-job-pill:visited {
+    color: #ececec;
 }
-.recent-status.status-unknown {
-    color: #d4d4d4;
+.recent-job-pill:hover {
+    background: #525252;
+    border-color: #6e6e6e;
+    color: #ffffff;
+}
+@media (max-width: 640px) {
+    .recent-job-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .recent-job-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
 }
 a {
     color: #b39cd0;
