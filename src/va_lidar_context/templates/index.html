@@ -11,6 +11,35 @@
         />
     </head>
     <body>
+        {% if auth_enabled and current_user %}
+        {% set profile_name = current_user.get('name') or ((current_user.get('email') or '').split('@')[0]) or 'User' %}
+        {% set profile_initial = (profile_name[:1] if profile_name else 'U')|upper %}
+        <div id="profileShell" class="profile-shell">
+            <button
+                type="button"
+                id="profileButton"
+                class="profile-button"
+                aria-label="Account menu"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="profileDropdown"
+            >
+                {{ profile_initial }}
+            </button>
+            <div id="profileDropdown" class="profile-dropdown hidden" role="menu" aria-labelledby="profileButton">
+                <p class="profile-row">
+                    Signed in as <strong>{{ current_user.email }}</strong>
+                </p>
+                {% if current_user.is_admin %}
+                <a class="profile-link" href="{{ url_for('admin_users') }}">Admin</a>
+                {% endif %}
+                <form method="post" action="{{ url_for('auth_logout') }}" class="profile-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <button class="btn secondary profile-logout" type="submit">Sign out</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
         <header>
             <h1>Terrain Modeler</h1>
             <p class="sub">
@@ -24,16 +53,27 @@
                 method="post"
                 action="{{ url_for('run_job') }}"
             >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <div class="form-body">
                     <div class="section-title">Location</div>
                     <div class="grid">
-                        <div style="grid-column: 1 / -1">
+                        <div>
                             <label>Coordinates</label>
                             <input
                                 type="text"
                                 name="coords"
                                 value="{{ defaults.center1 }}, {{ defaults.center2 }}"
                                 placeholder="lat, lon"
+                            />
+                        </div>
+                        <div>
+                            <label>Name (Optional)</label>
+                            <input
+                                type="text"
+                                name="job_name"
+                                value="{{ defaults.job_name }}"
+                                placeholder="Custom name"
+                                maxlength="120"
                             />
                         </div>
                         <div>
@@ -370,15 +410,58 @@
                 <div class="form-footer">
                     <div id="parcelAlert" class="status hidden"></div>
                     <div class="form-actions">
+                        {% if can_build %}
                         <button class="btn" id="runBtn" type="submit">
                             Build
                         </button>
+                        {% elif auth_enabled %}
+                        <a class="btn" id="loginBtn" href="{{ url_for('auth_login', next='/') }}">
+                            Login to Build
+                        </a>
+                        {% endif %}
                         <button class="btn secondary" type="reset">
                             Reset
                         </button>
                     </div>
                 </div>
             </form>
+            <div class="card">
+                <div class="section-title">Recent Jobs</div>
+                <div id="recentJobs">
+                    {% if not can_build %}
+                    <p class="footer">Sign in to view your jobs and downloads.</p>
+                    {% elif recent_jobs %}
+                    <ul class="recent-job-list">
+                        {% for job in recent_jobs %}
+                        <li class="recent-job-row">
+                            <div class="recent-job-title">{{ job.display_title }}</div>
+                            {% if job.status == 'done' %}
+                            <div class="recent-job-actions">
+                                {% if job.preview_url %}
+                                <a
+                                    class="recent-job-pill"
+                                    href="{{ job.preview_url }}"
+                                    data-preview-modal="1"
+                                    data-preview-url="{{ job.preview_url }}"
+                                    data-preview-title="{{ job.name }}"
+                                >Preview</a>
+                                {% endif %}
+                                {% if job.download_all_url %}
+                                <a class="recent-job-pill" href="{{ job.download_all_url }}">Download</a>
+                                {% endif %}
+                                {% if job.match_settings_url %}
+                                <a class="recent-job-pill" href="{{ job.match_settings_url }}">Match Settings</a>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="footer">No jobs yet.</p>
+                    {% endif %}
+                </div>
+            </div>
             <div class="note data-sources">
                 <span class="data-sources-label">Data sources:</span>
                 <div class="data-source-group">
@@ -394,28 +477,13 @@
                     {% endfor %}
                 </div>
             </div>
-
-            <div class="card">
-                <div class="section-title">Recent Jobs</div>
-                <div id="recentJobs">
-                    {% if jobs %}
-                    <ul>
-                        {% for job in jobs %}
-                        <li>
-                            <a
-                                href="{{ url_for('job_status', job_id=job.job_id) }}"
-                                >{{ job.job_id }}</a
-                            >
-                            — {{ status_label(job.status) }}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="footer">No jobs yet.</p>
-                    {% endif %}
-                </div>
-            </div>
         </main>
+        <div id="previewModal" class="preview-modal hidden" aria-hidden="true">
+            <div class="preview-modal-backdrop" data-preview-close="1"></div>
+            <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Job Preview">
+                <iframe id="previewModalFrame" class="preview-modal-frame" title="Job Preview"></iframe>
+            </div>
+        </div>
         <i
             id="faviconSource"
             class="visually-hidden"
@@ -443,12 +511,15 @@
             const VA_BOUNDS = { latMin: 36.5, latMax: 39.5, lonMin: -83.0, lonMax: -75.0 };
             const CONUS_BOUNDS = { latMin: 24.5, latMax: 49.5, lonMin: -125.0, lonMax: -66.5 };
             const PARCEL_SOURCES = {{ parcel_sources | tojson }};
-            const RECENT_JOBS_POLL_MS = 5000;
+            const RECENT_JOBS_WAIT_SECONDS = 25;
+            const RECENT_JOBS_RETRY_MS = 1500;
+            const CAN_BUILD = {{ can_build | tojson }};
             let buildErrorMessage = '';
             let coverageStatus = null;
             let coverageKey = null;
             let coverageTimer = null;
             let coverageRequestId = 0;
+            let recentJobsVersion = 0;
 
             function parseCoords(value) {
               if (!value) return null;
@@ -614,35 +685,152 @@
                 return;
               }
               const list = document.createElement('ul');
+              list.className = 'recent-job-list';
               jobs.forEach((job) => {
                 const item = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = `/jobs/${job.job_id}`;
-                link.textContent = job.job_id;
-                item.appendChild(link);
-                const label = job.status_label || job.status;
-                item.appendChild(document.createTextNode(` — ${label}`));
+                item.className = 'recent-job-row';
+                const isDone = job.status === 'done';
+                const name = job.name || job.job_id;
+
+                const title = document.createElement('div');
+                title.className = 'recent-job-title';
+                title.textContent = isDone ? name : 'Job running...';
+                item.appendChild(title);
+
+                if (isDone) {
+                  const actions = document.createElement('div');
+                  actions.className = 'recent-job-actions';
+                  if (job.preview_url) {
+                    const previewLink = document.createElement('a');
+                    previewLink.className = 'recent-job-pill';
+                    previewLink.href = job.preview_url;
+                    previewLink.textContent = 'Preview';
+                    previewLink.dataset.previewModal = '1';
+                    previewLink.dataset.previewUrl = job.preview_url;
+                    previewLink.dataset.previewTitle = name;
+                    actions.appendChild(previewLink);
+                  }
+                  if (job.download_all_url) {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.className = 'recent-job-pill';
+                    downloadLink.href = job.download_all_url;
+                    downloadLink.textContent = 'Download';
+                    actions.appendChild(downloadLink);
+                  }
+                  const matchLink = document.createElement('a');
+                  matchLink.className = 'recent-job-pill';
+                  matchLink.href = job.match_settings_url || `/?from_job=${encodeURIComponent(job.job_id)}`;
+                  matchLink.textContent = 'Match Settings';
+                  actions.appendChild(matchLink);
+                  item.appendChild(actions);
+                }
+
                 list.appendChild(item);
               });
               container.appendChild(list);
             }
 
-            async function refreshRecentJobs() {
+            function openPreviewModal(url) {
+              const modal = document.getElementById('previewModal');
+              const frame = document.getElementById('previewModalFrame');
+              if (!modal || !frame) return;
+              let embedUrl = url;
+              try {
+                const parsed = new URL(url, window.location.origin);
+                parsed.searchParams.set('embed', '1');
+                embedUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+              } catch (err) {
+                const separator = url && url.includes('?') ? '&' : '?';
+                embedUrl = `${url}${separator}embed=1`;
+              }
+              frame.src = embedUrl;
+              modal.classList.remove('hidden');
+              modal.setAttribute('aria-hidden', 'false');
+              document.body.classList.add('modal-open');
+            }
+
+            function closePreviewModal() {
+              const modal = document.getElementById('previewModal');
+              const frame = document.getElementById('previewModalFrame');
+              if (!modal || !frame) return;
+              modal.classList.add('hidden');
+              modal.setAttribute('aria-hidden', 'true');
+              frame.src = 'about:blank';
+              document.body.classList.remove('modal-open');
+            }
+
+            function initPreviewModal() {
+              document.addEventListener('click', (event) => {
+                const previewLink = event.target.closest('a[data-preview-modal="1"]');
+                if (previewLink) {
+                  event.preventDefault();
+                  const url = previewLink.dataset.previewUrl || previewLink.href;
+                  openPreviewModal(url);
+                  return;
+                }
+                const closeTarget = event.target.closest('[data-preview-close="1"]');
+                if (closeTarget) {
+                  event.preventDefault();
+                  closePreviewModal();
+                }
+              });
+              document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') closePreviewModal();
+              });
+            }
+
+            async function refreshRecentJobs(options = {}) {
+              if (!CAN_BUILD) return;
               const container = document.getElementById('recentJobs');
               if (!container) return;
+              const waitSeconds = Number.isFinite(options.waitSeconds)
+                ? Math.max(0, options.waitSeconds)
+                : 0;
+              const hasSince = Number.isFinite(options.sinceVersion);
+              const params = new URLSearchParams();
+              if (waitSeconds > 0) {
+                params.set('wait', String(waitSeconds));
+              }
+              if (hasSince) {
+                params.set('since', String(Math.max(0, options.sinceVersion)));
+              }
+              const path = params.toString() ? `/recent-jobs?${params.toString()}` : '/recent-jobs';
               try {
-                const resp = await fetch('/recent-jobs', { cache: 'no-store' });
-                if (!resp.ok) return;
+                const resp = await fetch(path, { cache: 'no-store' });
+                if (!resp.ok) {
+                  if (resp.status === 401 || resp.status === 403) {
+                    return { ok: false, stop: true };
+                  }
+                  return { ok: false, stop: false };
+                }
                 const data = await resp.json();
                 renderRecentJobs(container, data.jobs || []);
+                if (typeof data.version === 'number') {
+                  recentJobsVersion = data.version;
+                }
+                return { ok: true, stop: false };
               } catch (err) {
-                return;
+                return { ok: false, stop: false };
               }
             }
 
             function startRecentJobsPolling() {
               if (window.__recentJobsPoll) return;
-              window.__recentJobsPoll = setInterval(refreshRecentJobs, RECENT_JOBS_POLL_MS);
+              window.__recentJobsPoll = true;
+              const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+              (async () => {
+                while (window.__recentJobsPoll) {
+                  const result = await refreshRecentJobs({
+                    waitSeconds: RECENT_JOBS_WAIT_SECONDS,
+                    sinceVersion: recentJobsVersion,
+                  });
+                  if (result && result.stop) break;
+                  if (!result || !result.ok) {
+                    await sleep(RECENT_JOBS_RETRY_MS);
+                  }
+                }
+                window.__recentJobsPoll = false;
+              })();
             }
 
             function updateUnitLabels() {
@@ -801,7 +989,12 @@
                 headers: { 'X-Requested-With': 'fetch' },
               });
               if (!resp.ok) {
-                buildErrorMessage = 'Build failed to start. Please check your inputs and try again.';
+                try {
+                  const payload = await resp.json();
+                  buildErrorMessage = payload.error || 'Build failed to start. Please check your inputs and try again.';
+                } catch (err) {
+                  buildErrorMessage = 'Build failed to start. Please check your inputs and try again.';
+                }
                 updateAlerts();
                 runBtn.disabled = false;
                 runBtn.textContent = originalText;
@@ -810,28 +1003,76 @@
               const data = await resp.json();
 
               let offset = 0;
-              async function poll() {
-                const logResp = await fetch(`/logs/${data.job_id}?offset=${offset}`);
-                if (!logResp.ok) return;
-                const logData = await logResp.json();
-                offset = logData.offset;
-                if (logData.status === 'running') {
-                  setTimeout(poll, 1500);
-                } else {
+              const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+              while (true) {
+                try {
+                  const logResp = await fetch(`/logs/${data.job_id}?offset=${offset}&wait=25`, {
+                    cache: 'no-store',
+                  });
+                  if (!logResp.ok) {
+                    if (logResp.status === 401 || logResp.status === 403 || logResp.status === 404) {
+                      buildErrorMessage = 'Build status is no longer available. Please refresh and try again.';
+                      updateAlerts();
+                      break;
+                    }
+                    await sleep(1500);
+                    continue;
+                  }
+                  const logData = await logResp.json();
+                  if (typeof logData.offset === 'number') {
+                    offset = logData.offset;
+                  }
+                  if (logData.status === 'running' || logData.status === 'queued') {
+                    continue;
+                  }
                   if (logData.status === 'error') {
                     const reason = logData.error ? ` ${logData.error}` : '';
                     buildErrorMessage = `Build failed.${reason}`;
                     updateAlerts();
                   }
-                  refreshRecentJobs();
-                  runBtn.disabled = false;
-                  runBtn.textContent = originalText;
+                  break;
+                } catch (err) {
+                  await sleep(1500);
                 }
               }
-              poll();
+              refreshRecentJobs();
+              runBtn.disabled = false;
+              runBtn.textContent = originalText;
             }
 
             document.addEventListener('DOMContentLoaded', () => {
+              initPreviewModal();
+              const profileShell = document.getElementById('profileShell');
+              const profileButton = document.getElementById('profileButton');
+              const profileDropdown = document.getElementById('profileDropdown');
+              if (profileShell && profileButton && profileDropdown) {
+                const closeProfileMenu = () => {
+                  profileDropdown.classList.add('hidden');
+                  profileButton.setAttribute('aria-expanded', 'false');
+                };
+                profileButton.addEventListener('click', (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const willOpen = profileDropdown.classList.contains('hidden');
+                  if (willOpen) {
+                    profileDropdown.classList.remove('hidden');
+                    profileButton.setAttribute('aria-expanded', 'true');
+                  } else {
+                    closeProfileMenu();
+                  }
+                });
+                document.addEventListener('click', (event) => {
+                  if (!profileShell.contains(event.target)) {
+                    closeProfileMenu();
+                  }
+                });
+                document.addEventListener('keydown', (event) => {
+                  if (event.key === 'Escape') {
+                    closeProfileMenu();
+                  }
+                });
+              }
+
               initSegmentedControls();
               initToggleButtons();
               updateUnitLabels();
@@ -865,7 +1106,9 @@
               });
               const form = document.querySelector('form.card');
               if (form) {
-                form.addEventListener('submit', runBuild);
+                if (CAN_BUILD) {
+                  form.addEventListener('submit', runBuild);
+                }
                 form.addEventListener('reset', () => {
                   setTimeout(() => {
                     initSegmentedControls();
@@ -877,8 +1120,10 @@
                   }, 0);
                 });
               }
-              refreshRecentJobs();
-              startRecentJobsPolling();
+              if (CAN_BUILD) {
+                refreshRecentJobs();
+                startRecentJobsPolling();
+              }
               scheduleCoverageCheck();
             });
         </script>
