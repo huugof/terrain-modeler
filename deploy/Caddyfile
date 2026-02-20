@@ -2,7 +2,7 @@
     email {$ACME_EMAIL}
 }
 
-{$APP_DOMAIN} {
+{$APP_DOMAIN:localhost}, :80 {
     encode gzip
     reverse_proxy terrain-ui-blue:8000
 }

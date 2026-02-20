@@ -9,5 +9,6 @@
 - [x] user to input coordinates and size only and script to select correct tile programmatically
 - [x] enable selecting more than one tile and tiling them correctly
 - [ ] how do i host this?
+- [ ] simplify droplet deployment to one stack (production-only, no parallel dev stack)
 - [ ] what exactly does contour smoothing do
 - [ ] what exactly does output resolution do?

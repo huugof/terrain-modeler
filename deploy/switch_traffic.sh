@@ -20,5 +20,5 @@ else
 fi
 rm -f "${CADDY_FILE}.bak"
 
-docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
 echo "Traffic switched to ${TARGET}."

@@ -74,18 +74,17 @@ va-lidar-context-web --host 0.0.0.0 --port 8000
 
 ## Docker
 
-**Dev / local:**
-```bash
-mkdir -p /data/out
-docker compose up -d --build
-```
-App runs on `http://localhost:8000`.
-
 **Production (Caddy + TLS + blue/green):**
 ```bash
-# Required env vars: APP_DOMAIN, ACME_EMAIL, APP_IMAGE, VA_SESSION_SECRET
-docker compose -f docker-compose.prod.yml up -d
+mkdir -p /data/out /data/app
+chown -R 10001:10001 /data/out /data/app
+grep -q '^VA_SESSION_SECRET=' .env 2>/dev/null || \
+  echo "VA_SESSION_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> .env
+# Required env vars: VA_SESSION_SECRET
+# Optional for TLS/domain: APP_DOMAIN, ACME_EMAIL, APP_IMAGE
+docker compose up -d --build
 ```
+App is served through Caddy on `http://<host>/` (and `https://<domain>/` when DNS + ACME are configured).
 
 Blue/green deploy:
 ```bash
