@@ -77,9 +77,7 @@ def _validate_outputs(outputs: Iterable[str]) -> set[str]:
         cleaned.append(name)
 
     if not cleaned:
-        raise ValueError(
-            "No outputs specified. Provide --outputs with at least one value."
-        )
+        raise ValueError("No outputs specified. Provide --outputs with at least one value.")
 
     unknown = [name for name in cleaned if name not in OUTPUT_CHOICES]
     if unknown:
@@ -129,9 +127,7 @@ def _stage_image_only(
     logger = get_logger()
     tile_name = cfg.tile_name or _image_job_name(lat, lon, cfg.size, cfg.units)
     job_id = cfg.job_id or generate_job_id((lat, lon), cfg.size, cfg.units)
-    tile_dir, job_id = allocate_output_dir(
-        cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None
-    )
+    tile_dir, job_id = allocate_output_dir(cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None)
     write_job_info(
         tile_dir / "README.txt",
         tile_name=tile_name,
@@ -252,9 +248,7 @@ def _stage_resolve_tile(
             clip_bbox_wgs84_hint, logger=logger, cache_dir=cache_dir
         )
     if ept_source is None:
-        ept_source = usgs_ept.resolve_ept_from_point(
-            lon, lat, logger=logger, cache_dir=cache_dir
-        )
+        ept_source = usgs_ept.resolve_ept_from_point(lon, lat, logger=logger, cache_dir=cache_dir)
     if ept_source:
         return {
             "tile_name": tile_name,
@@ -279,9 +273,7 @@ def _stage_resolve_tile(
     return _build_laz_fallback_tile_info(tile_name, lon, lat)
 
 
-def _build_laz_fallback_tile_info(
-    tile_name: str, lon: float, lat: float
-) -> Dict[str, Any]:
+def _build_laz_fallback_tile_info(tile_name: str, lon: float, lat: float) -> Dict[str, Any]:
     features = usgs_index.query_for_point(lon, lat)
     if not features:
         raise ValueError("No USGS LiDAR workunits found at this location")
@@ -320,12 +312,7 @@ def _stage_download_laz_va(
     laz_paths = [laz_path]
     source_type_used = "laz"
 
-    use_ept = (
-        cfg.prefer_ept
-        and lat is not None
-        and lon is not None
-        and cfg.size is not None
-    )
+    use_ept = cfg.prefer_ept and lat is not None and lon is not None and cfg.size is not None
     if use_ept:
         ept_source = None
         if clip_bbox_wgs84_hint is not None:
@@ -339,9 +326,7 @@ def _stage_download_laz_va(
         if ept_source is not None and ept_source.crs_wkt:
             ept_crs = CRS.from_wkt(ept_source.crs_wkt)
             to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
-            wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
-                lat, lon, cfg.size, cfg.units
-            )
+            wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
             c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
             c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
             bounds = (
@@ -409,9 +394,7 @@ def _stage_download_laz_national(
             write_json(tile_json, tile_info)
         ept_crs = CRS.from_wkt(ept_wkt)
         to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
-        wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
-            lat, lon, cfg.size, cfg.units
-        )
+        wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
         c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
         c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
         bounds = (
@@ -430,17 +413,13 @@ def _stage_download_laz_national(
                 raise
             msg = f"EPT fetch failed; falling back to LAZ ({exc})"
             logger.warning(msg)
-            tile_info = _build_laz_fallback_tile_info(
-                tile_info.get("tile_name", ""), lon, lat
-            )
+            tile_info = _build_laz_fallback_tile_info(tile_info.get("tile_name", ""), lon, lat)
             write_json(tile_json, tile_info)
             source_type = "laz"
 
     if source_type == "laz":
         tile_name = tile_info.get("tile_name", "")
-        health = rockyweb_health.check_rockyweb(
-            cache_dir / "rockyweb_health.json", logger=logger
-        )
+        health = rockyweb_health.check_rockyweb(cache_dir / "rockyweb_health.json", logger=logger)
         if not health.get("ok"):
             raise ValueError(
                 "rockyweb is unavailable (EPT missing and LAZ fallback blocked). "
@@ -454,15 +433,11 @@ def _stage_download_laz_national(
             raise ValueError("No LAZ URLs found for workunit")
         if cfg.size is None:
             raise ValueError("National provider requires --size")
-        clip_bbox = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
-            lat, lon, cfg.size, cfg.units
-        )
+        clip_bbox = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
         laz_cache_dir = cache_dir.parent / "_cache" / "usgs_laz"
         workunit = tile_info.get("workunit", "workunit")
         cache_path = laz_cache_dir / f"{workunit}.json"
-        tiles_index = usgs_laz.build_laz_index(
-            laz_urls, cache_path, force=cfg.force, logger=logger
-        )
+        tiles_index = usgs_laz.build_laz_index(laz_urls, cache_path, force=cfg.force, logger=logger)
         selected = usgs_laz.select_laz_tiles(tiles_index, clip_bbox)
         if not selected:
             raise ValueError("No LAZ tiles intersect clip bbox")
@@ -521,6 +496,82 @@ def _stage_download_naip(
     return naip_tiled_used
 
 
+def _compute_terrain_uv(
+    terrain_vertices: Any,
+    *,
+    xy_scale: float,
+    to_3857_from_laz: Any,
+    transform: Any,
+    raster_width: int,
+    raster_height: int,
+    bbox_3857: Tuple[float, float, float, float],
+    use_raster_uv: bool,
+    flip_u: bool,
+    flip_v: bool,
+) -> list[tuple[float, float]]:
+    """Compute terrain UVs with a single, explicit OBJ orientation convention.
+
+    OBJ UVs are treated as:
+      - u: increases eastward (left -> right)
+      - v: increases northward / upward in the image (bottom -> top)
+
+    This keeps textured OBJ output consistent between the raster-space and
+    projected-space UV paths.
+    """
+    x_laz = terrain_vertices[:, 0] / xy_scale
+    y_laz = terrain_vertices[:, 1] / xy_scale
+
+    if use_raster_uv:
+        inv = ~transform
+        col = inv.a * x_laz + inv.b * y_laz + inv.c
+        row = inv.d * x_laz + inv.e * y_laz + inv.f
+        u = col / float(raster_width)
+        # Raster rows increase downward; OBJ v increases upward.
+        v = 1.0 - (row / float(raster_height))
+    else:
+        xmin, xmax, ymin, ymax = bbox_3857
+        x3857, y3857 = to_3857_from_laz.transform(x_laz, y_laz)
+        u = (x3857 - xmin) / (xmax - xmin)
+        # EPSG:3857 Y increases northward, which matches OBJ's upward V axis.
+        v = (y3857 - ymin) / (ymax - ymin)
+
+    if flip_u:
+        u = 1.0 - u
+    if flip_v:
+        v = 1.0 - v
+
+    return list(zip(u, v))
+
+
+def _resolve_scene_transform_center(
+    terrain_mesh: Any,
+    buildings_mesh: Any,
+    *,
+    center_laz_x: Optional[float],
+    center_laz_y: Optional[float],
+    xy_scale: float,
+) -> tuple[float, float]:
+    """Pick the pivot used for scene-level flip/rotate transforms."""
+    if center_laz_x is not None and center_laz_y is not None:
+        return center_laz_x * xy_scale, center_laz_y * xy_scale
+
+    if terrain_mesh is not None:
+        bounds = terrain_mesh.bounds
+        return (
+            (bounds[0][0] + bounds[1][0]) / 2.0,
+            (bounds[0][1] + bounds[1][1]) / 2.0,
+        )
+
+    if buildings_mesh is not None:
+        bounds = buildings_mesh.bounds
+        return (
+            (bounds[0][0] + bounds[1][0]) / 2.0,
+            (bounds[0][1] + bounds[1][1]) / 2.0,
+        )
+
+    return 0.0, 0.0
+
+
 def _stage_clip_and_multitile(
     cfg: BuildConfig,
     tile_info: Dict[str, Any],
@@ -536,7 +587,16 @@ def _stage_clip_and_multitile(
     clip_bbox_wgs84_hint: Optional[Tuple[float, float, float, float]],
     source_type_used: str,
     tile_infos: List[Dict[str, Any]],
-) -> Tuple[Any, Optional[Tuple[float, float, float, float]], Path, List[Path], List[Dict[str, Any]], bool, Optional[float], Optional[float]]:
+) -> Tuple[
+    Any,
+    Optional[Tuple[float, float, float, float]],
+    Path,
+    List[Path],
+    List[Dict[str, Any]],
+    bool,
+    Optional[float],
+    Optional[float],
+]:
     """Build clip polygon and handle multi-tile spillover.
 
     Returns (clip_poly, clip_bbox_wgs84, laz_processing_path, laz_paths,
@@ -552,21 +612,14 @@ def _stage_clip_and_multitile(
     if cfg.size is not None and lat is not None and lon is not None:
         if cfg.provider == "va":
             bbox = tile_info["bbox_wgs84"]
-            if not (
-                bbox["xmin"] <= lon <= bbox["xmax"]
-                and bbox["ymin"] <= lat <= bbox["ymax"]
-            ):
-                raise ValueError(
-                    f"Clip center ({lat}, {lon}) is outside the tile bbox."
-                )
+            if not (bbox["xmin"] <= lon <= bbox["xmax"] and bbox["ymin"] <= lat <= bbox["ymax"]):
+                raise ValueError(f"Clip center ({lat}, {lon}) is outside the tile bbox.")
 
         to_laz = Transformer.from_crs("EPSG:4326", laz_crs, always_xy=True)
         cx, cy = to_laz.transform(lon, lat)
         center_laz_x, center_laz_y = cx, cy
 
-        wgs84_bbox = clip_bbox_wgs84_hint or bbox_from_center_wgs84(
-            lat, lon, cfg.size, cfg.units
-        )
+        wgs84_bbox = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
         corners_laz = [
             to_laz.transform(wgs84_bbox[0], wgs84_bbox[1]),
             to_laz.transform(wgs84_bbox[0], wgs84_bbox[3]),
@@ -663,9 +716,7 @@ def _stage_rasters(
     if cfg.force or not dtm_path.exists():
         make_dtm(laz_processing_path, dtm_path, cfg.resolution)
         if not raster_has_data(dtm_path):
-            logger.warning(
-                "DTM contains no ground data; falling back to unclassified min raster"
-            )
+            logger.warning("DTM contains no ground data; falling back to unclassified min raster")
             make_dtm_unclassified(laz_processing_path, dtm_path, cfg.resolution)
     if cfg.fill_dtm:
         if cfg.force or not dtm_filled_path.exists():
@@ -712,9 +763,7 @@ def _stage_heights(
 
     reprojected = reproject_features(footprints, laz_crs)
     if clip_poly is not None:
-        reprojected = [
-            f for f in reprojected if f["geometry"].intersects(clip_poly)
-        ]
+        reprojected = [f for f in reprojected if f["geometry"].intersects(clip_poly)]
     if not reprojected:
         logger.warning("No footprints intersect the clip area after reprojection")
 
@@ -788,9 +837,7 @@ def _stage_mesh_export(
         else:
             combined = combine_meshes([terrain_mesh, mesh])
             if combined is None:
-                logger.warning(
-                    "No combined mesh produced (missing terrain or buildings)"
-                )
+                logger.warning("No combined mesh produced (missing terrain or buildings)")
             else:
                 export_mesh(combined, str(combined_path))
 
@@ -856,9 +903,7 @@ def _stage_dxf_export(
         else:
             source, parcels = fetch_parcels_for_bbox(parcels_bbox)
             if source is None or parcels is None:
-                logger.warning(
-                    "No parcel source available for this area; skipping."
-                )
+                logger.warning("No parcel source available for this area; skipping.")
             else:
                 parcel_count = dxf.add_polygons_from_geojson(
                     parcels,
@@ -870,9 +915,7 @@ def _stage_dxf_export(
                     clip_boundary=clip_poly,
                     rotate_deg=cfg.rotate_z,
                 )
-                logger.info(
-                    f"  Added {parcel_count} parcel boundaries ({source.name})"
-                )
+                logger.info(f"  Added {parcel_count} parcel boundaries ({source.name})")
 
     if include_buildings:
         building_count = dxf.add_polygons_from_geojson(
@@ -930,9 +973,7 @@ def build(cfg: BuildConfig) -> BuildResult:
     ):
         raise ValueError("--contours requires 'contours' in --outputs.")
     if cfg.combine_output and not (export_buildings and export_terrain):
-        raise ValueError(
-            "--combine-output requires both buildings and terrain outputs."
-        )
+        raise ValueError("--combine-output requires both buildings and terrain outputs.")
 
     lat, lon = None, None
     if cfg.center is not None:
@@ -959,9 +1000,7 @@ def build(cfg: BuildConfig) -> BuildResult:
     cache_dir = cfg.out_dir / "_cache"
 
     logger.info("Stage 1/6: tile lookup")
-    tile_info = _stage_resolve_tile(
-        cfg, lat, lon, tile_name, clip_bbox_wgs84_hint, cache_dir
-    )
+    tile_info = _stage_resolve_tile(cfg, lat, lon, tile_name, clip_bbox_wgs84_hint, cache_dir)
     tile_name = tile_info.get("tile_name") or tile_name or ""
 
     job_center = None
@@ -975,9 +1014,7 @@ def build(cfg: BuildConfig) -> BuildResult:
         )
 
     job_id = cfg.job_id or generate_job_id(job_center, cfg.size, cfg.units)
-    tile_dir, job_id = allocate_output_dir(
-        cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None
-    )
+    tile_dir, job_id = allocate_output_dir(cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None)
 
     tile_json = tile_dir / "tile.json"
     laz_path = tile_dir / "tile.laz"
@@ -1020,10 +1057,7 @@ def build(cfg: BuildConfig) -> BuildResult:
                     f"(~{ratio * 100:.1f}% covered). Output may be incomplete."
                 )
             else:
-                msg = (
-                    "EPT coverage is partial for the requested clip. "
-                    "Output may be incomplete."
-                )
+                msg = "EPT coverage is partial for the requested clip. Output may be incomplete."
             logger.warning(msg)
             warnings.append(msg)
 
@@ -1032,16 +1066,14 @@ def build(cfg: BuildConfig) -> BuildResult:
     multi_tile_used = False
 
     if provider == "va":
-        laz_processing_path, laz_paths, source_type_used, tile_infos = (
-            _stage_download_laz_va(
-                cfg,
-                tile_info,
-                laz_path,
-                lat,
-                lon,
-                clip_bbox_wgs84_hint,
-                cache_dir,
-            )
+        laz_processing_path, laz_paths, source_type_used, tile_infos = _stage_download_laz_va(
+            cfg,
+            tile_info,
+            laz_path,
+            lat,
+            lon,
+            clip_bbox_wgs84_hint,
+            cache_dir,
         )
         if source_type_used == "laz" and len(laz_paths) > 1:
             multi_tile_used = True
@@ -1110,16 +1142,12 @@ def build(cfg: BuildConfig) -> BuildResult:
             footprints = vgin.fetch_footprints_geojson(bbox_tuple)
         else:
             if clip_bbox_wgs84 is None:
-                raise ValueError(
-                    "National provider requires a clip bbox for footprints"
-                )
+                raise ValueError("National provider requires a clip bbox for footprints")
             footprints = national_footprints.fetch_footprints_geojson(clip_bbox_wgs84)
         footprints_path.write_text(json.dumps(footprints))
 
     logger.info("Stage 4/6: generate rasters")
-    override_heights = (
-        cfg.random_heights_min is not None and cfg.random_heights_max is not None
-    )
+    override_heights = cfg.random_heights_min is not None and cfg.random_heights_max is not None
     dtm_use_path, terrain_source_path = _stage_rasters(
         cfg,
         laz_processing_path,
@@ -1186,9 +1214,7 @@ def build(cfg: BuildConfig) -> BuildResult:
             ]
 
         to_3857_from_laz = Transformer.from_crs(laz_crs, "EPSG:3857", always_xy=True)
-        xs, ys = to_3857_from_laz.transform(
-            [p[0] for p in bbox_laz], [p[1] for p in bbox_laz]
-        )
+        xs, ys = to_3857_from_laz.transform([p[0] for p in bbox_laz], [p[1] for p in bbox_laz])
         xmin, xmax = min(xs), max(xs)
         ymin, ymax = min(ys), max(ys)
         use_raster_uv = False
@@ -1219,6 +1245,33 @@ def build(cfg: BuildConfig) -> BuildResult:
             warnings,
         )
 
+    if export_naip and export_terrain and terrain_mesh is not None and uv_context is not None:
+        (
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            to_3857_from_laz,
+            transform,
+            raster_width,
+            raster_height,
+            use_raster_uv,
+        ) = uv_context
+        # Compute UVs before any scene-level transform (flip/rotate), so the
+        # texture remains locked to terrain geometry after rotation.
+        terrain_uv = _compute_terrain_uv(
+            terrain_mesh.vertices,
+            xy_scale=xy_scale,
+            to_3857_from_laz=to_3857_from_laz,
+            transform=transform,
+            raster_width=raster_width,
+            raster_height=raster_height,
+            bbox_3857=(xmin, xmax, ymin, ymax),
+            use_raster_uv=use_raster_uv,
+            flip_u=cfg.naip_flip_u,
+            flip_v=cfg.naip_flip_v,
+        )
+
     if cfg.terrain_flip_y and terrain_mesh is not None:
         bounds = terrain_mesh.bounds
         center_x = (bounds[0][0] + bounds[1][0]) / 2.0
@@ -1228,17 +1281,13 @@ def build(cfg: BuildConfig) -> BuildResult:
     center_x = None
     center_y = None
     if cfg.flip_x or cfg.flip_y or cfg.rotate_z:
-        if terrain_mesh is not None:
-            bounds = terrain_mesh.bounds
-            center_x = (bounds[0][0] + bounds[1][0]) / 2.0
-            center_y = (bounds[0][1] + bounds[1][1]) / 2.0
-        elif mesh is not None:
-            bounds = mesh.bounds
-            center_x = (bounds[0][0] + bounds[1][0]) / 2.0
-            center_y = (bounds[0][1] + bounds[1][1]) / 2.0
-        else:
-            center_x = 0.0
-            center_y = 0.0
+        center_x, center_y = _resolve_scene_transform_center(
+            terrain_mesh,
+            mesh,
+            center_laz_x=center_laz_x,
+            center_laz_y=center_laz_y,
+            xy_scale=xy_scale,
+        )
         apply_scene_transform(
             terrain_mesh,
             center_x,
@@ -1255,44 +1304,6 @@ def build(cfg: BuildConfig) -> BuildResult:
             flip_y=cfg.flip_y,
             rotate_deg=cfg.rotate_z,
         )
-
-    if (
-        export_naip
-        and export_terrain
-        and terrain_mesh is not None
-        and uv_context is not None
-    ):
-        (
-            xmin,
-            xmax,
-            ymin,
-            ymax,
-            to_3857_from_laz,
-            transform,
-            raster_width,
-            raster_height,
-            use_raster_uv,
-        ) = uv_context
-        verts = terrain_mesh.vertices
-        x_laz = verts[:, 0] / xy_scale
-        y_laz = verts[:, 1] / xy_scale
-        if use_raster_uv:
-            inv = ~transform
-            col = inv.a * x_laz + inv.b * y_laz + inv.c
-            row = inv.d * x_laz + inv.e * y_laz + inv.f
-            u = col / float(raster_width)
-            v = row / float(raster_height)
-            v = 1.0 - v
-        else:
-            x3857, y3857 = to_3857_from_laz.transform(x_laz, y_laz)
-            u = (x3857 - xmin) / (xmax - xmin)
-            v = (y3857 - ymin) / (ymax - ymin)
-            v = 1.0 - v
-        if cfg.naip_flip_u:
-            u = 1.0 - u
-        if cfg.naip_flip_v:
-            v = 1.0 - v
-        terrain_uv = list(zip(u, v))
 
     _stage_mesh_export(
         cfg,
@@ -1335,9 +1346,7 @@ def build(cfg: BuildConfig) -> BuildResult:
         if cfg.xyz_mode == "contours":
             if contours:
                 spacing = cfg.xyz_contour_spacing or 0.0
-                xyz_point_count = export_contours_xyz(
-                    contours, str(xyz_path), spacing=spacing
-                )
+                xyz_point_count = export_contours_xyz(contours, str(xyz_path), spacing=spacing)
         else:
             xyz_point_count = export_terrain_xyz(
                 str(terrain_source_path),
@@ -1408,9 +1417,7 @@ def build(cfg: BuildConfig) -> BuildResult:
         "footprints_extruded": len(heights) if needs_heights else 0,
         "clip": {
             "enabled": clip_poly is not None,
-            "center_latlon": (lat, lon)
-            if lat is not None and lon is not None
-            else None,
+            "center_latlon": (lat, lon) if lat is not None and lon is not None else None,
             "size": cfg.size,
         },
         "transform": {

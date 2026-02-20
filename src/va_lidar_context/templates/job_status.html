@@ -239,22 +239,6 @@
         #preview-container { height: 340px; }
       }
     </style>
-    <link rel="modulepreload"
-          href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
-          integrity="sha384-61S/Nu32S3E5+n+KpCOTb2eRYps6fVKm+9Gz1QBvSePFthb46f063Aa/qe/lykFZ"
-          crossorigin="anonymous">
-    <link rel="modulepreload"
-          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js"
-          integrity="sha384-qlO/ZugKPxAQUAvTlQoo0QECzxJIJySZmCF/DHdb2Xn/hHndFwX/vfUAC9Hbk6LP"
-          crossorigin="anonymous">
-    <link rel="modulepreload"
-          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js"
-          integrity="sha384-qOxu19eVIcHchuUw1oqOwdUJBMFRbuIik14tOMzsoBIa4yuIxVZYj4/YeaWokjND"
-          crossorigin="anonymous">
-    <link rel="modulepreload"
-          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js"
-          integrity="sha384-ZxIh2P78v4FWy4FwqeD6RJXKTaYyGquR8aL2qt8Au04TPrLrtD2XJRJ2bpqgMOWi"
-          crossorigin="anonymous">
   </head>
   <body{% if embed_mode %} class="embed-mode"{% endif %}>
     {% if not embed_mode %}
@@ -322,22 +306,26 @@
         </div>
       </div>
     </main>
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
-        }
-      }
-    </script>
     <script type="module">
-      import * as THREE_NS from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-      import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-      import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
-      import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
-      window.THREE = THREE_NS;
-      window.OrbitControls = OrbitControls;
-      window.OBJLoader = OBJLoader;
-      window.MTLLoader = MTLLoader;
+      (async () => {
+        try {
+          const [threeMod, controlsMod, objMod, mtlMod] = await Promise.all([
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/+esm'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js/+esm'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js/+esm'),
+          ]);
+          window.THREE = threeMod;
+          window.OrbitControls = controlsMod.OrbitControls;
+          window.OBJLoader = objMod.OBJLoader;
+          window.MTLLoader = mtlMod.MTLLoader;
+          window.__threeLoadError = null;
+        } catch (error) {
+          const message = (error && error.message) ? error.message : String(error);
+          window.__threeLoadError = message;
+          console.error('Failed to load 3D renderer modules:', error);
+        }
+      })();
     </script>
     <script>
       const STATUS_LABELS = {
@@ -470,6 +458,10 @@
 
       function ensureThreeContext() {
         if (previewState.initialized) return true;
+        if (window.__threeLoadError) {
+          setPreviewMessage(`3D preview unavailable: ${window.__threeLoadError}`);
+          return false;
+        }
         const OrbitControlsCtor = window.OrbitControls;
         if (!window.THREE || !window.OBJLoader || !OrbitControlsCtor || !window.MTLLoader) {
           setPreviewMessage('Loading 3D renderer...');
@@ -681,7 +673,7 @@
 
         if (!ensureThreeContext()) {
           previewState.activationStarted = false;
-          setTimeout(activatePreview, 600);
+          if (!window.__threeLoadError) setTimeout(activatePreview, 600);
           return;
         }
 
