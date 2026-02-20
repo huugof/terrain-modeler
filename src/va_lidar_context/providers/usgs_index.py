@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 from ..constants import USGS_LIDAR_INDEX_QUERY
@@ -91,12 +90,3 @@ def sort_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(features, key=sort_key)
 
 
-def format_collect_date(feature: Dict[str, Any]) -> str | None:
-    """Format collect_end epoch ms into an ISO date string when available."""
-    end_ms = _collect_end_ms(feature)
-    if not end_ms:
-        return None
-    try:
-        return datetime.utcfromtimestamp(end_ms / 1000).date().isoformat()
-    except Exception:
-        return None

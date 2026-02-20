@@ -1,10 +1,8 @@
-from .types import BBoxWGS84, BuildArtifacts, BuildRequest, ClipSpec, LidarSource, OutputKind
+from .types import BBoxWGS84, BuildResult, LidarSource, OutputKind
 
 __all__ = [
     "BBoxWGS84",
-    "BuildArtifacts",
-    "BuildRequest",
-    "ClipSpec",
+    "BuildResult",
     "LidarSource",
     "OutputKind",
 ]

@@ -219,7 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Comma-separated outputs. Options: buildings, terrain, contours, parcels, naip, xyz. "
-            "Defaults to buildings,terrain."
+            "Defaults to buildings,terrain. Note: contours requires --contours INTERVAL."
         ),
     )
 
@@ -277,7 +277,7 @@ def main() -> int:
             ept_only=args.ept_only,
             outputs=outputs,
         )
-        return build(cfg)
+        return build(cfg).exit_code
 
     parser.error("Unknown command")
     return 2

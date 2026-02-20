@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job {{ job.job_id }}</title>
+    <style>
+      html, body { height: 100%; }
+      body { margin: 0; font-family: "Avenir Next", "Avenir", "Futura", sans-serif; background:#f7f4ef; color:#1f1f1f; }
+      header { padding: 20px 24px; }
+      main { padding: 0 24px 32px; }
+      .card { background:#fff; border:1px solid #e4ded4; border-radius:12px; padding:16px; margin-bottom:16px; }
+      .meta { color: #666; margin-top: 6px; }
+      .actions { margin-top: 10px; }
+      a { color: #B39CD0; text-decoration: none; }
+      .status-chip {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .status-running { background: #3f2f1b; color: #ffd58e; }
+      .status-done { background: #203328; color: #b8f2c9; }
+      .status-error { background: #3b1f1f; color: #ffd4d4; }
+      .status-unknown { background: #2f2f2f; color: #d4d4d4; }
+      .tab-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .tab-btn {
+        border: 1px solid #d6d6d6;
+        border-radius: 8px;
+        background: #fff;
+        color: #1f1f1f;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .tab-btn.active {
+        border-color: #b39cd0;
+        background: #f5f1fb;
+      }
+      .tab-panel.hidden {
+        display: none;
+      }
+      pre { background:#0f1410; color:#bde7c0; padding:14px; border-radius:8px; height:420px; overflow:auto; margin: 0; }
+      #preview-container {
+        width: 100%;
+        height: 500px;
+        background: #1a1a1a;
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+      }
+      #preview-message {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #d9d9d9;
+        font-size: 14px;
+        pointer-events: none;
+      }
+      #preview-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      #preview-controls button,
+      #preview-controls select {
+        font: inherit;
+        border-radius: 6px;
+        border: 1px solid #d6d6d6;
+        background: #ffffff;
+        color: #1f1f1f;
+        padding: 8px 10px;
+      }
+      #preview-controls button { cursor: pointer; }
+      #preview-controls button:hover { border-color: #b39cd0; }
+      #preview-file { min-width: 180px; }
+      body.embed-mode {
+        overflow: hidden;
+        background: #2c2c2c;
+        color: #e4e4e4;
+      }
+      body.embed-mode main {
+        padding: 0;
+        box-sizing: border-box;
+        height: 100%;
+      }
+      body.embed-mode .card {
+        height: 100%;
+        box-sizing: border-box;
+        margin-bottom: 0;
+        border: 0;
+        border-radius: 0;
+        background: #1a1a1a;
+        box-shadow: none;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      body.embed-mode h3 {
+        margin: 0 0 10px;
+        color: #e4e4e4;
+      }
+      body.embed-mode .tab-row {
+        margin-bottom: 12px;
+        gap: 8px;
+      }
+      body.embed-mode .tab-btn {
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: #2f2f2f;
+        color: #bcbcbc;
+        padding: 8px 12px;
+      }
+      body.embed-mode .tab-btn.active {
+        border-color: #b39cd0;
+        background: #464646;
+        color: #e4e4e4;
+      }
+      body.embed-mode #preview-container {
+        flex: 1;
+        min-height: 0;
+        height: auto;
+        border-radius: 0;
+        border: 0;
+      }
+      body.embed-mode #preview-controls {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        top: auto;
+        right: auto;
+        margin-top: 0;
+        gap: 10px;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        z-index: 6;
+      }
+      body.embed-mode #preview-controls button,
+      body.embed-mode #preview-controls select {
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: rgba(47, 47, 47, 0.72);
+        color: #e4e4e4;
+        padding: 10px 12px;
+      }
+      body.embed-mode #preview-controls button:hover {
+        border-color: #b39cd0;
+        background: #3a3a3a;
+      }
+      body.embed-mode #preview-controls button:disabled {
+        border-color: #3a3a3a;
+        background: rgba(47, 47, 47, 0.65);
+        color: #9a9a9a;
+        cursor: not-allowed;
+      }
+      body.embed-mode #preview-wireframe-btn.is-active {
+        border-color: #b39cd0;
+        background: #b39cd0;
+        color: #ffffff;
+      }
+      body.embed-mode #preview-file {
+        display: none;
+      }
+      body.embed-mode #preview-scene-select {
+        min-width: 220px;
+      }
+      #preview-zoom-controls {
+        display: none;
+      }
+      body.embed-mode #preview-zoom-controls {
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+        top: auto;
+        transform: none;
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        z-index: 7;
+      }
+      body.embed-mode #preview-zoom-controls button {
+        width: 36px;
+        height: 36px;
+        border: 1px solid #444444;
+        border-radius: 8px;
+        background: rgba(47, 47, 47, 0.92);
+        color: #e4e4e4;
+        font-size: 17px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      body.embed-mode #preview-zoom-controls button:hover {
+        border-color: #b39cd0;
+        background: #3a3a3a;
+      }
+      body.embed-mode pre {
+        background: #0f1410;
+        border: 1px solid #2f2f2f;
+        color: #b7e3c0;
+        border-radius: 8px;
+        padding: 14px;
+      }
+      body.embed-mode #preview-message {
+        color: #d9d9d9;
+      }
+      body.embed-mode .tab-panel {
+        flex: 1;
+        min-height: 0;
+      }
+      body.embed-mode #panel-preview {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        height: 100%;
+      }
+      body.embed-mode #panel-preview.hidden {
+        display: none;
+      }
+      body.embed-mode #panel-log {
+        height: 100%;
+      }
+      body.embed-mode pre {
+        height: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+      }
+      @media (max-width: 700px) {
+        #preview-container { height: 340px; }
+      }
+    </style>
+    <link rel="modulepreload"
+          href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+          integrity="sha384-61S/Nu32S3E5+n+KpCOTb2eRYps6fVKm+9Gz1QBvSePFthb46f063Aa/qe/lykFZ"
+          crossorigin="anonymous">
+    <link rel="modulepreload"
+          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+          integrity="sha384-qlO/ZugKPxAQUAvTlQoo0QECzxJIJySZmCF/DHdb2Xn/hHndFwX/vfUAC9Hbk6LP"
+          crossorigin="anonymous">
+    <link rel="modulepreload"
+          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js"
+          integrity="sha384-qOxu19eVIcHchuUw1oqOwdUJBMFRbuIik14tOMzsoBIa4yuIxVZYj4/YeaWokjND"
+          crossorigin="anonymous">
+    <link rel="modulepreload"
+          href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js"
+          integrity="sha384-ZxIh2P78v4FWy4FwqeD6RJXKTaYyGquR8aL2qt8Au04TPrLrtD2XJRJ2bpqgMOWi"
+          crossorigin="anonymous">
+  </head>
+  <body{% if embed_mode %} class="embed-mode"{% endif %}>
+    {% if not embed_mode %}
+    <header>
+      <h2>{{ job.summary.get('name') or job.job_id }}</h2>
+      <div class="meta">Job ID: {{ job.job_id }}</div>
+      <div class="meta">Status: <span id="status" class="status-chip {{ status_class(job.status) }}">{{ status_label(job.status) }}</span></div>
+      <div class="meta">Provider: {{ job.summary.get('provider_label') or job.summary.get('provider') }}</div>
+      <div class="meta">Target: {{ job.summary.get('target') }}</div>
+      {% if job.summary.get('tile') %}
+        <div class="meta">Tile: {{ job.summary.get('tile') }}</div>
+      {% endif %}
+      <div class="meta actions">
+        <a href="{{ url_for('bp.index', from_job=job.job_id) }}">Reuse settings in main form</a>
+        ·
+        <a href="{{ url_for('bp.index') }}">Back to form</a>
+      </div>
+    </header>
+    {% endif %}
+    <main>
+      {% if not embed_mode %}
+      {% if job.error or job.summary.get('warnings') %}
+      <div class="card">
+        <h3>Job Notes</h3>
+        {% if job.error %}
+          <p><strong>This job did not complete.</strong> {{ job.error }}</p>
+        {% endif %}
+        {% if job.summary.get('warnings') %}
+          <p><strong>Warnings:</strong></p>
+          <ul>
+          {% for warning in job.summary.get('warnings') %}
+            <li>{{ warning }}</li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endif %}
+      <div class="card">
+        {% if not embed_mode %}
+        <h3>3D Preview & Activity</h3>
+        <div class="tab-row">
+          <button type="button" class="tab-btn" data-tab="preview" id="tab-preview">Preview</button>
+          <button type="button" class="tab-btn" data-tab="log" id="tab-log">Activity Log</button>
+        </div>
+        {% endif %}
+        <div id="panel-preview" class="tab-panel">
+          <div id="preview-container">
+            <div id="preview-message">Waiting for model files...</div>
+          </div>
+          <div id="preview-controls">
+            <button id="preview-wireframe-btn" type="button" onclick="toggleWireframe()">Wireframe</button>
+            {% if embed_mode %}
+            <select id="preview-scene-select" aria-label="Preview model"></select>
+            {% endif %}
+            <select id="preview-file"></select>
+          </div>
+          <div id="preview-zoom-controls" aria-label="Zoom controls">
+            <button type="button" onclick="zoomOut()" aria-label="Zoom out">-</button>
+            <button type="button" onclick="zoomIn()" aria-label="Zoom in">+</button>
+          </div>
+        </div>
+        <div id="panel-log" class="tab-panel">
+          <pre id="logs"></pre>
+        </div>
+      </div>
+    </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE_NS from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+      import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+      import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+      import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+      window.THREE = THREE_NS;
+      window.OrbitControls = OrbitControls;
+      window.OBJLoader = OBJLoader;
+      window.MTLLoader = MTLLoader;
+    </script>
+    <script>
+      const STATUS_LABELS = {
+        queued: 'Queued',
+        running: 'Running',
+        done: 'Completed',
+        error: 'Failed',
+      };
+      const STATUS_CLASSES = {
+        queued: 'status-running',
+        running: 'status-running',
+        done: 'status-done',
+        error: 'status-error',
+      };
+      const previewState = {
+        jobId: '{{ job.job_id }}',
+        initialized: false,
+        activationStarted: false,
+        wireframe: false,
+        filesByName: new Map(),
+        models: [],
+        currentModelKey: null,
+        scene: null,
+        camera: null,
+        renderer: null,
+        controls: null,
+        currentObject: null,
+      };
+      const EMBED_MODE = {{ embed_mode | tojson }};
+
+      function setActiveTab(tabName) {
+        const isPreview = tabName === 'preview';
+        const previewPanel = document.getElementById('panel-preview');
+        const logPanel = document.getElementById('panel-log');
+        const previewBtn = document.getElementById('tab-preview');
+        const logBtn = document.getElementById('tab-log');
+        if (previewPanel) previewPanel.classList.toggle('hidden', !isPreview);
+        if (logPanel) logPanel.classList.toggle('hidden', isPreview);
+        if (previewBtn) previewBtn.classList.toggle('active', isPreview);
+        if (logBtn) logBtn.classList.toggle('active', !isPreview);
+      }
+
+      function initTabs(initialStatus) {
+        if (EMBED_MODE) {
+          setActiveTab(initialStatus === 'done' ? 'preview' : 'log');
+          return;
+        }
+        document.querySelectorAll('.tab-btn[data-tab]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const tab = button.dataset.tab === 'preview' ? 'preview' : 'log';
+            setActiveTab(tab);
+          });
+        });
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get('tab');
+        setActiveTab(requested === 'preview' ? 'preview' : 'log');
+      }
+
+      function setStatusBadge(status) {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return;
+        const label = STATUS_LABELS[status] || status;
+        const className = STATUS_CLASSES[status] || 'status-unknown';
+        statusEl.textContent = label;
+        statusEl.className = `status-chip ${className}`;
+      }
+
+      function setPreviewMessage(message) {
+        const msgEl = document.getElementById('preview-message');
+        if (msgEl) {
+          msgEl.textContent = message;
+          msgEl.style.display = message ? 'block' : 'none';
+        }
+      }
+
+      function addInlineMode(url) {
+        if (!url) return '';
+        return url.includes('?') ? `${url}&inline=1` : `${url}?inline=1`;
+      }
+
+      function buildDownloadUrl(name) {
+        const fileMeta = previewState.filesByName.get(name);
+        if (fileMeta && fileMeta.download_url) {
+          return addInlineMode(fileMeta.download_url);
+        }
+        return `/jobs/${previewState.jobId}/download/${encodeURIComponent(name)}?inline=1`;
+      }
+
+      function pickAvailableModels(filesByName) {
+        const models = [];
+        const hasTerrain = filesByName.has('terrain.obj');
+        const hasBuildings = filesByName.has('buildings.obj');
+        const hasCombined = filesByName.has('combined.obj');
+        const terrainMtl = filesByName.has('terrain.mtl') ? 'terrain.mtl' : null;
+        const combinedMtl = filesByName.has('combined.mtl') ? 'combined.mtl' : null;
+
+        if (hasTerrain && hasBuildings) {
+          models.push({
+            key: 'scene',
+            label: 'Terrain + Buildings',
+            parts: [
+              { obj: 'terrain.obj', mtl: terrainMtl },
+              { obj: 'buildings.obj', mtl: null },
+            ],
+          });
+        }
+        if (hasCombined) {
+          models.push({
+            key: 'combined',
+            label: 'Combined',
+            parts: [{ obj: 'combined.obj', mtl: combinedMtl }],
+          });
+        }
+        if (hasTerrain) {
+          models.push({
+            key: 'terrain',
+            label: 'Terrain',
+            parts: [{ obj: 'terrain.obj', mtl: terrainMtl }],
+          });
+        }
+        if (hasBuildings) {
+          models.push({
+            key: 'buildings',
+            label: 'Buildings',
+            parts: [{ obj: 'buildings.obj', mtl: null }],
+          });
+        }
+        return models;
+      }
+
+      function ensureThreeContext() {
+        if (previewState.initialized) return true;
+        const OrbitControlsCtor = window.OrbitControls;
+        if (!window.THREE || !window.OBJLoader || !OrbitControlsCtor || !window.MTLLoader) {
+          setPreviewMessage('Loading 3D renderer...');
+          return false;
+        }
+        const container = document.getElementById('preview-container');
+        if (!container) return false;
+
+        container.innerHTML = '<div id="preview-message"></div>';
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000000);
+        camera.up.set(0, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.shadowMap.enabled = false;
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControlsCtor(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.07;
+        controls.screenSpacePanning = true;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const directional = new THREE.DirectionalLight(0xffffff, 1.0);
+        directional.position.set(200, -150, 300);
+        scene.add(directional);
+
+        previewState.scene = scene;
+        previewState.camera = camera;
+        previewState.renderer = renderer;
+        previewState.controls = controls;
+        previewState.initialized = true;
+
+        const resize = () => {
+          if (!previewState.renderer || !previewState.camera) return;
+          const width = Math.max(container.clientWidth, 1);
+          const height = Math.max(container.clientHeight, 1);
+          previewState.camera.aspect = width / height;
+          previewState.camera.updateProjectionMatrix();
+          previewState.renderer.setSize(width, height, false);
+        };
+        window.addEventListener('resize', resize);
+        resize();
+
+        const animate = () => {
+          if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
+          requestAnimationFrame(animate);
+          if (previewState.controls) previewState.controls.update();
+          previewState.renderer.render(previewState.scene, previewState.camera);
+        };
+        animate();
+        return true;
+      }
+
+      function applyWireframeMode(enabled) {
+        if (!previewState.currentObject) return;
+        previewState.currentObject.traverse((node) => {
+          if (!node.isMesh || !node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            if (enabled) {
+              if (material.map) {
+                material.userData = material.userData || {};
+                material.userData.savedMap = material.map;
+                material.map = null;
+              }
+            } else if (
+              material &&
+              material.userData &&
+              material.userData.savedMap &&
+              !material.map
+            ) {
+              material.map = material.userData.savedMap;
+            }
+            material.wireframe = enabled;
+            material.needsUpdate = true;
+          }
+        });
+      }
+
+      function clearCurrentObject() {
+        if (!previewState.scene || !previewState.currentObject) return;
+        previewState.scene.remove(previewState.currentObject);
+        previewState.currentObject = null;
+      }
+
+      function centerAndPrepareObject(obj) {
+        obj.traverse((node) => {
+          if (!node.isMesh) return;
+          if (node.geometry) node.geometry.computeVertexNormals();
+          if (!node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) material.side = THREE.DoubleSide;
+        });
+        const box = new THREE.Box3().setFromObject(obj);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          obj.position.sub(center);
+        }
+      }
+
+      function loadObjPart(part) {
+        const manager = new THREE.LoadingManager();
+        manager.setURLModifier((url) => {
+          if (!url) return url;
+          if (url.startsWith('data:') || /^https?:\/\//i.test(url)) return url;
+          const clean = url.split('#')[0].split('?')[0];
+          const name = clean.slice(clean.lastIndexOf('/') + 1);
+          if (previewState.filesByName.has(name)) return buildDownloadUrl(name);
+          return url;
+        });
+
+        return (async () => {
+          const objLoader = new window.OBJLoader(manager);
+          if (part.mtl) {
+            try {
+              const mtlResp = await fetch(buildDownloadUrl(part.mtl), { cache: 'no-store' });
+              if (mtlResp.ok) {
+                const mtlText = await mtlResp.text();
+                const mtlLoader = new window.MTLLoader(manager);
+                const mtlPath = `/jobs/${previewState.jobId}/download/`;
+                const materials = mtlLoader.parse(mtlText, mtlPath);
+                materials.preload();
+                for (const key of Object.keys(materials.materials)) {
+                  const material = materials.materials[key];
+                  if (material && material.map) {
+                    // Keep TextureLoader's default flipY behavior; our OBJ UVs
+                    // are already exported in OBJ convention (v flipped once).
+                    material.map.needsUpdate = true;
+                  }
+                }
+                objLoader.setMaterials(materials);
+              }
+            } catch (error) {
+              // Continue without MTL if it cannot be loaded.
+            }
+          }
+
+          const objUrl = buildDownloadUrl(part.obj);
+          const objResp = await fetch(objUrl, { cache: 'no-store' });
+          if (!objResp.ok) throw new Error(`OBJ fetch failed (${objResp.status}) for ${part.obj}`);
+          const objText = await objResp.text();
+          return objLoader.parse(objText);
+        })();
+      }
+
+      async function renderModel(modelKey, options = {}) {
+        const model = previewState.models.find((m) => m.key === modelKey);
+        if (!model || !previewState.scene) return;
+        const shouldResetView = options.resetView !== false;
+        setPreviewMessage('Loading model...');
+        clearCurrentObject();
+        try {
+          const group = new THREE.Group();
+          for (const part of model.parts) {
+            try {
+              const partObj = await loadObjPart(part);
+              group.add(partObj);
+            } catch (error) {
+              console.warn('Preview part failed', part.obj, error);
+            }
+          }
+          if (!group.children.length) throw new Error('No preview geometry could be loaded.');
+          centerAndPrepareObject(group);
+          previewState.scene.add(group);
+          previewState.currentObject = group;
+          previewState.currentModelKey = model.key;
+          applyWireframeMode(previewState.wireframe);
+          updateWireframeButton();
+          updateSceneSelect();
+          if (shouldResetView) resetCamera();
+          setPreviewMessage('');
+        } catch (error) {
+          const msg = (error && error.message) ? error.message : 'Failed to load preview model.';
+          setPreviewMessage(msg);
+        }
+      }
+
+      async function activatePreview() {
+        if (previewState.activationStarted) return;
+        previewState.activationStarted = true;
+        let artifactPayload;
+        try {
+          const resp = await fetch(`/jobs/${previewState.jobId}/artifacts`, { cache: 'no-store' });
+          if (!resp.ok) {
+            previewState.activationStarted = false;
+            setPreviewMessage('Preview will be available when model files are generated.');
+            return;
+          }
+          artifactPayload = await resp.json();
+        } catch (error) {
+          previewState.activationStarted = false;
+          setPreviewMessage('Preview could not be loaded.');
+          return;
+        }
+
+        const files = Array.isArray(artifactPayload.files) ? artifactPayload.files : [];
+        previewState.filesByName = new Map(files.map((f) => [f.name, f]));
+        previewState.models = pickAvailableModels(previewState.filesByName);
+        if (!previewState.models.length) {
+          previewState.activationStarted = false;
+          setPreviewMessage('No 3D model artifacts found for this job.');
+          return;
+        }
+
+        if (!ensureThreeContext()) {
+          previewState.activationStarted = false;
+          setTimeout(activatePreview, 600);
+          return;
+        }
+
+        const select = document.getElementById('preview-file');
+        if (!select) return;
+        select.innerHTML = '';
+        for (const model of previewState.models) {
+          const option = document.createElement('option');
+          option.value = model.key;
+          option.textContent = model.label;
+          select.appendChild(option);
+        }
+        if (select.dataset.bound !== 'true') {
+          select.addEventListener('change', (event) => {
+            const value = event.target.value;
+            if (value) renderModel(value, { resetView: false });
+          });
+          select.dataset.bound = 'true';
+        }
+        updateSceneSelect();
+        const defaultModel =
+          previewState.models.find((model) => model.key === 'scene') ||
+          previewState.models[0];
+        if (defaultModel) renderModel(defaultModel.key);
+      }
+
+      async function pollLogs(jobId) {
+        const logsEl = document.getElementById('logs');
+        if (!logsEl) return;
+        let offset = 0;
+        let keepPolling = true;
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        while (keepPolling) {
+          try {
+            const logResp = await fetch(`/logs/${jobId}?offset=${offset}&wait=25`, {
+              cache: 'no-store',
+            });
+            if (!logResp.ok) {
+              if (logResp.status === 401 || logResp.status === 403 || logResp.status === 404) break;
+              await sleep(1500);
+              continue;
+            }
+            const logData = await logResp.json();
+            if (logData.logs && logData.logs.length) {
+              logsEl.textContent += logData.logs.join('\n') + '\n';
+              logsEl.scrollTop = logsEl.scrollHeight;
+            }
+            if (typeof logData.offset === 'number') {
+              offset = logData.offset;
+            }
+            const status = logData.status || 'unknown';
+            setStatusBadge(status);
+            if (EMBED_MODE) {
+              setActiveTab(status === 'done' ? 'preview' : 'log');
+            }
+            if (status === 'done') activatePreview();
+            keepPolling = status === 'running' || status === 'queued';
+          } catch (err) {
+            await sleep(1500);
+          }
+        }
+      }
+
+      function toggleWireframe() {
+        previewState.wireframe = !previewState.wireframe;
+        applyWireframeMode(previewState.wireframe);
+        updateWireframeButton();
+      }
+
+      function updateWireframeButton() {
+        const wireframeBtn = document.getElementById('preview-wireframe-btn');
+        if (!wireframeBtn) return;
+        wireframeBtn.classList.toggle('is-active', previewState.wireframe);
+      }
+
+      function resetCamera() {
+        if (!previewState.camera || !previewState.controls) return;
+        let radius = 100.0;
+        if (previewState.currentObject) {
+          const box = new THREE.Box3().setFromObject(previewState.currentObject);
+          if (!box.isEmpty()) {
+            const sphere = box.getBoundingSphere(new THREE.Sphere());
+            radius = Math.max(sphere.radius, 1.0);
+          }
+        }
+        previewState.camera.near = Math.max(radius / 1000.0, 0.01);
+        previewState.camera.far = Math.max(radius * 200.0, 1000.0);
+        previewState.camera.position.set(radius * 1.35, radius * 1.35, radius * 0.95);
+        previewState.controls.target.set(0, 0, 0);
+        previewState.camera.updateProjectionMatrix();
+        previewState.controls.update();
+      }
+
+      function updateSceneSelect() {
+        const sceneSelect = document.getElementById('preview-scene-select');
+        if (!sceneSelect) return;
+        if (sceneSelect.dataset.bound !== 'true') {
+          sceneSelect.addEventListener('change', (event) => {
+            const modelKey = event.target.value;
+            if (modelKey) renderModel(modelKey, { resetView: false });
+          });
+          sceneSelect.dataset.bound = 'true';
+        }
+
+        const preferredKeys = new Set(['scene', 'terrain', 'buildings']);
+        let options = previewState.models.filter((model) => preferredKeys.has(model.key));
+        if (!options.length) options = previewState.models.slice();
+
+        sceneSelect.innerHTML = '';
+        for (const model of options) {
+          const option = document.createElement('option');
+          option.value = model.key;
+          option.textContent = model.label;
+          sceneSelect.appendChild(option);
+        }
+        sceneSelect.disabled = options.length === 0;
+
+        if (!options.length) return;
+        const hasCurrent = options.some((model) => model.key === previewState.currentModelKey);
+        sceneSelect.value = hasCurrent ? previewState.currentModelKey : options[0].key;
+      }
+
+      function zoomBy(scale) {
+        if (!previewState.camera || !previewState.controls) return;
+        const target = previewState.controls.target.clone();
+        const offset = previewState.camera.position.clone().sub(target);
+        const currentDistance = offset.length();
+        if (!Number.isFinite(currentDistance) || currentDistance <= 0) return;
+
+        let minDistance = 0.5;
+        let maxDistance = 1000000.0;
+        if (previewState.currentObject) {
+          const box = new THREE.Box3().setFromObject(previewState.currentObject);
+          if (!box.isEmpty()) {
+            const sphere = box.getBoundingSphere(new THREE.Sphere());
+            minDistance = Math.max(sphere.radius * 0.15, 0.5);
+            maxDistance = Math.max(sphere.radius * 25.0, minDistance * 4.0);
+          }
+        }
+        const nextDistance = Math.min(
+          maxDistance,
+          Math.max(minDistance, currentDistance * scale)
+        );
+        offset.setLength(nextDistance);
+        previewState.camera.position.copy(target.add(offset));
+        previewState.camera.updateProjectionMatrix();
+        previewState.controls.update();
+      }
+
+      function zoomIn() {
+        zoomBy(0.92);
+      }
+
+      function zoomOut() {
+        zoomBy(1.08);
+      }
+
+      window.toggleWireframe = toggleWireframe;
+      window.resetCamera = resetCamera;
+      window.zoomIn = zoomIn;
+      window.zoomOut = zoomOut;
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const initialStatus = '{{ job.status }}';
+        updateWireframeButton();
+        initTabs(initialStatus);
+        setStatusBadge(initialStatus);
+        if (initialStatus === 'done') {
+          activatePreview();
+        } else if (initialStatus === 'error') {
+          setPreviewMessage('Build failed. Preview unavailable.');
+        } else {
+          setPreviewMessage('Preview will be available when the build completes.');
+        }
+        pollLogs('{{ job.job_id }}');
+      });
+    </script>
+  </body>
+</html>

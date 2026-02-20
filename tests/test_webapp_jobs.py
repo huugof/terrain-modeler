@@ -9,6 +9,9 @@ from pathlib import Path
 import pytest
 
 from va_lidar_context import auth_store, webapp
+import va_lidar_context.webapp.auth as _webapp_auth
+import va_lidar_context.webapp.jobs as _webapp_jobs
+import va_lidar_context.webapp.settings as _webapp_settings
 
 
 @pytest.fixture()
@@ -17,11 +20,12 @@ def auth_webapp_env(tmp_path, monkeypatch):
     out_dir.mkdir(parents=True, exist_ok=True)
     db_path = tmp_path / "app.db"
 
-    monkeypatch.setattr(webapp, "AUTH_ENABLED", True)
-    monkeypatch.setattr(webapp, "DB_PATH", db_path)
-    monkeypatch.setattr(webapp, "OUT_DIR", out_dir)
-    monkeypatch.setattr(webapp, "_auth_started", False)
-    monkeypatch.setattr(webapp, "_recent_jobs_change_version", 0)
+    from va_lidar_context.webapp.settings import load_config
+
+    test_config = load_config(overrides={"auth_enabled": True, "db_path": db_path, "out_dir": out_dir})
+    monkeypatch.setattr(_webapp_settings, "_config", test_config)
+    monkeypatch.setattr(_webapp_auth, "_auth_started", False)
+    monkeypatch.setattr(_webapp_jobs, "_recent_jobs_change_version", 0)
 
     with webapp.JOBS_LOCK:
         webapp.JOBS.clear()
@@ -240,7 +244,7 @@ def test_recent_jobs_rehydrate_from_db(auth_webapp_env, monkeypatch):
 
     with webapp.JOBS_LOCK:
         webapp.JOBS.clear()
-    monkeypatch.setattr(webapp, "_auth_started", False)
+    monkeypatch.setattr(_webapp_auth, "_auth_started", False)
     webapp.ensure_auth_store()
 
     with webapp.JOBS_LOCK:
@@ -278,7 +282,7 @@ def test_rehydrate_discovers_nested_output_dir_from_report(auth_webapp_env, monk
 
     with webapp.JOBS_LOCK:
         webapp.JOBS.clear()
-    monkeypatch.setattr(webapp, "_auth_started", False)
+    monkeypatch.setattr(_webapp_auth, "_auth_started", False)
     webapp.ensure_auth_store()
 
     client = _client_for_sid(auth_webapp_env["sid1"])

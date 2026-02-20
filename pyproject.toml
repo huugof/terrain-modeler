@@ -37,11 +37,26 @@ where = ["src"]
 va_lidar_context = [
   "templates/*.html",
   "static/*.css",
+  "static/*.js",
   "parcels/sources.json",
   "py.typed",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
 ]
 
 [tool.pytest.ini_options]
 filterwarnings = [
   "ignore::pyparsing.PyparsingDeprecationWarning",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

@@ -11,6 +11,8 @@ from rasterio.fill import fillnodata
 from rasterio.mask import mask as rio_mask
 from rasterio.warp import Resampling, reproject
 
+from ..util import require_https_url
+
 
 def run_pdal_pipeline(pipeline: dict) -> None:
     """Run a PDAL pipeline JSON spec via stdin."""
@@ -35,6 +37,7 @@ def ept_to_laz(
     bounds: tuple[float, float, float, float],
 ) -> Path:
     """Download an EPT subset into a LAZ file for the given bounds."""
+    require_https_url(ept_url)
     pipeline = {
         "pipeline": [
             {

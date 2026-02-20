@@ -9,21 +9,53 @@ from typing import Any, Dict, List, Optional
 
 from .util import ensure_dir
 
+_ALLOWED_DDL_TABLES = frozenset(
+    {
+        "users",
+        "sessions",
+        "jobs",
+        "build_requests",
+        "active_jobs",
+        "used_nonces",
+        "job_artifacts",
+    }
+)
+_ALLOWED_DDL_COLUMNS = frozenset(
+    {
+        "started_at",
+        "exit_code",
+        "error",
+        "summary_json",
+        "updated_at",
+    }
+)
+
+
+def _validate_ddl_name(name: str, allowed: frozenset) -> None:
+    if name not in allowed:
+        raise ValueError(f"Disallowed DDL identifier: {name!r}")
+
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.DatabaseError:
+        pass
     return conn
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    _validate_ddl_name(table_name, _ALLOWED_DDL_TABLES)
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row["name"]) for row in rows}
 
 
-def _ensure_column(
-    conn: sqlite3.Connection, table_name: str, column_name: str, ddl: str
-) -> None:
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, ddl: str) -> None:
+    _validate_ddl_name(table_name, _ALLOWED_DDL_TABLES)
+    _validate_ddl_name(column_name, _ALLOWED_DDL_COLUMNS)
     columns = _table_columns(conn, table_name)
     if column_name in columns:
         return
@@ -112,18 +144,14 @@ def init_db(db_path: Path, admin_email: str | None = None) -> None:
         conn.execute(
             "UPDATE jobs SET summary_json = '{}' WHERE summary_json IS NULL OR summary_json = ''"
         )
-        conn.execute(
-            "UPDATE jobs SET updated_at = COALESCE(updated_at, finished_at, created_at)"
-        )
+        conn.execute("UPDATE jobs SET updated_at = COALESCE(updated_at, finished_at, created_at)")
         conn.commit()
 
     if admin_email:
         upsert_user(db_path, admin_email.strip().lower(), is_admin=True, is_active=True)
 
 
-def upsert_user(
-    db_path: Path, email: str, is_admin: bool = False, is_active: bool = True
-) -> None:
+def upsert_user(db_path: Path, email: str, is_admin: bool = False, is_active: bool = True) -> None:
     now = time.time()
     with _connect(db_path) as conn:
         conn.execute(
@@ -345,9 +373,7 @@ def upsert_job_snapshot(
         conn.commit()
 
 
-def replace_job_artifacts(
-    db_path: Path, job_id: str, artifacts: List[Dict[str, Any]]
-) -> None:
+def replace_job_artifacts(db_path: Path, job_id: str, artifacts: List[Dict[str, Any]]) -> None:
     cleaned: List[tuple[str, int, float]] = []
     seen: set[str] = set()
     for item in artifacts:
@@ -440,9 +466,7 @@ def list_recent_jobs(
                     "finished_at": (
                         float(row["finished_at"]) if row["finished_at"] is not None else None
                     ),
-                    "exit_code": (
-                        int(row["exit_code"]) if row["exit_code"] is not None else None
-                    ),
+                    "exit_code": (int(row["exit_code"]) if row["exit_code"] is not None else None),
                     "error": str(row["error"]) if row["error"] is not None else None,
                     "summary": summary,
                     "artifacts": [],

@@ -4,23 +4,39 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Admin Users</title>
-        <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='app.css') }}"
+        />
     </head>
     <body>
         <header>
             <h1>Approved Users</h1>
             <p class="sub">Manage access to the build UI.</p>
-            <p><a href="{{ url_for('index') }}">Back to app</a></p>
+            <p><a href="{{ url_for('bp.index') }}">Back to app</a></p>
         </header>
         <main>
-            <form class="card app-card" method="post" action="{{ url_for('admin_users_upsert') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <form
+                class="card app-card"
+                method="post"
+                action="{{ url_for('bp.admin_users_upsert') }}"
+            >
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="{{ csrf_token() }}"
+                />
                 <div class="form-body">
                     <div class="section-title">Add or Update User</div>
                     <div class="grid two-col">
                         <div style="grid-column: 1 / -1">
                             <label>Email</label>
-                            <input type="email" name="email" placeholder="name@example.com" required />
+                            <input
+                                type="email"
+                                name="email"
+                                placeholder="name@example.com"
+                                required
+                            />
                         </div>
                         <label class="check">
                             <input type="checkbox" name="is_active" checked />
@@ -46,8 +62,8 @@
                     {% for user in users %}
                     <li>
                         <strong>{{ user.email }}</strong>
-                        - {{ "admin" if user.is_admin else "user" }}
-                        - {{ "active" if user.is_active else "inactive" }}
+                        - {{ "admin" if user.is_admin else "user" }} - {{
+                        "active" if user.is_active else "inactive" }}
                     </li>
                     {% endfor %}
                 </ul>

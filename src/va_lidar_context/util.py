@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable
+from urllib.parse import urlparse
 
 
 def get_logger(
@@ -22,16 +23,25 @@ def get_logger(
     return logger
 
 
+def require_https_url(url: str) -> None:
+    """Raise ValueError if *url* does not use http or https scheme.
+
+    Call this before passing any externally-sourced URL to a subprocess
+    (e.g. PDAL) to prevent SSRF via file://, s3://, or other protocols.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"Unsafe URL scheme {parsed.scheme!r} — only http/https are allowed: {url!r}"
+        )
+
+
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
 def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text())
 
 
 def download_file(

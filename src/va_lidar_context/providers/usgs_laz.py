@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import requests
 from pyproj import CRS, Transformer
 
-from ..util import ensure_dir
+from ..util import ensure_dir, require_https_url
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,7 @@ def list_laz_urls(
     logger=None,
 ) -> List[str]:
     """List LAZ/ LAS URLs from a USGS LPC link."""
+    require_https_url(lpc_link)
     url = _download_links_url(lpc_link)
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -76,6 +77,7 @@ def _extract_wkt(metadata: Dict[str, Any]) -> str | None:
 
 
 def _pdal_info(url: str) -> Dict[str, Any]:
+    require_https_url(url)
     proc = subprocess.run(
         ["pdal", "info", "--metadata", url],
         check=True,
