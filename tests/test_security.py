@@ -173,7 +173,7 @@ def test_create_app_raises_without_clerk_jwks_url(monkeypatch):
         }
     )
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
-    with pytest.raises(RuntimeError, match="VA_CLERK_JWKS_URL"):
+    with pytest.raises(RuntimeError, match="CLERK_JWKS_URL"):
         create_app(config=cfg)
 
 
@@ -189,7 +189,7 @@ def test_create_app_raises_without_clerk_issuer(monkeypatch):
         }
     )
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
-    with pytest.raises(RuntimeError, match="VA_CLERK_ISSUER"):
+    with pytest.raises(RuntimeError, match="CLERK_ISSUER"):
         create_app(config=cfg)
 
 
@@ -204,29 +204,29 @@ def test_verify_clerk_session_token_requires_configured_jwks_url(monkeypatch):
         }
     )
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
-    with pytest.raises(RuntimeError, match="VA_CLERK_JWKS_URL"):
+    with pytest.raises(RuntimeError, match="CLERK_JWKS_URL"):
         auth_mod._verify_clerk_session_token("not-a-token")
 
 
 # ---------------------------------------------------------------------------
-# C1 — VA_SESSION_SECRET required in server mode
+# C1 — SESSION_SECRET required in server mode
 # ---------------------------------------------------------------------------
 
 
 def test_create_app_raises_without_session_secret_in_server_mode(monkeypatch):
     from va_lidar_context.webapp import create_app
 
-    monkeypatch.delenv("VA_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
     cfg = load_config(overrides={"desktop_mode": False})
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
-    with pytest.raises(RuntimeError, match="VA_SESSION_SECRET"):
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
         create_app(config=cfg)
 
 
 def test_create_app_allows_random_key_in_desktop_mode(monkeypatch):
     from va_lidar_context.webapp import create_app
 
-    monkeypatch.delenv("VA_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
     cfg = load_config(overrides={"desktop_mode": True})
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
     flask_app = create_app(config=cfg)

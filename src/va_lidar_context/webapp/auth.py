@@ -225,7 +225,7 @@ def _clerk_jwk_client(jwks_url: str) -> jwt.PyJWKClient:
 def _verify_clerk_session_token(raw_token: str) -> Dict[str, Any]:
     jwks_url = str(_settings._config.clerk_jwks_url or "").strip()
     if not jwks_url:
-        raise RuntimeError("VA_CLERK_JWKS_URL is not configured.")
+        raise RuntimeError("CLERK_JWKS_URL is not configured.")
     jwk_client = _clerk_jwk_client(jwks_url)
     signing_key = jwk_client.get_signing_key_from_jwt(raw_token)
     # Use only the configured issuer — never derive from the unverified token's
@@ -271,7 +271,7 @@ def _clerk_primary_email(user_payload: Dict[str, Any]) -> str:
 
 def _fetch_clerk_user_email(clerk_user_id: str) -> str:
     if not _settings._config.clerk_secret_key:
-        raise RuntimeError("Missing VA_CLERK_SECRET_KEY.")
+        raise RuntimeError("Missing CLERK_SECRET_KEY.")
     resp = requests.get(
         f"{_settings._config.clerk_api_url.rstrip('/')}/users/{clerk_user_id}",
         headers={"Authorization": f"Bearer {_settings._config.clerk_secret_key}"},

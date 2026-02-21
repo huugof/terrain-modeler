@@ -14,7 +14,7 @@ set -a
 source .env
 set +a
 
-required_vars=(APP_DOMAIN ACME_EMAIL VA_SESSION_SECRET)
+required_vars=(APP_DOMAIN ACME_EMAIL SESSION_SECRET)
 missing_vars=()
 for var in "${required_vars[@]}"; do
   if [[ -z "${!var:-}" ]]; then

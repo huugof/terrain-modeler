@@ -72,13 +72,13 @@ def load_config(overrides: dict | None = None) -> AppConfig:
     ov = overrides or {}
 
     desktop_mode: bool = os.getenv(
-        "VA_DESKTOP_MODE", "1" if DEFAULT_DESKTOP_MODE else "0"
+        "DESKTOP_MODE", "1" if DEFAULT_DESKTOP_MODE else "0"
     ).lower() in ("1", "true", "yes")
     desktop_mode = ov.get("desktop_mode", desktop_mode)
 
     out_dir: Path = Path(
         os.getenv(
-            "VA_OUT_DIR",
+            "OUT_DIR",
             str(DEFAULT_DESKTOP_OUT_DIR if desktop_mode else DEFAULT_OUT_DIR),
         )
     )
@@ -86,64 +86,64 @@ def load_config(overrides: dict | None = None) -> AppConfig:
 
     retention_days: int = int(
         os.getenv(
-            "VA_RETENTION_DAYS",
+            "RETENTION_DAYS",
             str(DEFAULT_DESKTOP_RETENTION_DAYS if desktop_mode else 7),
         )
     )
 
-    cleanup_interval_seconds: int = int(os.getenv("VA_CLEANUP_INTERVAL", "3600"))
+    cleanup_interval_seconds: int = int(os.getenv("CLEANUP_INTERVAL", "3600"))
     default_random_min_height: float = 15.0
     default_random_max_height: float = 40.0
-    coverage_cache_ttl_seconds: int = int(os.getenv("VA_COVERAGE_CACHE_TTL", "600"))
-    db_path: Path = Path(os.getenv("VA_DB_PATH", "./data/app.db"))
-    auth_provider: str = os.getenv("VA_AUTH_PROVIDER", "").strip().lower()
+    coverage_cache_ttl_seconds: int = int(os.getenv("COVERAGE_CACHE_TTL", "600"))
+    db_path: Path = Path(os.getenv("DB_PATH", "./data/app.db"))
+    auth_provider: str = os.getenv("AUTH_PROVIDER", "").strip().lower()
     auth_enabled: bool = (not desktop_mode) and auth_provider == "clerk"
-    clerk_publishable_key: str = os.getenv("VA_CLERK_PUBLISHABLE_KEY", "").strip()
-    clerk_secret_key: str = os.getenv("VA_CLERK_SECRET_KEY", "").strip()
-    clerk_sign_in_url: str = os.getenv("VA_CLERK_SIGN_IN_URL", "").strip()
-    clerk_jwks_url: str = os.getenv("VA_CLERK_JWKS_URL", "").strip()
-    clerk_issuer: str = os.getenv("VA_CLERK_ISSUER", "").strip()
+    clerk_publishable_key: str = os.getenv("CLERK_PUBLISHABLE_KEY", "").strip()
+    clerk_secret_key: str = os.getenv("CLERK_SECRET_KEY", "").strip()
+    clerk_sign_in_url: str = os.getenv("CLERK_SIGN_IN_URL", "").strip()
+    clerk_jwks_url: str = os.getenv("CLERK_JWKS_URL", "").strip()
+    clerk_issuer: str = os.getenv("CLERK_ISSUER", "").strip()
     clerk_api_url: str = os.getenv(
-        "VA_CLERK_API_URL", "https://api.clerk.com/v1"
+        "CLERK_API_URL", "https://api.clerk.com/v1"
     ).strip()
-    clerk_frontend_api_url: str = os.getenv("VA_CLERK_FRONTEND_API_URL", "").strip()
+    clerk_frontend_api_url: str = os.getenv("CLERK_FRONTEND_API_URL", "").strip()
     clerk_allowed_domain: str = os.getenv(
-        "VA_CLERK_ALLOWED_DOMAIN", ""
+        "CLERK_ALLOWED_DOMAIN", ""
     ).strip().lower()
     require_local_allowlist: bool = os.getenv(
-        "VA_REQUIRE_LOCAL_ALLOWLIST", "0"
+        "REQUIRE_LOCAL_ALLOWLIST", "0"
     ).lower() in ("1", "true", "yes")
     clerk_authorized_parties: List[str] = [
         p.strip()
-        for p in os.getenv("VA_CLERK_AUTHORIZED_PARTIES", "").split(",")
+        for p in os.getenv("CLERK_AUTHORIZED_PARTIES", "").split(",")
         if p.strip()
     ]
     session_ttl_seconds: int = int(
-        os.getenv("VA_SESSION_TTL_SECONDS", str(7 * 86400))
+        os.getenv("SESSION_TTL_SECONDS", str(7 * 86400))
     )
     session_cookie_secure: bool = os.getenv(
-        "VA_SESSION_COOKIE_SECURE", "1"
+        "SESSION_COOKIE_SECURE", "1"
     ).lower() not in ("0", "false", "no")
-    admin_email: str = os.getenv("VA_ADMIN_EMAIL", "").strip().lower()
-    rate_limit_hourly: int = int(os.getenv("VA_RATE_LIMIT_HOURLY", "3"))
-    rate_limit_daily: int = int(os.getenv("VA_RATE_LIMIT_DAILY", "10"))
-    max_active_jobs_per_user: int = int(os.getenv("VA_MAX_ACTIVE_JOBS_PER_USER", "1"))
-    max_clip_size: float = float(os.getenv("VA_MAX_CLIP_SIZE", "5000"))
+    admin_email: str = os.getenv("ADMIN_EMAIL", "").strip().lower()
+    rate_limit_hourly: int = int(os.getenv("RATE_LIMIT_HOURLY", "3"))
+    rate_limit_daily: int = int(os.getenv("RATE_LIMIT_DAILY", "10"))
+    max_active_jobs_per_user: int = int(os.getenv("MAX_ACTIVE_JOBS_PER_USER", "1"))
+    max_clip_size: float = float(os.getenv("MAX_CLIP_SIZE", "5000"))
     job_history_enabled: bool = os.getenv(
-        "VA_JOB_HISTORY_ENABLED", "1"
+        "JOB_HISTORY_ENABLED", "1"
     ).lower() in ("1", "true", "yes")
-    job_rehydrate_limit: int = int(os.getenv("VA_JOB_REHYDRATE_LIMIT", "500"))
+    job_rehydrate_limit: int = int(os.getenv("JOB_REHYDRATE_LIMIT", "500"))
     job_log_wait_max_seconds: float = float(
-        os.getenv("VA_JOB_LOG_WAIT_MAX_SECONDS", "25")
+        os.getenv("JOB_LOG_WAIT_MAX_SECONDS", "25")
     )
     recent_jobs_wait_max_seconds: float = float(
-        os.getenv("VA_RECENT_JOBS_WAIT_MAX_SECONDS", "25")
+        os.getenv("RECENT_JOBS_WAIT_MAX_SECONDS", "25")
     )
-    recent_jobs_limit: int = int(os.getenv("VA_RECENT_JOBS_LIMIT", "5"))
-    hmac_keys_json: str = os.getenv("VA_HMAC_KEYS_JSON", "").strip()
-    hmac_max_skew_seconds: int = int(os.getenv("VA_HMAC_MAX_SKEW_SECONDS", "300"))
-    hmac_nonce_ttl_seconds: int = int(os.getenv("VA_HMAC_NONCE_TTL_SECONDS", "600"))
-    worker_shared_token: str = os.getenv("VA_WORKER_SHARED_TOKEN", "").strip()
+    recent_jobs_limit: int = int(os.getenv("RECENT_JOBS_LIMIT", "5"))
+    hmac_keys_json: str = os.getenv("HMAC_KEYS_JSON", "").strip()
+    hmac_max_skew_seconds: int = int(os.getenv("HMAC_MAX_SKEW_SECONDS", "300"))
+    hmac_nonce_ttl_seconds: int = int(os.getenv("HMAC_NONCE_TTL_SECONDS", "600"))
+    worker_shared_token: str = os.getenv("WORKER_SHARED_TOKEN", "").strip()
     desktop_host: str = DEFAULT_DESKTOP_HOST
     desktop_port: int = DEFAULT_DESKTOP_PORT
 

@@ -115,7 +115,7 @@ _coverage_cache_lock = threading.Lock()
 # --- M7: per-user long-poll connection cap ---
 _LONGPOLL_COUNTS: Dict[str, int] = {}
 _LONGPOLL_LOCK = threading.Lock()
-_LONGPOLL_MAX_PER_USER = int(os.getenv("VA_LONGPOLL_MAX_PER_USER", "3"))
+_LONGPOLL_MAX_PER_USER = int(os.getenv("LONGPOLL_MAX_PER_USER", "3"))
 
 
 class _LongPollSlot:

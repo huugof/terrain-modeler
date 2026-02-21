@@ -136,22 +136,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
     if not _cfg.desktop_mode and not _cfg.auth_enabled:
         _logging.getLogger(__name__).warning(
             "SECURITY WARNING: Authentication is DISABLED. "
-            "Set VA_AUTH_PROVIDER=clerk to enable auth in server mode."
+            "Set AUTH_PROVIDER=clerk to enable auth in server mode."
         )
 
     # --- M6: shared worker token is deprecated and ignored ---
     if _cfg.worker_shared_token:
         _logging.getLogger(__name__).warning(
-            "SECURITY WARNING: VA_WORKER_SHARED_TOKEN is set. "
+            "SECURITY WARNING: WORKER_SHARED_TOKEN is set. "
             "This legacy auth path is deprecated and no longer accepted. "
-            "Use VA_HMAC_KEYS_JSON for worker authentication."
+            "Use HMAC_KEYS_JSON for worker authentication."
         )
 
     # --- M5: warn when DB path is relative in server mode ---
     if not _cfg.desktop_mode and not os.path.isabs(str(_cfg.db_path)):
         _logging.getLogger(__name__).warning(
-            "SECURITY WARNING: VA_DB_PATH is a relative path (%s). "
-            "Set VA_DB_PATH to an absolute path in production.",
+            "SECURITY WARNING: DB_PATH is a relative path (%s). "
+            "Set DB_PATH to an absolute path in production.",
             _cfg.db_path,
         )
 
@@ -159,24 +159,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
     if _cfg.auth_enabled:
         if not _cfg.clerk_jwks_url:
             raise RuntimeError(
-                "VA_CLERK_JWKS_URL must be set when authentication is enabled. "
+                "CLERK_JWKS_URL must be set when authentication is enabled. "
                 "Find this in your Clerk Dashboard under API Keys."
             )
         if not _cfg.clerk_issuer:
             raise RuntimeError(
-                "VA_CLERK_ISSUER must be set when authentication is enabled. "
+                "CLERK_ISSUER must be set when authentication is enabled. "
                 "This is your Clerk Frontend API URL "
                 "(e.g. https://clerk.<your-domain>.com)."
             )
 
     # --- C1: require a stable secret key in server mode ---
-    _session_secret = os.getenv("VA_SESSION_SECRET", "").strip()
+    _session_secret = os.getenv("SESSION_SECRET", "").strip()
     if not _session_secret:
         if _cfg.desktop_mode:
             _session_secret = secrets.token_hex(32)  # ephemeral key OK for desktop
         else:
             raise RuntimeError(
-                "VA_SESSION_SECRET must be set in server mode. "
+                "SESSION_SECRET must be set in server mode. "
                 "Generate one with: "
                 'python -c "import secrets; print(secrets.token_hex(32))"'
             )
@@ -228,11 +228,11 @@ def main() -> int:
     default_host = DESKTOP_HOST if DESKTOP_MODE else "127.0.0.1"
     default_port = DESKTOP_PORT if DESKTOP_MODE else 5000
     parser = argparse.ArgumentParser(prog="va-lidar-context-web")
-    parser.add_argument("--host", default=os.getenv("VA_WEB_HOST", default_host))
+    parser.add_argument("--host", default=os.getenv("WEB_HOST", default_host))
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("VA_WEB_PORT", str(default_port))),
+        default=int(os.getenv("WEB_PORT", str(default_port))),
     )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
