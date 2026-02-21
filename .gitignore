@@ -25,6 +25,7 @@ htmlcov/
 # Local env/config files
 .env
 .env.*
+!.env.example
 .python-version
 
 # Editor / OS files

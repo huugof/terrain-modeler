@@ -76,15 +76,35 @@ va-lidar-context-web --host 0.0.0.0 --port 8000
 
 **Production (Caddy + TLS + blue/green):**
 ```bash
+# 1) Point your DNS A record to the droplet public IPv4 first.
+#    Example: meshd.xyz -> 134.209.42.153
+
+# 2) Create deployment env file.
+cp .env.example .env
+# edit .env and set APP_DOMAIN, ACME_EMAIL, VA_SESSION_SECRET
+# generate a secret with: python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# 3) Prepare persistent volumes for the app container user (uid 10001).
 mkdir -p /data/out /data/app
 chown -R 10001:10001 /data/out /data/app
-grep -q '^VA_SESSION_SECRET=' .env 2>/dev/null || \
-  echo "VA_SESSION_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> .env
-# Required env vars: VA_SESSION_SECRET
-# Optional for TLS/domain: APP_DOMAIN, ACME_EMAIL, APP_IMAGE
+
+# 4) Validate env + compose + DNS before startup.
+./deploy/preflight.sh
+
+# 5) Start stack.
 docker compose up -d --build
 ```
 App is served through Caddy on `http://<host>/` (and `https://<domain>/` when DNS + ACME are configured).
+
+Quick checks:
+```bash
+docker compose ps
+docker compose logs --since=10m caddy
+curl -I http://$APP_DOMAIN
+curl -I https://$APP_DOMAIN
+```
+
+If you use `docker compose logs -f ...`, it will stream continuously until you stop it with `Ctrl+C`.
 
 Blue/green deploy:
 ```bash

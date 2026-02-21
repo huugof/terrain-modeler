@@ -3,6 +3,8 @@ set -euo pipefail
 
 APP_IMAGE="${1:-${APP_IMAGE:-va-lidar-context:latest}}"
 
+./deploy/preflight.sh
+
 echo "Starting green deployment with image: ${APP_IMAGE}"
 APP_IMAGE="${APP_IMAGE}" docker compose --profile green up -d terrain-ui-green
 

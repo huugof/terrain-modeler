@@ -55,13 +55,21 @@ All outputs land in `./out/<job_id>/` where job_id is a hash of the inputs.
 
 | Variable | Default | Description |
 |---|---|---|
-| `VA_SESSION_SECRET` | random | Flask session signing key. Set a stable value in production. |
+| `VA_SESSION_SECRET` | required in server mode | Flask session signing key. Startup fails in server mode when unset. |
 | `VA_OUT_DIR` | `./out` | Where job outputs are written. |
 | `VA_RETENTION_DAYS` | `7` | Days before outputs are cleaned up. |
 | `VA_CLEANUP_INTERVAL` | `3600` | Cleanup loop interval in seconds. |
 | `VA_DB_PATH` | `./data/app.db` | SQLite database path. In Docker: `/data/app/app.db`. |
 | `VA_JOB_HISTORY_ENABLED` | `1` | Persist job metadata across restarts. |
 | `VA_JOB_REHYDRATE_LIMIT` | `500` | Max jobs loaded from DB on startup. |
+
+### Docker / Caddy deployment
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_DOMAIN` | none | Public domain Caddy should serve (required in compose deployment). |
+| `ACME_EMAIL` | none | Contact email used for ACME/TLS account registration (required). |
+| `APP_IMAGE` | `va-lidar-context:latest` | Image tag for blue/green services. |
 
 ### Auth (Clerk)
 

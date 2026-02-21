@@ -1,6 +1,9 @@
 services:
   caddy:
     image: caddy:2
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN must be set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL must be set in .env}
     ports:
       - "80:80"
       - "443:443"
