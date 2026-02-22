@@ -1,12 +1,14 @@
 """Regression tests for parse_float / parse_int hardening and /run 400 responses
 (tasks 1.6)."""
+
 from __future__ import annotations
+
+import unittest.mock as mock
 
 import pytest
 
 import va_lidar_context.webapp.settings as _webapp_settings
 from va_lidar_context.webapp import app, parse_float, parse_int
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for parse_float / parse_int
@@ -123,3 +125,33 @@ def test_invalid_terrain_complexity_falls_back_to_default(client, monkeypatch):
         )
     # Should not be 500 — either 200/202 (job queued) or a known 400 (no pipeline)
     assert resp.status_code != 500
+
+
+def test_run_defaults_to_computed_heights_without_random_override(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._target = target
+            self._args = args
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args)
+
+    def _capture_cfg(_job, cfg):
+        captured["cfg"] = cfg
+
+    with mock.patch("va_lidar_context.webapp.routes.threading.Thread", _ImmediateThread):
+        with mock.patch("va_lidar_context.webapp.routes._run_build_job", side_effect=_capture_cfg):
+            resp = client.post(
+                "/run",
+                data=_base_form(output_buildings="on"),
+            )
+
+    assert resp.status_code in (302, 303)
+    cfg = captured.get("cfg")
+    assert cfg is not None
+    assert cfg.random_heights_min is None
+    assert cfg.random_heights_max is None

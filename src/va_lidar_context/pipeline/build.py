@@ -15,9 +15,12 @@ from ..core.geo import bbox_contains, bbox_from_center_wgs84
 from ..core.heights import (
     FEET_PER_METER,
     derive_heights,
+    derive_heights_from_point_cloud,
     get_laz_crs_wkt,
     get_unit_scale,
     reproject_features,
+    write_heights_csv,
+    write_heights_geojson,
 )
 from ..core.mesh import (
     DxfExporter,
@@ -739,12 +742,14 @@ def _stage_rasters(
 
 def _stage_heights(
     cfg: BuildConfig,
+    laz_processing_path: Path,
     footprints: Dict[str, Any],
     laz_crs: Any,
     clip_poly: Any,
     ndsm_path: Path,
     dtm_use_path: Path,
     z_scale: float,
+    z_to_meters: float,
     override_heights: bool,
 ) -> Tuple[list, List[str]]:
     """Stage 5: compute building heights. Returns (heights, height_warnings)."""
@@ -770,16 +775,31 @@ def _stage_heights(
         )
         rng = random.Random(cfg.random_seed)
 
-    return derive_heights(
-        None if override_heights else str(ndsm_path),
-        str(dtm_use_path),
-        reprojected,
-        cfg.percentile,
-        min_height_laz,
-        max_height_laz,
-        floor_to_floor_laz,
-        override_height_range=override_range,
-        rng=rng,
+    if override_heights:
+        return derive_heights(
+            None,
+            str(dtm_use_path),
+            reprojected,
+            cfg.percentile,
+            min_height_laz,
+            max_height_laz,
+            floor_to_floor_laz,
+            override_height_range=override_range,
+            rng=rng,
+        )
+
+    clip_bounds = clip_poly.bounds if clip_poly is not None else None
+    return derive_heights_from_point_cloud(
+        laz_path=str(laz_processing_path),
+        dtm_path=str(dtm_use_path),
+        features=reprojected,
+        percentile=cfg.percentile,
+        min_height=min_height_laz,
+        max_height=max_height_laz,
+        floor_to_floor=floor_to_floor_laz,
+        z_to_meters=z_to_meters,
+        ndsm_path=str(ndsm_path),
+        clip_bounds=clip_bounds,
     )
 
 
@@ -1024,6 +1044,8 @@ def build(cfg: BuildConfig) -> BuildResult:
     dtm_clip_path = tile_dir / "dtm_clip.tif"
     report_path = tile_dir / "report.json"
     merged_laz_path = tile_dir / "tiles_merged.laz"
+    heights_geojson_path = tile_dir / "building_heights.geojson"
+    heights_csv_path = tile_dir / "building_heights.csv"
 
     write_json(tile_json, tile_info)
 
@@ -1090,6 +1112,7 @@ def build(cfg: BuildConfig) -> BuildResult:
     laz_crs = CRS.from_wkt(laz_wkt)
     xy_scale = get_unit_scale(laz_crs, cfg.units, latitude=lat)
     z_scale = get_unit_scale(laz_crs, cfg.units, latitude=None)
+    z_to_meters = get_unit_scale(laz_crs, "meters", latitude=None)
 
     (
         clip_poly,
@@ -1160,15 +1183,27 @@ def build(cfg: BuildConfig) -> BuildResult:
     if needs_heights:
         heights, height_warnings = _stage_heights(
             cfg,
+            laz_processing_path,
             footprints,
             laz_crs,
             clip_poly,
             ndsm_path,
             dtm_use_path,
             z_scale,
+            z_to_meters,
             override_heights,
         )
         warnings.extend(height_warnings)
+        write_heights_geojson(
+            str(heights_geojson_path),
+            heights,
+            z_to_meters=z_to_meters,
+        )
+        write_heights_csv(
+            str(heights_csv_path),
+            heights,
+            z_to_meters=z_to_meters,
+        )
 
     logger.info("Stage 6/6: mesh export")
     mesh = None
@@ -1436,6 +1471,12 @@ def build(cfg: BuildConfig) -> BuildResult:
         }
         if needs_heights
         else None,
+        "building_heights": {
+            "enabled": needs_heights,
+            "count": len(heights) if needs_heights else 0,
+            "geojson": heights_geojson_path.name if needs_heights else None,
+            "csv": heights_csv_path.name if needs_heights else None,
+        },
         "contours": {
             "enabled": export_contours,
             "interval": cfg.contour_interval if export_contours else None,

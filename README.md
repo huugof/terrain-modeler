@@ -59,6 +59,8 @@ va-lidar-context build \
 ```
 
 `--center` takes `lat lon` (Google Maps order). Outputs land in `./out/<job_id>/`.
+Each build also writes per-footprint height attributes to
+`building_heights.geojson` and `building_heights.csv` (with QC fields).
 
 ## Web App
 

@@ -40,6 +40,7 @@ All outputs land in `./out/<job_id>/` where job_id is a hash of the inputs.
 | `footprints.geojson` | Always |
 | `terrain.obj`, `terrain.mtl`, `terrain.png` | When `terrain` in outputs |
 | `buildings.obj` | When `buildings` in outputs |
+| `building_heights.geojson`, `building_heights.csv` | When `buildings` in outputs |
 | `combined.obj`, `combined.mtl` | When `--combine-output` |
 | `contours.dxf` | When `contours` or `parcels` in outputs |
 | `terrain.xyz` | When `xyz` in outputs |

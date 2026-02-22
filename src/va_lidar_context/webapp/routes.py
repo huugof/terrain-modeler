@@ -28,12 +28,6 @@ from flask import (
 )
 
 from .. import auth_store
-from ..constants import (
-    DEFAULT_PREVIEW_CENTER,
-    DEFAULT_PREVIEW_JOB_ID,
-    DEFAULT_PREVIEW_NAME,
-    DEFAULT_PREVIEW_SIZE_FEET,
-)
 from ..config import (
     DEFAULT_EPT_ONLY,
     DEFAULT_FILL_MAX_DIST,
@@ -47,6 +41,12 @@ from ..config import (
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
     BuildConfig,
+)
+from ..constants import (
+    DEFAULT_PREVIEW_CENTER,
+    DEFAULT_PREVIEW_JOB_ID,
+    DEFAULT_PREVIEW_NAME,
+    DEFAULT_PREVIEW_SIZE_FEET,
 )
 from ..pipeline.io import generate_job_id
 from ..providers.usgs_index import query_for_point
@@ -642,15 +642,11 @@ def run_job():
     floor_to_floor = DEFAULT_FLOOR_TO_FLOOR
 
     random_min = parse_float(form.get("random_min_height"))
-    if random_min is None:
-        from .settings import DEFAULT_RANDOM_MIN_HEIGHT
-
-        random_min = DEFAULT_RANDOM_MIN_HEIGHT
     random_max = parse_float(form.get("random_max_height"))
-    if random_max is None:
-        from .settings import DEFAULT_RANDOM_MAX_HEIGHT
-
-        random_max = DEFAULT_RANDOM_MAX_HEIGHT
+    if (random_min is None) != (random_max is None):
+        return jsonify({"error": "Provide both random min/max heights or leave both empty."}), 400
+    if random_min is not None and random_max is not None and random_min >= random_max:
+        return jsonify({"error": "Random min height must be less than random max height."}), 400
     random_seed = None
 
     naip_pixel_size, naip_max_size, naip_tiled = resolve_image_quality(form.get("image_quality"))
