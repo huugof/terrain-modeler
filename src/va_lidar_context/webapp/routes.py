@@ -50,7 +50,7 @@ from ..constants import (
 )
 from ..pipeline.io import generate_job_id
 from ..providers.usgs_index import query_for_point
-from ..util import ensure_dir, get_logger, is_path_within
+from ..util import ensure_dir, get_logger, is_path_within, request_build_cancel
 from . import jobs as _jobs_module
 from . import rate_limiter as _rl
 from . import settings as _settings
@@ -1015,6 +1015,35 @@ def job_delete(job_id: str):
 
     _notify_recent_jobs_change()
     return jsonify({"ok": True, "job_id": job_id})
+
+
+@bp.route("/jobs/<job_id>/cancel", methods=["POST"])
+def job_cancel(job_id: str):
+    denied = _enforce_job_access(job_id, "Not allowed to cancel this job.")
+    if denied is not None:
+        return denied
+    if not validate_csrf():
+        return jsonify({"error": "Invalid CSRF token."}), 400
+
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    with job.change_cond:
+        if job.status not in ("queued", "running"):
+            return jsonify({"error": "Job is not running."}), 409
+        job.cancel_requested = True
+        job.stage_label = "Canceling..."
+        job.stage_index = None
+        job.stage_total = None
+        job.stage_progress = None
+        _jobs_module._notify_job_change_locked(job)
+
+    request_build_cancel(job_id)
+    _notify_recent_jobs_change()
+    _persist_job_snapshot(job)
+    return jsonify({"ok": True, "job_id": job_id, "status": "canceling"})
 
 
 @bp.route("/jobs/<job_id>/rename", methods=["POST"])

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -11,12 +10,12 @@ from rasterio.fill import fillnodata
 from rasterio.mask import mask as rio_mask
 from rasterio.warp import Resampling, reproject
 
-from ..util import require_https_url
+from ..util import require_https_url, run_subprocess
 
 
 def run_pdal_pipeline(pipeline: dict) -> None:
     """Run a PDAL pipeline JSON spec via stdin."""
-    proc = subprocess.run(
+    proc = run_subprocess(
         ["pdal", "pipeline", "--stdin"],
         input=json.dumps(pipeline).encode("utf-8"),
         check=True,
@@ -70,9 +69,7 @@ def merge_lazs(
     merge_inputs = []
     for idx, laz_path in enumerate(laz_paths):
         reader_tag = f"r{idx}"
-        pipeline.append(
-            {"type": "readers.las", "filename": str(laz_path), "tag": reader_tag}
-        )
+        pipeline.append({"type": "readers.las", "filename": str(laz_path), "tag": reader_tag})
         if target_srs:
             reproj_tag = f"rp{idx}"
             pipeline.append(
@@ -222,7 +219,7 @@ def fill_nodata_raster(
             str(in_path),
             str(out_path),
         ]
-        subprocess.run(args, check=True, capture_output=True)
+        run_subprocess(args, check=True, capture_output=True)
         if not hard_fill:
             return out_path
         src_path = out_path

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
@@ -9,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import requests
 from pyproj import CRS, Transformer
 
-from ..util import ensure_dir, require_https_url
+from ..util import ensure_dir, require_https_url, run_subprocess
 
 
 @dataclass(frozen=True)
@@ -50,9 +49,7 @@ def list_laz_urls(
         except requests.RequestException as exc:
             last_exc = exc
             if logger:
-                logger.warning(
-                    f"Failed to fetch LAZ list (attempt {attempt}/{retries}): {exc}"
-                )
+                logger.warning(f"Failed to fetch LAZ list (attempt {attempt}/{retries}): {exc}")
             if attempt < retries:
                 import time
 
@@ -78,7 +75,7 @@ def _extract_wkt(metadata: Dict[str, Any]) -> str | None:
 
 def _pdal_info(url: str) -> Dict[str, Any]:
     require_https_url(url)
-    proc = subprocess.run(
+    proc = run_subprocess(
         ["pdal", "info", "--metadata", url],
         check=True,
         capture_output=True,

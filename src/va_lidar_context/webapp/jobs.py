@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -15,7 +16,17 @@ from typing import Any, Dict, List, Optional
 from .. import auth_store
 from ..config import BuildConfig
 from ..pipeline.build import build as build_pipeline
-from ..util import ensure_dir, is_path_within
+from ..util import (
+    BuildCancelledError,
+    bind_cancel_job,
+    check_cancel_requested,
+    clear_cancel_handle,
+    ensure_dir,
+    is_path_within,
+    register_cancel_handle,
+    request_build_cancel,
+    unbind_cancel_job,
+)
 from . import settings as _settings
 from .forms import merge_prefill_defaults
 
@@ -36,6 +47,7 @@ class Job:
     stage_index: Optional[int] = None
     stage_total: Optional[int] = None
     stage_progress: Optional[int] = None
+    cancel_requested: bool = False
     change_cond: threading.Condition = field(default_factory=threading.Condition, repr=False)
     change_version: int = 0
 
@@ -465,6 +477,50 @@ def _recent_job_display_name(job: Job, sequence_number: int) -> str:
     return f"Job {max(sequence_number, 1)}"
 
 
+def _job_cleanup_reference_ts(job: Job) -> Optional[float]:
+    candidates: List[Path] = []
+    root_dir = _settings.OUT_DIR
+    direct_dir = root_dir / job.job_id
+    candidates.append(direct_dir)
+
+    output_dir = _resolve_job_output_dir(job)
+    if output_dir is not None:
+        candidates.append(output_dir)
+        try:
+            root_resolved = root_dir.resolve()
+            output_resolved = output_dir.resolve()
+            if is_path_within(root_resolved, output_resolved):
+                rel = output_resolved.relative_to(root_resolved)
+                if rel.parts:
+                    candidates.append(root_resolved / rel.parts[0])
+        except Exception:
+            pass
+
+    for path in candidates:
+        try:
+            if path.exists():
+                return float(path.stat().st_mtime)
+        except Exception:
+            continue
+
+    if isinstance(job.finished_at, (int, float)):
+        return float(job.finished_at)
+    if isinstance(job.created_at, (int, float)):
+        return float(job.created_at)
+    return None
+
+
+def _auto_delete_eta_hours(job: Job) -> Optional[int]:
+    if _settings.RETENTION_DAYS <= 0:
+        return None
+    base_ts = _job_cleanup_reference_ts(job)
+    if base_ts is None:
+        return None
+    expires_at = base_ts + (_settings.RETENTION_DAYS * 86400.0)
+    remaining_seconds = max(0.0, expires_at - time.time())
+    return int(math.ceil(remaining_seconds / 3600.0))
+
+
 def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
     from flask import url_for  # imported here to avoid requiring app context at import
 
@@ -475,18 +531,24 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
 
     name = _recent_job_display_name(job, sequence_number)
     is_done = job.status == "done"
+    delete_eta_hours = _auto_delete_eta_hours(job)
+    display_name = f"{name} ({delete_eta_hours} hrs left)" if delete_eta_hours is not None else name
     payload: Dict[str, Any] = {
         "job_id": job.job_id,
         "name": name,
+        "display_name": display_name,
         "status": job.status,
-        "display_title": name if is_done else "Job running...",
+        "display_title": display_name if is_done else "Job running...",
         "form_defaults": _safe_form_defaults(job.summary.get("form_defaults")),
         "stage_label": job.stage_label,
         "stage_index": job.stage_index,
         "stage_total": job.stage_total,
         "stage_progress": job.stage_progress,
+        "cancel_requested": bool(job.cancel_requested),
         "rename_url": url_for("bp.job_rename", job_id=job.job_id),
     }
+    if job.status in ("queued", "running"):
+        payload["cancel_url"] = url_for("bp.job_cancel", job_id=job.job_id)
     if job.status not in ("queued", "running"):
         payload["delete_url"] = url_for("bp.job_delete", job_id=job.job_id)
     if not is_done:
@@ -507,6 +569,7 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
 
 
 _GENERIC_BUILD_ERROR = "Build failed. Check server logs for details."
+_CANCELED_BUILD_ERROR = "Build canceled by user."
 
 
 def sanitize_job_error(value: Any) -> Optional[str]:
@@ -514,6 +577,8 @@ def sanitize_job_error(value: Any) -> Optional[str]:
     if not text:
         return None
     if text == _GENERIC_BUILD_ERROR:
+        return text
+    if text == _CANCELED_BUILD_ERROR:
         return text
     if text.startswith("Job interrupted (server restarted)."):
         return text
@@ -546,20 +611,26 @@ def _job_logs_payload(job: Job, offset: int) -> Dict[str, Any]:
         "stage_index": job.stage_index,
         "stage_total": job.stage_total,
         "stage_progress": job.stage_progress,
+        "cancel_requested": bool(job.cancel_requested),
         "summary": _sanitize_summary_for_response(raw_summary),
     }
 
 
 def _run_build_job(job: Job, cfg: BuildConfig) -> None:
+    register_cancel_handle(job.job_id)
+    bind_cancel_job(job.job_id)
+    if job.cancel_requested:
+        request_build_cancel(job.job_id)
     job_root = cfg.out_dir / job.job_id
     ensure_dir(job_root)
     build_log_path = job_root / "build.log"
     error_log_path = job_root / "error.log"
 
     with job.change_cond:
+        canceling = bool(job.cancel_requested)
         job.status = "running"
         job.started_at = time.time()
-        _set_job_stage(job, label="Queued")
+        _set_job_stage(job, label="Canceling..." if canceling else "Queued")
         job.summary["build_log"] = build_log_path.name
         _notify_job_change_locked(job)
     _notify_recent_jobs_change()
@@ -584,10 +655,12 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     pipeline_logger.addHandler(file_handler)
     result = None
     try:
+        check_cancel_requested()
         with job.change_cond:
             _set_job_stage(job, label="Starting build")
             _notify_job_change_locked(job)
         result = build_pipeline(cfg)
+        check_cancel_requested()
         with job.change_cond:
             job.exit_code = result.exit_code
             if job.exit_code == 0:
@@ -602,6 +675,14 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                     encoding="utf-8",
                 )
                 job.summary["error_log"] = error_log_path.name
+    except BuildCancelledError as exc:
+        error_log_path.write_text(str(exc) + "\n", encoding="utf-8")
+        with job.change_cond:
+            job.status = "canceled"
+            job.error = _CANCELED_BUILD_ERROR
+            _set_job_stage(job, label="Canceled")
+            job.summary["error_log"] = error_log_path.name
+            job.exit_code = 130
     except Exception as exc:  # pragma: no cover - surface to UI
         tb = traceback.format_exc()
         error_log_path.write_text(tb, encoding="utf-8")
@@ -648,3 +729,5 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
             _notify_job_change_locked(job)
         _notify_recent_jobs_change()
         _persist_job_snapshot(job)
+        clear_cancel_handle(job.job_id)
+        unbind_cancel_job()

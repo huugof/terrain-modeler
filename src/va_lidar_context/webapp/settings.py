@@ -1,4 +1,5 @@
 """Runtime configuration read from environment variables."""
+
 from __future__ import annotations
 
 import os
@@ -102,43 +103,37 @@ def load_config(overrides: dict | None = None) -> AppConfig:
     clerk_sign_in_url: str = os.getenv("CLERK_SIGN_IN_URL", "").strip()
     clerk_jwks_url: str = os.getenv("CLERK_JWKS_URL", "").strip()
     clerk_issuer: str = os.getenv("CLERK_ISSUER", "").strip()
-    clerk_api_url: str = os.getenv(
-        "CLERK_API_URL", "https://api.clerk.com/v1"
-    ).strip()
+    clerk_api_url: str = os.getenv("CLERK_API_URL", "https://api.clerk.com/v1").strip()
     clerk_frontend_api_url: str = os.getenv("CLERK_FRONTEND_API_URL", "").strip()
-    clerk_allowed_domain: str = os.getenv(
-        "CLERK_ALLOWED_DOMAIN", ""
-    ).strip().lower()
-    require_local_allowlist: bool = os.getenv(
-        "REQUIRE_LOCAL_ALLOWLIST", "0"
-    ).lower() in ("1", "true", "yes")
-    clerk_authorized_parties: List[str] = [
-        p.strip()
-        for p in os.getenv("CLERK_AUTHORIZED_PARTIES", "").split(",")
-        if p.strip()
-    ]
-    session_ttl_seconds: int = int(
-        os.getenv("SESSION_TTL_SECONDS", str(7 * 86400))
+    clerk_allowed_domain: str = os.getenv("CLERK_ALLOWED_DOMAIN", "").strip().lower()
+    require_local_allowlist: bool = os.getenv("REQUIRE_LOCAL_ALLOWLIST", "0").lower() in (
+        "1",
+        "true",
+        "yes",
     )
-    session_cookie_secure: bool = os.getenv(
-        "SESSION_COOKIE_SECURE", "1"
-    ).lower() not in ("0", "false", "no")
+    clerk_authorized_parties: List[str] = [
+        p.strip() for p in os.getenv("CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
+    ]
+    session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", str(7 * 86400)))
+    session_cookie_secure: bool = os.getenv("SESSION_COOKIE_SECURE", "1").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
     admin_email: str = os.getenv("ADMIN_EMAIL", "").strip().lower()
     rate_limit_hourly: int = int(os.getenv("RATE_LIMIT_HOURLY", "3"))
     rate_limit_daily: int = int(os.getenv("RATE_LIMIT_DAILY", "10"))
     max_active_jobs_per_user: int = int(os.getenv("MAX_ACTIVE_JOBS_PER_USER", "1"))
     max_clip_size: float = float(os.getenv("MAX_CLIP_SIZE", "5000"))
-    job_history_enabled: bool = os.getenv(
-        "JOB_HISTORY_ENABLED", "1"
-    ).lower() in ("1", "true", "yes")
+    job_history_enabled: bool = os.getenv("JOB_HISTORY_ENABLED", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     job_rehydrate_limit: int = int(os.getenv("JOB_REHYDRATE_LIMIT", "500"))
-    job_log_wait_max_seconds: float = float(
-        os.getenv("JOB_LOG_WAIT_MAX_SECONDS", "25")
-    )
-    recent_jobs_wait_max_seconds: float = float(
-        os.getenv("RECENT_JOBS_WAIT_MAX_SECONDS", "25")
-    )
-    recent_jobs_limit: int = int(os.getenv("RECENT_JOBS_LIMIT", "5"))
+    job_log_wait_max_seconds: float = float(os.getenv("JOB_LOG_WAIT_MAX_SECONDS", "25"))
+    recent_jobs_wait_max_seconds: float = float(os.getenv("RECENT_JOBS_WAIT_MAX_SECONDS", "25"))
+    recent_jobs_limit: int = int(os.getenv("RECENT_JOBS_LIMIT", "20"))
     hmac_keys_json: str = os.getenv("HMAC_KEYS_JSON", "").strip()
     hmac_max_skew_seconds: int = int(os.getenv("HMAC_MAX_SKEW_SECONDS", "300"))
     hmac_nonce_ttl_seconds: int = int(os.getenv("HMAC_NONCE_TTL_SECONDS", "600"))
@@ -222,5 +217,3 @@ def __getattr__(name: str) -> object:
         return getattr(_config, lower)
     except AttributeError:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-

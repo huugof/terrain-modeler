@@ -32,6 +32,7 @@ let authExchangeInFlight = false;
 let clerkDarkThemePromise = null;
 let recentJobsData = [];
 let currentPreviewPath = "";
+let projectNamePromptResolver = null;
 
 function setFaviconFromLucide() {
   const icon = document.getElementById("faviconSource");
@@ -69,14 +70,48 @@ function getPreviewJobs() {
   });
 }
 
+function getActivePreviewJob() {
+  const previewJobs = getPreviewJobs();
+  if (!previewJobs.length) return null;
+  const current = normalizePreviewPath(currentPreviewPath);
+  if (current) {
+    const matched = previewJobs.find(
+      (job) => normalizePreviewPath(job.preview_url) === current,
+    );
+    if (matched) return matched;
+  }
+  return previewJobs[0] || null;
+}
+
+function updatePreviewDownloadButton() {
+  const downloadBtn = document.getElementById("previewDownloadButton");
+  if (!downloadBtn) return;
+  const activeJob = getActivePreviewJob();
+  const url =
+    activeJob && typeof activeJob.download_all_url === "string"
+      ? activeJob.download_all_url
+      : "";
+  if (!url) {
+    downloadBtn.disabled = true;
+    delete downloadBtn.dataset.downloadUrl;
+    return;
+  }
+  downloadBtn.disabled = false;
+  downloadBtn.dataset.downloadUrl = url;
+}
+
 function updatePreviewNavButtons() {
   const prevBtn = document.getElementById("previewPrevButton");
   const nextBtn = document.getElementById("previewNextButton");
-  if (!prevBtn || !nextBtn) return;
+  if (!prevBtn || !nextBtn) {
+    updatePreviewDownloadButton();
+    return;
+  }
   const previewJobs = getPreviewJobs();
   if (previewJobs.length < 2) {
     prevBtn.disabled = true;
     nextBtn.disabled = true;
+    updatePreviewDownloadButton();
     return;
   }
   const normalizedPaths = previewJobs.map((job) =>
@@ -87,10 +122,13 @@ function updatePreviewNavButtons() {
   if (currentIndex < 0) {
     prevBtn.disabled = false;
     nextBtn.disabled = false;
+    updatePreviewDownloadButton();
     return;
   }
-  prevBtn.disabled = currentIndex <= 0;
-  nextBtn.disabled = currentIndex >= normalizedPaths.length - 1;
+  // Left button moves down the list (older), right button moves to newer.
+  prevBtn.disabled = currentIndex >= normalizedPaths.length - 1;
+  nextBtn.disabled = currentIndex <= 0;
+  updatePreviewDownloadButton();
 }
 
 function navigatePreview(direction) {
@@ -217,27 +255,28 @@ function scheduleCoverageCheck() {
   coverageTimer = setTimeout(checkCoverage, 400);
 }
 
-function setAlert(message, isError) {
+function setAlert(message, tone) {
   const alertEl = document.getElementById("parcelAlert");
   if (!alertEl) return;
+  const isError = tone === true || tone === "error";
+  const isWarning = tone === "warning";
   if (!message) {
     alertEl.classList.add("hidden");
     alertEl.classList.remove("error");
+    alertEl.classList.remove("warning");
     alertEl.textContent = "";
     return;
   }
   alertEl.textContent = message;
   alertEl.classList.remove("hidden");
-  if (isError) {
-    alertEl.classList.add("error");
-  } else {
-    alertEl.classList.remove("error");
-  }
+  alertEl.classList.toggle("error", isError);
+  alertEl.classList.toggle("warning", isWarning);
 }
 
 function updateAlerts() {
   const parcels = document.getElementById("dxf_include_parcels");
   const contours = document.getElementById("output_contours");
+  const outBuildings = document.getElementById("output_buildings");
   const coordsInput = document.querySelector('input[name="coords"]');
   const coords = coordsInput ? parseCoords(coordsInput.value) : null;
   if (coordsInput && coordsInput.value.trim() && !coords) {
@@ -275,6 +314,13 @@ function updateAlerts() {
   }
   if (buildErrorMessage) {
     setAlert(buildErrorMessage, true);
+    return;
+  }
+  if (outBuildings && outBuildings.checked) {
+    setAlert(
+      "Enabling buildings significantly increases build time. Building heights can be inaccurate in some areas.",
+      "warning",
+    );
     return;
   }
   setAlert("", false);
@@ -341,10 +387,42 @@ async function deleteRecentJob(deleteUrl, jobId) {
   }
 }
 
+async function cancelRecentJob(cancelUrl, jobId) {
+  if (!cancelUrl) return;
+  const confirmed = window.confirm(
+    "Force cancel this build? Any partial outputs may be incomplete.",
+  );
+  if (!confirmed) return;
+  const csrfToken = getCsrfToken();
+  try {
+    const resp = await fetch(cancelUrl, {
+      method: "POST",
+      headers: {
+        "X-Requested-With": "fetch",
+        "X-CSRF-Token": csrfToken,
+      },
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const message =
+        (payload && payload.error) || `Failed to cancel job ${jobId || ""}.`;
+      setAlert(message, true);
+      return;
+    }
+    if (buildErrorMessage) {
+      buildErrorMessage = "";
+      updateAlerts();
+    }
+    await refreshRecentJobs();
+  } catch (err) {
+    setAlert("Failed to cancel job.", true);
+  }
+}
+
 async function renameRecentJob(renameUrl, jobId, currentName) {
   if (!renameUrl) return;
   const initialName = String(currentName || "").trim();
-  const next = window.prompt("Project name", initialName);
+  const next = await promptForProjectName(initialName);
   if (next === null) return;
   const name = String(next || "").trim();
   if (!name) {
@@ -469,11 +547,19 @@ function applyRecentJobPreview(previewUrl, formDefaults) {
 function initPreviewNavButtons() {
   const prevBtn = document.getElementById("previewPrevButton");
   const nextBtn = document.getElementById("previewNextButton");
+  const downloadBtn = document.getElementById("previewDownloadButton");
   if (prevBtn) {
-    prevBtn.addEventListener("click", () => navigatePreview(-1));
+    prevBtn.addEventListener("click", () => navigatePreview(1));
   }
   if (nextBtn) {
-    nextBtn.addEventListener("click", () => navigatePreview(1));
+    nextBtn.addEventListener("click", () => navigatePreview(-1));
+  }
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", () => {
+      const downloadUrl = downloadBtn.dataset.downloadUrl;
+      if (!downloadUrl) return;
+      window.location.href = downloadUrl;
+    });
   }
   updatePreviewNavButtons();
 }
@@ -483,7 +569,7 @@ function renderRecentJobs(container, jobs) {
   if (!jobs || jobs.length === 0) {
     const empty = document.createElement("p");
     empty.className = "footer";
-    empty.textContent = "No jobs yet.";
+    empty.textContent = "no jobs yet.";
     container.appendChild(empty);
     return;
   }
@@ -492,44 +578,59 @@ function renderRecentJobs(container, jobs) {
   jobs.forEach((job) => {
     const item = document.createElement("li");
     item.className = "recent-job-row";
-    const canAct = job.status === "done" || job.status === "error";
+    const canAct =
+      job.status === "done" ||
+      job.status === "error" ||
+      job.status === "canceled";
     const name = job.name || job.job_id;
+    const displayName = job.display_name || name;
 
     const meta = document.createElement("div");
     meta.className = "recent-job-meta";
-    const title = document.createElement("div");
-    title.className = "recent-job-title";
-    title.textContent = name;
+    let title;
+    if (job.preview_url) {
+      title = document.createElement("a");
+      title.className = "recent-job-title recent-job-title-link";
+      title.href = job.preview_url;
+      title.dataset.previewInline = "1";
+      title.dataset.previewUrl = job.preview_url;
+      title.dataset.formDefaults = JSON.stringify(job.form_defaults || {});
+    } else {
+      title = document.createElement("div");
+      title.className = "recent-job-title";
+    }
+    title.textContent = displayName;
     meta.appendChild(title);
     if (!canAct && job.stage_label) {
+      const stageWrap = document.createElement("div");
+      stageWrap.className = "recent-job-stage-wrap";
       const stage = document.createElement("div");
       stage.className = "recent-job-stage";
       const progress = Number.isFinite(job.stage_progress)
         ? ` (${job.stage_progress}%)`
         : "";
       stage.textContent = `${job.stage_label}${progress}`;
-      meta.appendChild(stage);
+      stageWrap.appendChild(stage);
+      if (job.cancel_url) {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "recent-job-cancel-btn";
+        cancelBtn.textContent = "cancel --force";
+        cancelBtn.dataset.jobCancelUrl = job.cancel_url;
+        cancelBtn.dataset.jobId = job.job_id;
+        stageWrap.appendChild(cancelBtn);
+      }
+      meta.appendChild(stageWrap);
     }
     item.appendChild(meta);
 
     if (canAct) {
       const actions = document.createElement("div");
       actions.className = "recent-job-actions";
-      if (job.preview_url) {
-        const previewLink = document.createElement("a");
-        previewLink.className = "recent-job-pill";
-        previewLink.href = job.preview_url;
-        previewLink.textContent = "Preview";
-        previewLink.dataset.previewInline = "1";
-        previewLink.dataset.previewUrl = job.preview_url;
-        previewLink.dataset.formDefaults = JSON.stringify(
-          job.form_defaults || {},
-        );
-        actions.appendChild(previewLink);
-      }
+      let hasActions = false;
       if (job.download_all_url) {
         const downloadLink = document.createElement("a");
-        downloadLink.className = "recent-job-pill";
+        downloadLink.className = "recent-job-pill recent-job-pill-download";
         downloadLink.href = job.download_all_url;
         downloadLink.setAttribute("aria-label", "Download job files");
         downloadLink.setAttribute("title", "Download job files");
@@ -537,19 +638,21 @@ function renderRecentJobs(container, jobs) {
         icon.setAttribute("data-lucide", "download");
         downloadLink.appendChild(icon);
         actions.appendChild(downloadLink);
+        hasActions = true;
       }
       if (job.delete_url) {
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.className = "recent-job-pill recent-job-pill-delete";
         const icon = document.createElement("i");
-        icon.setAttribute("data-lucide", "trash-2");
+        icon.setAttribute("data-lucide", "x");
         deleteBtn.appendChild(icon);
         deleteBtn.dataset.jobDeleteUrl = job.delete_url;
         deleteBtn.dataset.jobId = job.job_id;
         deleteBtn.setAttribute("aria-label", "Delete job");
         deleteBtn.setAttribute("title", "Delete job");
         actions.appendChild(deleteBtn);
+        hasActions = true;
       }
       if (job.rename_url) {
         const renameBtn = document.createElement("button");
@@ -564,8 +667,11 @@ function renderRecentJobs(container, jobs) {
         renameBtn.setAttribute("aria-label", "Edit job name");
         renameBtn.setAttribute("title", "Edit job name");
         actions.appendChild(renameBtn);
+        hasActions = true;
       }
-      item.appendChild(actions);
+      if (hasActions) {
+        meta.appendChild(actions);
+      }
     }
 
     list.appendChild(item);
@@ -607,6 +713,63 @@ function closePreviewModal() {
   _updateModalOpenClass();
 }
 
+function closeProjectNameModal(value = null) {
+  const modal = document.getElementById("projectNameModal");
+  if (!modal) return;
+  const resolver = projectNamePromptResolver;
+  projectNamePromptResolver = null;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  _updateModalOpenClass();
+  if (resolver) resolver(value);
+}
+
+function promptForProjectName(initialValue = "") {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("projectNameModal");
+    const input = document.getElementById("projectNameInput");
+    if (!modal || !input) {
+      const fallback = window.prompt(
+        "Project name",
+        String(initialValue || ""),
+      );
+      resolve(fallback === null ? null : String(fallback || ""));
+      return;
+    }
+    if (projectNamePromptResolver) {
+      closeProjectNameModal(null);
+    }
+    projectNamePromptResolver = resolve;
+    input.value = String(initialValue || "");
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    _updateModalOpenClass();
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  });
+}
+
+function initProjectNameModal() {
+  const form = document.getElementById("projectNameForm");
+  const input = document.getElementById("projectNameInput");
+  const cancelBtn = document.getElementById("projectNameCancel");
+  if (!form || !input) return;
+  if (form.dataset.bound === "true") return;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    closeProjectNameModal(String(input.value || "").trim());
+  });
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      closeProjectNameModal(null);
+    });
+  }
+  form.dataset.bound = "true";
+}
+
 function initPreviewModal() {
   document.addEventListener("click", (event) => {
     const deleteButton = event.target.closest("button[data-job-delete-url]");
@@ -628,6 +791,15 @@ function initPreviewModal() {
       );
       return;
     }
+    const cancelButton = event.target.closest("button[data-job-cancel-url]");
+    if (cancelButton) {
+      event.preventDefault();
+      cancelRecentJob(
+        cancelButton.dataset.jobCancelUrl,
+        cancelButton.dataset.jobId,
+      );
+      return;
+    }
     const previewInlineLink = event.target.closest(
       'a[data-preview-inline="1"]',
     );
@@ -639,14 +811,6 @@ function initPreviewModal() {
         previewInlineLink.dataset.formDefaults,
       );
       applyRecentJobPreview(url, formDefaults);
-      const profileButton = document.getElementById("menuButton");
-      const profileDropdown = document.getElementById("menuDropdown");
-      if (profileDropdown) {
-        profileDropdown.classList.add("hidden");
-      }
-      if (profileButton) {
-        profileButton.setAttribute("aria-expanded", "false");
-      }
       return;
     }
     const previewLink = event.target.closest('a[data-preview-modal="1"]');
@@ -660,18 +824,35 @@ function initPreviewModal() {
     if (closeTarget) {
       event.preventDefault();
       closePreviewModal();
+      return;
+    }
+    const projectNameCloseTarget = event.target.closest(
+      '[data-project-name-close="1"]',
+    );
+    if (projectNameCloseTarget) {
+      event.preventDefault();
+      closeProjectNameModal(null);
     }
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closePreviewModal();
+    if (event.key === "Escape") {
+      closePreviewModal();
+      closeProjectNameModal(null);
+    }
   });
 }
 
 function _updateModalOpenClass() {
   const previewModal = document.getElementById("previewModal");
+  const projectNameModal = document.getElementById("projectNameModal");
   const previewOpen =
     previewModal && !previewModal.classList.contains("hidden");
-  document.body.classList.toggle("modal-open", Boolean(previewOpen));
+  const projectNameOpen =
+    projectNameModal && !projectNameModal.classList.contains("hidden");
+  document.body.classList.toggle(
+    "modal-open",
+    Boolean(previewOpen || projectNameOpen),
+  );
 }
 
 function _buildAuthLoginUrl(nextPath) {
@@ -1125,7 +1306,7 @@ async function runBuild(event) {
     const current = String(jobNameInput.value || "").trim();
     let nextName = current;
     if (!nextName) {
-      const prompted = window.prompt("Project name");
+      const prompted = await promptForProjectName(current);
       if (prompted === null) return;
       nextName = String(prompted || "").trim();
     }
@@ -1144,8 +1325,8 @@ async function runBuild(event) {
   updateAlerts();
   runBtn.disabled = true;
   const originalText = runBtn.textContent;
-  runBtn.textContent = "Saving...";
-  setInlineBuildStatus("Saving...");
+  runBtn.textContent = "Building...";
+  setInlineBuildStatus("Building...");
   setInlineBuildingOverlay(true);
 
   const formData = new FormData(form);
@@ -1240,6 +1421,10 @@ async function runBuild(event) {
         const reason = logData.error ? ` ${logData.error}` : "";
         buildErrorMessage = `Build failed.${reason}`;
         setInlineBuildStatus("Build failed.");
+        updateAlerts();
+      } else if (logData.status === "canceled") {
+        buildErrorMessage = "Build canceled.";
+        setInlineBuildStatus("Build canceled.");
         updateAlerts();
       } else if (logData.status === "done") {
         setInlineBuildStatus("Build complete.");
@@ -1454,41 +1639,74 @@ function initInlinePreview() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initPreviewModal();
+  initProjectNameModal();
   initAuthModal();
-  const jobsMenuShell = document.getElementById("menuShell");
-  const jobsMenuButton = document.getElementById("menuButton");
-  const jobsMenuDropdown = document.getElementById("menuDropdown");
-  if (jobsMenuShell && jobsMenuButton && jobsMenuDropdown) {
-    const closeJobsMenu = () => {
-      jobsMenuDropdown.classList.add("hidden");
-      jobsMenuButton.setAttribute("aria-expanded", "false");
+  const jobsPanel = document.getElementById("recentJobsPanel");
+  const jobsButton = document.getElementById("menuButton");
+  if (jobsPanel && jobsButton) {
+    const setJobsPanelOpenState = (open) => {
+      document.body.classList.toggle("jobs-panel-open", Boolean(open));
     };
-    jobsMenuButton.addEventListener("click", (event) => {
+    const closeJobsPanel = () => {
+      jobsPanel.classList.add("hidden");
+      jobsButton.setAttribute("aria-expanded", "false");
+      setJobsPanelOpenState(false);
+    };
+    const openJobsPanel = () => {
+      jobsPanel.classList.remove("hidden");
+      jobsButton.setAttribute("aria-expanded", "true");
+      setJobsPanelOpenState(true);
+    };
+    jobsButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const willOpen = jobsMenuDropdown.classList.contains("hidden");
+      const willOpen = jobsPanel.classList.contains("hidden");
       if (willOpen) {
-        jobsMenuDropdown.classList.remove("hidden");
-        jobsMenuButton.setAttribute("aria-expanded", "true");
+        openJobsPanel();
       } else {
-        closeJobsMenu();
+        closeJobsPanel();
       }
     });
     document.addEventListener("click", (event) => {
-      if (!jobsMenuShell.contains(event.target)) {
-        closeJobsMenu();
+      const target = event.target;
+      if (!jobsPanel.contains(target) && !jobsButton.contains(target)) {
+        closeJobsPanel();
       }
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        closeJobsMenu();
+        closeJobsPanel();
       }
     });
+    const previewFrames = [
+      document.getElementById("inlinePreviewFrame"),
+      document.getElementById("previewModalFrame"),
+    ].filter(Boolean);
+    window.addEventListener("blur", () => {
+      const active = document.activeElement;
+      if (active && previewFrames.includes(active)) {
+        closeJobsPanel();
+      }
+    });
+    previewFrames.forEach((frame) => {
+      frame.addEventListener("load", () => {
+        try {
+          const frameDoc = frame.contentWindow && frame.contentWindow.document;
+          if (!frameDoc || frame.dataset.jobsCloseBound === "true") return;
+          frameDoc.addEventListener("pointerdown", () => {
+            closeJobsPanel();
+          });
+          frame.dataset.jobsCloseBound = "true";
+        } catch (err) {
+          // Ignore cross-document access failures.
+        }
+      });
+    });
+    setJobsPanelOpenState(false);
   }
   const topProfileShell = document.getElementById("topProfileShell");
   const topProfileButton = document.getElementById("topProfileButton");
   const topProfileDropdown = document.getElementById("topProfileDropdown");
-  const topRecentJobsLink = document.getElementById("topRecentJobsLink");
   if (topProfileShell && topProfileButton && topProfileDropdown) {
     const closeTopProfileMenu = () => {
       topProfileDropdown.classList.add("hidden");
@@ -1515,17 +1733,6 @@ document.addEventListener("DOMContentLoaded", () => {
         closeTopProfileMenu();
       }
     });
-    if (topRecentJobsLink) {
-      topRecentJobsLink.addEventListener("click", (event) => {
-        event.preventDefault();
-        closeTopProfileMenu();
-        if (jobsMenuDropdown && jobsMenuButton) {
-          jobsMenuDropdown.classList.remove("hidden");
-          jobsMenuButton.setAttribute("aria-expanded", "true");
-          jobsMenuButton.focus();
-        }
-      });
-    }
   }
 
   initSegmentedControls();
@@ -1534,7 +1741,6 @@ document.addEventListener("DOMContentLoaded", () => {
   updateUiToggles();
   if (window.lucide) {
     lucide.createIcons();
-    setFaviconFromLucide();
   }
   const contours = document.getElementById("output_contours");
   const outTerrain = document.getElementById("output_terrain");

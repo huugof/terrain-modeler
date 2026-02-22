@@ -11,8 +11,39 @@ import argparse
 import logging as _logging
 import os
 import secrets
+import sys
 
 from flask import Flask
+
+
+# Default to desktop mode when launched from local dev CLIs and the user did
+# not explicitly set DESKTOP_MODE. Keep server mode as the default elsewhere
+# (e.g., gunicorn/docker).
+def _should_default_desktop_mode() -> bool:
+    if os.getenv("DESKTOP_MODE") is not None:
+        return False
+    _argv0 = os.path.basename(sys.argv[0]).strip().lower() if sys.argv else ""
+    _run_from_flask_cli = os.getenv("FLASK_RUN_FROM_CLI", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    return _run_from_flask_cli or _argv0 in {
+        "flask",
+        "va-lidar-context-web",
+        "va-lidar-context-web.exe",
+    }
+
+
+def _bootstrap_local_dev_env() -> None:
+    if not _should_default_desktop_mode():
+        return
+    os.environ.setdefault("DESKTOP_MODE", "1")
+    # Keep local dev/backward compatibility with existing jobs under ./out.
+    os.environ.setdefault("OUT_DIR", "./out")
+
+
+_bootstrap_local_dev_env()
 
 # --- settings module (exposed so tests can monkeypatch via webapp.settings.X) ---
 from . import settings

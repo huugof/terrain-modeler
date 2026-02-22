@@ -31,6 +31,22 @@
     --range-track: #3f3f3f;
     --card-float: rgba(40, 40, 40, 0.82);
     --card-float-border: rgba(255, 255, 255, 0.08);
+    --radius-surface: 16px;
+    --radius-control: 12px;
+    --radius-action-pill: 999px;
+    --focus-border-subtle: rgba(122, 95, 250, 0.45);
+    --focus-ring-subtle: rgba(122, 95, 250, 0.2);
+    --form-card-width: 460px;
+    --recent-jobs-card-width: 320px;
+    --controls-gap: 14px;
+    --recent-jobs-offset-x: 10px;
+    --recent-jobs-offset-y: 20px;
+    --cli-font:
+        "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco,
+        Consolas, "Liberation Mono", monospace;
+    --cli-text: #c7c7c7;
+    --cli-dim: #9f9f9f;
+    --cli-border: rgba(127, 211, 141, 0.34);
 }
 :root[data-theme="light"] {
     --bg: #f5f5f3;
@@ -65,6 +81,9 @@
     --range-track: #d0d0d0;
     --card-float: rgba(255, 255, 255, 0.8);
     --card-float-border: rgba(0, 0, 0, 0.1);
+    --cli-text: #666666;
+    --cli-dim: #8a8a8a;
+    --cli-border: rgba(38, 112, 56, 0.28);
 }
 * {
     box-sizing: border-box;
@@ -110,10 +129,13 @@ body {
     color: var(--ink);
 }
 .card-logo-mark {
-    width: 28px;
-    height: 18px;
+    width: auto;
+    height: 37.4px;
     display: block;
     flex: 0 0 auto;
+}
+:root:not([data-theme="light"]) .card-logo-mark {
+    filter: invert(1);
 }
 .card-header-actions {
     display: flex;
@@ -177,6 +199,10 @@ body {
 .menu-button .lucide {
     width: 16px;
     height: 16px;
+    transition: transform 0.18s ease;
+}
+.menu-button[aria-expanded="true"] .lucide {
+    transform: rotate(90deg);
 }
 .menu-dropdown {
     position: absolute;
@@ -193,15 +219,15 @@ body {
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-    padding: 12px;
-    z-index: 100;
+    padding: 14px;
+    z-index: 1400;
 }
 .menu-section-title {
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 .menu-divider {
     height: 1px;
@@ -211,7 +237,7 @@ body {
 .menu-link {
     display: inline-block;
     margin-bottom: 8px;
-    font-size: 13px;
+    font-size: 14px;
 }
 /* ---- Login banner ---- */
 .login-banner {
@@ -381,6 +407,10 @@ body {
     opacity: 0.55;
     cursor: default;
 }
+.preview-download-toggle:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
 .wireframe-toggle.is-active {
     border-color: var(--accent-strong);
     background: var(--accent-strong);
@@ -408,6 +438,13 @@ main {
     inset: 0;
     z-index: 0;
 }
+body.jobs-panel-open .layout-preview-col::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+}
 /* ---- Inline preview panel ---- */
 .inline-preview-panel {
     position: absolute;
@@ -425,9 +462,8 @@ main {
     top: 5vh;
     left: 0;
     bottom: 5vh;
-    width: 460px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    width: var(--form-card-width);
+    overflow: visible;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -444,6 +480,11 @@ main {
 .layout-form-col::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 999px;
+}
+.layout-controls-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
 }
 .inline-preview-frame {
     position: absolute;
@@ -465,7 +506,7 @@ main {
     top: 0;
     right: 0;
     bottom: 0;
-    left: 460px;
+    left: var(--form-card-width);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -534,12 +575,68 @@ main {
         transform: rotate(360deg);
     }
 }
+.app-card {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.recent-jobs-card {
+    position: absolute;
+    top: var(--recent-jobs-offset-y);
+    left: calc(100% + var(--controls-gap) + var(--recent-jobs-offset-x));
+    width: max-content;
+    min-width: var(--recent-jobs-card-width);
+    max-height: calc(100% - var(--recent-jobs-offset-y));
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    z-index: 20;
+}
+.recent-jobs-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 34px;
+}
+.recent-jobs-card .menu-section-title {
+    margin-bottom: 0;
+    color: var(--cli-text);
+    line-height: 1;
+}
+.recent-jobs-card .recent-jobs-scroll {
+    max-height: min(74vh, 640px);
+}
+.recent-jobs-card-footer {
+    border-top: 0;
+    padding-top: 0;
+}
 @media (max-width: 520px) {
     .layout-form-col {
         width: 100%;
         top: 5vh;
         bottom: 5vh;
         padding: 0 12px;
+    }
+    .layout-controls-wrap {
+        width: 100%;
+        height: auto;
+    }
+    .app-card,
+    .recent-jobs-card {
+        width: 100%;
+        height: auto;
+        flex: 0 0 auto;
+    }
+    .recent-jobs-card {
+        position: static;
+        max-height: none;
+        margin-top: 12px;
     }
     .inline-preview-demo {
         left: 0;
@@ -548,18 +645,11 @@ main {
 .card {
     background: var(--card-float);
     border: 1px solid var(--card-float-border);
-    border-radius: 12px;
+    border-radius: var(--radius-surface);
     padding: 0;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-}
-.app-card {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
 }
 .form-body {
     --field-gap: 15px;
@@ -670,11 +760,26 @@ main {
 .app-card select {
     width: 100%;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--border);
     font-size: 14px;
     background: var(--pill-bg);
     color: var(--ink);
+}
+.app-card input[type="text"]:focus-visible,
+.app-card input[type="number"]:focus-visible,
+.app-card select:focus-visible,
+.project-name-modal-input:focus-visible {
+    outline: none;
+    border-color: var(--focus-border-subtle);
+    box-shadow: 0 0 0 2px var(--focus-ring-subtle);
+}
+.app-card input[type="text"]:focus:not(:focus-visible),
+.app-card input[type="number"]:focus:not(:focus-visible),
+.app-card select:focus:not(:focus-visible),
+.project-name-modal-input:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
 }
 .check-row {
     display: flex;
@@ -688,7 +793,7 @@ main {
     gap: 1px;
     background: var(--toggle-line);
     border: 1px solid var(--toggle-line);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     overflow: hidden;
 }
 .output-toggle-btn {
@@ -707,10 +812,6 @@ main {
         background 0.12s,
         color 0.12s;
 }
-/* if last item is alone (odd count), span both columns */
-.output-toggle-btn:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-}
 .output-toggle-btn:hover {
     background: var(--pill-hover-bg);
     color: var(--ink);
@@ -719,12 +820,17 @@ main {
     background: var(--segmented-active);
     color: var(--ink);
 }
+.output-toggle-btn-placeholder {
+    pointer-events: none;
+    cursor: default;
+    color: transparent;
+}
 .segmented {
     display: inline-flex;
     width: 100%;
     background: var(--segmented-bg);
     border: 1px solid var(--toggle-line);
-    border-radius: 12px;
+    border-radius: var(--radius-control);
     overflow: hidden;
     height: 36px;
     align-items: stretch;
@@ -880,7 +986,7 @@ main {
     border: none;
     padding: 12px 18px;
     font-size: 14px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
     text-decoration: none;
     display: inline-flex;
@@ -899,7 +1005,7 @@ main {
 }
 #runBtn {
     height: 42px;
-    border-radius: 999px;
+    border-radius: var(--radius-action-pill);
     padding: 0 16px;
 }
 .footer {
@@ -922,12 +1028,34 @@ main {
     color: #ffd4d4;
     background: #3b1f1f;
 }
+.status.warning {
+    color: #ffe9a3;
+    background: #3f3212;
+}
 .recent-jobs-scroll {
     max-height: min(52vh, 420px);
     overflow-y: auto;
     padding-right: 2px;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+}
+.recent-jobs-card,
+.recent-jobs-card .menu-section-title,
+.recent-jobs-card .recent-job-title,
+.recent-jobs-card .recent-job-stage,
+.recent-jobs-card .recent-job-cancel-btn,
+.recent-jobs-card .menu-link,
+.recent-jobs-card .footer {
+    font-family: var(--cli-font);
+}
+.recent-jobs-card .menu-section-title {
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+.recent-jobs-card {
+    text-align: left;
 }
 .recent-jobs-scroll::-webkit-scrollbar {
     width: 4px;
@@ -945,103 +1073,182 @@ main {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
 }
 .recent-job-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 2px 0;
-    border: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 0;
+    padding: 6px 0;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
     border-radius: 0;
     background: transparent;
 }
 .recent-job-meta {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
     min-width: 0;
-    gap: 2px;
+    gap: 4px 10px;
+    text-align: left;
 }
 .recent-job-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--ink);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--cli-text);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
+    text-overflow: clip;
     min-width: 0;
+    max-width: none;
+}
+.recent-job-title-link {
+    color: var(--cli-text);
+    text-decoration: none;
+}
+.recent-job-title-link:visited {
+    color: var(--cli-text);
+}
+.recent-job-title-link:hover {
+    color: var(--cli-text);
+    text-decoration: underline;
 }
 .recent-job-stage {
     font-size: 11px;
-    color: var(--muted);
+    color: var(--cli-dim);
+    letter-spacing: 0.03em;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 220px;
+    overflow: visible;
+    text-overflow: clip;
+    max-width: none;
 }
-.recent-job-actions {
+.recent-job-stage::before {
+    content: "status: ";
+    color: var(--cli-dim);
+}
+.recent-job-stage-wrap {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
+    justify-content: flex-start;
+    gap: 8px;
+    min-width: 100%;
+}
+.recent-job-stage-wrap .recent-job-stage {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.recent-job-cancel-btn {
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    color: var(--cli-text);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 10px;
+    line-height: 1.1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        opacity 0.12s ease,
+        background-color 0.12s ease;
+}
+.recent-job-cancel-btn:hover {
+    background: rgba(127, 211, 141, 0.12);
+}
+.recent-job-row:hover .recent-job-cancel-btn,
+.recent-job-stage-wrap:focus-within .recent-job-cancel-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+.recent-job-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
     flex-shrink: 0;
 }
 .recent-job-pill {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 999px;
-    border: 1px solid var(--job-pill-border);
-    background: var(--job-pill-bg);
-    color: var(--ink);
-    padding: 4px 9px;
-    font-size: 11px;
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 0;
+    font-size: 0;
     line-height: 1;
     text-decoration: none;
     white-space: nowrap;
+    cursor: pointer;
 }
 .recent-job-pill:visited {
-    color: var(--ink);
+    color: inherit;
 }
 .recent-job-pill:hover {
-    background: var(--job-pill-hover-bg);
-    border-color: var(--job-pill-hover-border);
-    color: var(--ink);
+    opacity: 0.86;
 }
 .recent-job-pill .lucide {
-    width: 12px;
-    height: 12px;
-    stroke-width: 2.25;
+    width: 16px;
+    height: 16px;
+    stroke-width: 2.15;
+}
+.recent-jobs-card .footer {
+    font-size: 11px;
+    color: var(--cli-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.recent-jobs-card .footer::before {
+    content: "~ ";
+    color: var(--cli-dim);
+}
+.recent-jobs-card .menu-link {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cli-text);
+}
+.recent-jobs-card .menu-link::before {
+    content: "> ";
+    color: var(--cli-dim);
+}
+.recent-job-pill-download {
+    color: #c8d2e8;
 }
 .recent-job-pill-delete {
-    border-color: rgba(216, 93, 93, 0.75);
-    background: rgba(216, 93, 93, 0.18);
-    color: #ffb3b3;
+    color: #f2a2a2;
 }
 .recent-job-pill-edit {
-    border-color: rgba(134, 177, 225, 0.75);
-    background: rgba(134, 177, 225, 0.18);
-    color: #d7ebff;
+    color: #9ec4ee;
 }
 .recent-job-pill-edit:hover {
-    background: rgba(134, 177, 225, 0.28);
-    border-color: rgba(134, 177, 225, 0.95);
-    color: #eef7ff;
+    color: #86b1e1;
 }
 .recent-job-pill-delete:hover {
-    background: rgba(216, 93, 93, 0.3);
-    border-color: rgba(216, 93, 93, 0.95);
-    color: #ffd6d6;
+    color: #d85d5d;
 }
 @media (max-width: 640px) {
     .recent-job-row {
         align-items: flex-start;
-        flex-direction: column;
+        flex-direction: row;
     }
     .recent-job-actions {
         justify-content: flex-start;
-        width: 100%;
+        width: auto;
+    }
+    .recent-job-cancel-btn {
+        opacity: 1;
+        pointer-events: auto;
     }
 }
 @media (max-width: 1040px) {
@@ -1068,7 +1275,7 @@ a:visited {
     -webkit-appearance: none;
     width: 100%;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--range-track);
     outline: none;
 }
@@ -1140,7 +1347,7 @@ body.modal-open {
     width: min(920px, 100vw);
     height: min(640px, 100vh);
     border: 1px solid rgba(228, 228, 228, 0.02);
-    border-radius: 12px;
+    border-radius: var(--radius-surface);
     background: transparent;
     display: flex;
     flex-direction: column;
@@ -1174,6 +1381,51 @@ body.modal-open {
     border: 0;
     background: transparent;
 }
+.project-name-modal-dialog {
+    width: min(440px, calc(100vw - 24px));
+    height: auto;
+    background: var(--card);
+}
+.project-name-modal-form {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    font-family: inherit;
+}
+.project-name-modal-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.project-name-modal-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    background: var(--pill-bg);
+    color: var(--ink);
+}
+.project-name-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.project-name-modal-actions .btn {
+    border-radius: var(--radius-action-pill);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 106px;
+    padding-left: 24px;
+    padding-right: 24px;
+}
 @media (max-width: 640px) {
     .top-bar {
         padding: max(8px, env(safe-area-inset-top))
@@ -1183,7 +1435,12 @@ body.modal-open {
     .preview-modal-dialog {
         width: 100vw;
         height: 100vh;
-        border-radius: 10px;
+        border-radius: var(--radius-surface);
+    }
+    .project-name-modal-dialog {
+        width: min(440px, calc(100vw - 16px));
+        height: auto;
+        border-radius: var(--radius-surface);
     }
 }
 /* ---- Data sources page ---- */

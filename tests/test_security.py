@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -231,6 +232,61 @@ def test_create_app_allows_random_key_in_desktop_mode(monkeypatch):
     monkeypatch.setattr(_webapp_settings, "_config", cfg)
     flask_app = create_app(config=cfg)
     assert flask_app.secret_key  # a random key was generated
+
+
+# ---------------------------------------------------------------------------
+# C1.1 — Default desktop mode for local dev CLIs when unset
+# ---------------------------------------------------------------------------
+
+
+def test_should_default_desktop_mode_for_flask_cli(monkeypatch):
+    import sys
+
+    import va_lidar_context.webapp as webapp
+
+    monkeypatch.delenv("DESKTOP_MODE", raising=False)
+    monkeypatch.setenv("FLASK_RUN_FROM_CLI", "true")
+    monkeypatch.setattr(sys, "argv", ["python"])
+    assert webapp._should_default_desktop_mode() is True
+
+
+def test_bootstrap_local_dev_env_sets_out_dir_for_cli(monkeypatch):
+    import sys
+
+    import va_lidar_context.webapp as webapp
+
+    monkeypatch.delenv("DESKTOP_MODE", raising=False)
+    monkeypatch.delenv("OUT_DIR", raising=False)
+    monkeypatch.setenv("FLASK_RUN_FROM_CLI", "true")
+    monkeypatch.setattr(sys, "argv", ["python"])
+    webapp._bootstrap_local_dev_env()
+    assert os.getenv("DESKTOP_MODE") == "1"
+    assert os.getenv("OUT_DIR") == "./out"
+
+
+def test_should_not_default_desktop_mode_for_server_process(monkeypatch):
+    import sys
+
+    import va_lidar_context.webapp as webapp
+
+    monkeypatch.delenv("DESKTOP_MODE", raising=False)
+    monkeypatch.delenv("FLASK_RUN_FROM_CLI", raising=False)
+    monkeypatch.setattr(sys, "argv", ["gunicorn"])
+    assert webapp._should_default_desktop_mode() is False
+
+
+def test_bootstrap_local_dev_env_keeps_explicit_out_dir(monkeypatch):
+    import sys
+
+    import va_lidar_context.webapp as webapp
+
+    monkeypatch.delenv("DESKTOP_MODE", raising=False)
+    monkeypatch.setenv("OUT_DIR", "/tmp/custom-out")
+    monkeypatch.setenv("FLASK_RUN_FROM_CLI", "true")
+    monkeypatch.setattr(sys, "argv", ["python"])
+    webapp._bootstrap_local_dev_env()
+    assert os.getenv("DESKTOP_MODE") == "1"
+    assert os.getenv("OUT_DIR") == "/tmp/custom-out"
 
 
 # ---------------------------------------------------------------------------

@@ -95,6 +95,7 @@ def status_label(status: str) -> str:
         "queued": "Queued",
         "running": "Running",
         "done": "Completed",
+        "canceled": "Canceled",
         "error": "Failed",
     }
     return mapping.get(status, status.title())
@@ -105,6 +106,8 @@ def status_class(status: str) -> str:
         return "status-running"
     if status == "done":
         return "status-done"
+    if status == "canceled":
+        return "status-error"
     if status == "error":
         return "status-error"
     return "status-unknown"

@@ -4,7 +4,12 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Terrain Modeler</title>
-        <link rel="icon" type="image/svg+xml" id="favicon" href="data:," />
+        <link
+            rel="icon"
+            type="image/png"
+            id="favicon"
+            href="{{ url_for('static', filename='favicon.png') }}"
+        />
         <link
             rel="stylesheet"
             href="{{ url_for('static', filename='app.css') }}"
@@ -33,6 +38,16 @@
                 disabled
             >
                 <i data-lucide="chevron-right"></i>
+            </button>
+            <button
+                type="button"
+                id="previewDownloadButton"
+                class="theme-toggle preview-download-toggle"
+                aria-label="Download current job files"
+                title="Download current job files"
+                disabled
+            >
+                <i data-lucide="download"></i>
             </button>
             <button
                 type="button"
@@ -75,14 +90,6 @@
                     <div class="top-profile-item top-profile-identity">
                         {{ top_profile_display }}
                     </div>
-                    <a
-                        href="#"
-                        id="topRecentJobsLink"
-                        class="top-profile-item"
-                        role="menuitem"
-                    >
-                        Recent jobs
-                    </a>
                     <button
                         class="top-profile-item"
                         type="submit"
@@ -136,6 +143,7 @@
                 </div>
             </div><!-- /.layout-preview-col -->
             <div class="layout-form-col">
+            <div class="layout-controls-wrap">
             <form
                 class="card app-card"
                 method="post"
@@ -146,91 +154,24 @@
                     <span class="card-logo">
                         <img
                             class="card-logo-mark"
-                            src="{{ url_for('static', filename='logo-canyon-lowpoly.svg') }}"
+                            src="{{ url_for('static', filename='logo-solid.svg') }}"
                             alt=""
                             aria-hidden="true"
                         />
                         <span>Meshd</span>
                     </span>
                     <div class="card-header-actions">
-                        <div id="menuShell" class="menu-shell">
-                            <button
-                                type="button"
-                                id="menuButton"
-                                class="menu-button"
-                                aria-label="Recent jobs"
-                                title="Recent jobs"
-                                aria-haspopup="menu"
-                                aria-expanded="false"
-                                aria-controls="menuDropdown"
-                            >
-                                <i data-lucide="rotate-ccw"></i>
-                            </button>
-                            <div id="menuDropdown" class="menu-dropdown hidden" role="menu">
-                                <div class="menu-section-title">Recent Jobs</div>
-                                <div id="recentJobs" class="recent-jobs-scroll">
-                                    {% if recent_jobs %}
-                                    <ul class="recent-job-list">
-                                        {% for job in recent_jobs %}
-                                        <li class="recent-job-row">
-                                            <div class="recent-job-meta">
-                                                <div class="recent-job-title">{{ job.name }}</div>
-                                                {% if job.status in ['queued', 'running'] and job.stage_label %}
-                                                <div class="recent-job-stage">{{ job.stage_label }}{% if job.stage_progress is not none %} ({{ job.stage_progress }}%){% endif %}</div>
-                                                {% endif %}
-                                            </div>
-                                            {% if job.status in ['done', 'error'] %}
-                                            <div class="recent-job-actions">
-                                                {% if job.preview_url %}
-                                                <a
-                                                    class="recent-job-pill"
-                                                    href="{{ job.preview_url }}"
-                                                    data-preview-inline="1"
-                                                    data-preview-url="{{ job.preview_url }}"
-                                                    data-form-defaults="{{ job.form_defaults | tojson | forceescape }}"
-                                                >Preview</a>
-                                                {% endif %}
-                                                {% if job.download_all_url %}
-                                                <a class="recent-job-pill" href="{{ job.download_all_url }}" aria-label="Download job files" title="Download job files"><i data-lucide="download"></i></a>
-                                                {% endif %}
-                                                {% if job.delete_url %}
-                                                <button
-                                                    type="button"
-                                                    class="recent-job-pill recent-job-pill-delete"
-                                                    data-job-delete-url="{{ job.delete_url }}"
-                                                    data-job-id="{{ job.job_id }}"
-                                                    aria-label="Delete job"
-                                                    title="Delete job"
-                                                ><i data-lucide="trash-2"></i></button>
-                                                {% endif %}
-                                                {% if job.rename_url %}
-                                                <button
-                                                    type="button"
-                                                    class="recent-job-pill recent-job-pill-edit"
-                                                    data-job-rename-url="{{ job.rename_url }}"
-                                                    data-job-id="{{ job.job_id }}"
-                                                    data-job-name="{{ job.name }}"
-                                                    aria-label="Edit job name"
-                                                    title="Edit job name"
-                                                ><i data-lucide="pencil"></i></button>
-                                                {% endif %}
-                                            </div>
-                                            {% endif %}
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% else %}
-                                    <p class="footer">No jobs yet.</p>
-                                    {% endif %}
-                                </div>
-                                {% if auth_enabled and current_user %}
-                                <div class="menu-divider"></div>
-                                {% if current_user.is_admin %}
-                                <a class="menu-link" href="{{ url_for('bp.admin_users') }}">Admin</a>
-                                {% endif %}
-                                {% endif %}
-                            </div>
-                        </div>
+                        <button
+                            type="button"
+                            id="menuButton"
+                            class="menu-button"
+                            aria-label="Recent jobs"
+                            title="Recent jobs"
+                            aria-expanded="false"
+                            aria-controls="recentJobsPanel"
+                        >
+                            <i data-lucide="pyramid"></i>
+                        </button>
                     </div>
                 </div>
                 <div class="card-header-divider"></div>
@@ -273,20 +214,18 @@
                             <button type="button" class="output-toggle-btn {% if defaults.output_naip %}active{% endif %}" data-input="output_naip" title="terrain.png">Satellite Image</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_terrain %}active{% endif %}" data-input="output_terrain" title="terrain.obj">Mesh</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_buildings %}active{% endif %}" data-input="output_buildings" title="buildings.obj">Buildings</button>
+                            <button type="button" class="output-toggle-btn output-toggle-btn-placeholder" disabled aria-hidden="true" tabindex="-1"></button>
                         </div>
                         <input type="checkbox" id="output_contours" name="output_contours" class="visually-hidden" {% if defaults.output_contours %}checked{% endif %} />
                         <input type="checkbox" id="output_xyz" name="output_xyz" class="visually-hidden" {% if defaults.output_xyz %}checked{% endif %} />
                         <input type="checkbox" id="output_naip" name="output_naip" class="visually-hidden" {% if defaults.output_naip %}checked{% endif %} />
                         <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" {% if defaults.output_terrain %}checked{% endif %} />
                         <input type="checkbox" id="output_buildings" name="output_buildings" class="visually-hidden" {% if defaults.output_buildings %}checked{% endif %} />
-                        <p class="inline-note">
-                            Buildings are off by default. Enabling buildings increases build time, and inferred building heights can be inaccurate in some areas.
-                        </p>
                     </div>
 
                     <div id="advancedControls" class="advanced-controls">
                         <div id="meshResolutionSection">
-                            <label title="Controls terrain mesh detail in preview/export. Higher values preserve more detail but increase build time and output file size.">Output Resolution</label>
+                            <label title="Higher values keep more terrain detail; lower values build faster and export smaller files.">Output Resolution</label>
                             <div class="slider-row">
                                 <input
                                     type="range"
@@ -305,7 +244,6 @@
                                     {{ defaults.terrain_complexity }}
                                 </div>
                             </div>
-                            <p class="inline-note">Higher values keep more terrain detail; lower values build faster and export smaller files.</p>
                         </div>
 
                         <div id="rotationSection">
@@ -323,7 +261,7 @@
                         </div>
 
                         <div id="contourSmoothingSection">
-                            <label title="Smooths contour polylines after extraction by resampling line vertices. Higher values produce cleaner curves but can remove sharp local detail.">Contour Smoothing</label>
+                            <label title="Lower values preserve sharper contour detail. Higher values produce cleaner, simpler lines.">Contour Smoothing</label>
                             <div class="slider-row">
                                 <input
                                     type="range"
@@ -343,7 +281,6 @@
                                     {{ defaults.dxf_contour_spacing }}
                                 </div>
                             </div>
-                            <p class="inline-note">Lower values preserve sharper contour detail. Higher values produce cleaner, simpler lines.</p>
                         </div>
 
                         <div class="grid two-col">
@@ -470,13 +407,90 @@
                     <div id="parcelAlert" class="status hidden"></div>
                     <div class="footer-divider"></div>
                     <button class="btn btn-full" id="runBtn" type="submit">
-                        Save
+                        Build
                     </button>
                     <div class="form-byline">
                         &copy; 2026 Meshd &nbsp;&middot;&nbsp; <a class="byline-source-link" href="{{ url_for('bp.data_sources') }}">Data Sources</a>
                     </div>
                 </div>
             </form>
+            <aside class="recent-jobs-card hidden" id="recentJobsPanel" aria-label="Recent jobs">
+                <div class="recent-jobs-card-header">
+                    <div class="menu-section-title">recent-jobs.log</div>
+                </div>
+                <div id="recentJobs" class="recent-jobs-scroll">
+                    {% if recent_jobs %}
+                    <ul class="recent-job-list">
+                        {% for job in recent_jobs %}
+                        <li class="recent-job-row">
+                            <div class="recent-job-meta">
+                                {% if job.preview_url %}
+                                <a
+                                    class="recent-job-title recent-job-title-link"
+                                    href="{{ job.preview_url }}"
+                                    data-preview-inline="1"
+                                    data-preview-url="{{ job.preview_url }}"
+                                    data-form-defaults="{{ job.form_defaults | tojson | forceescape }}"
+                                >{{ job.display_name or job.name }}</a>
+                                {% else %}
+                                <div class="recent-job-title">{{ job.display_name or job.name }}</div>
+                                {% endif %}
+                                {% if job.status in ['done', 'error', 'canceled'] and (job.download_all_url or job.delete_url or job.rename_url) %}
+                                <div class="recent-job-actions">
+                                    {% if job.download_all_url %}
+                                    <a class="recent-job-pill recent-job-pill-download" href="{{ job.download_all_url }}" aria-label="Download job files" title="Download job files"><i data-lucide="download"></i></a>
+                                    {% endif %}
+                                    {% if job.delete_url %}
+                                    <button
+                                        type="button"
+                                        class="recent-job-pill recent-job-pill-delete"
+                                        data-job-delete-url="{{ job.delete_url }}"
+                                        data-job-id="{{ job.job_id }}"
+                                        aria-label="Delete job"
+                                        title="Delete job"
+                                    ><i data-lucide="x"></i></button>
+                                    {% endif %}
+                                    {% if job.rename_url %}
+                                    <button
+                                        type="button"
+                                        class="recent-job-pill recent-job-pill-edit"
+                                        data-job-rename-url="{{ job.rename_url }}"
+                                        data-job-id="{{ job.job_id }}"
+                                        data-job-name="{{ job.name }}"
+                                        aria-label="Edit job name"
+                                        title="Edit job name"
+                                    ><i data-lucide="pencil"></i></button>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% if job.status in ['queued', 'running'] and job.stage_label %}
+                                <div class="recent-job-stage-wrap">
+                                    <div class="recent-job-stage">{{ job.stage_label }}{% if job.stage_progress is not none %} ({{ job.stage_progress }}%){% endif %}</div>
+                                    {% if job.cancel_url %}
+                                    <button
+                                        type="button"
+                                        class="recent-job-cancel-btn"
+                                        data-job-cancel-url="{{ job.cancel_url }}"
+                                        data-job-id="{{ job.job_id }}"
+                                    >cancel --force</button>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="footer">no jobs yet.</p>
+                    {% endif %}
+                </div>
+                {% if auth_enabled and current_user and current_user.is_admin %}
+                <div class="recent-jobs-card-footer">
+                    <a class="menu-link" href="{{ url_for('bp.admin_users') }}">Admin</a>
+                </div>
+                {% endif %}
+            </aside>
+            </div>
             {% if auth_enabled and current_user %}
             <form
                 id="logoutForm"
@@ -494,6 +508,26 @@
             <div class="preview-modal-backdrop" data-preview-close="1"></div>
             <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Job Preview">
                 <iframe id="previewModalFrame" class="preview-modal-frame" title="Job Preview"></iframe>
+            </div>
+        </div>
+        <div id="projectNameModal" class="preview-modal hidden" aria-hidden="true">
+            <div class="preview-modal-backdrop" data-project-name-close="1"></div>
+            <div class="preview-modal-dialog project-name-modal-dialog" role="dialog" aria-modal="true" aria-label="Project name">
+                <form id="projectNameForm" class="project-name-modal-form">
+                    <h3 class="project-name-modal-title">Give this project a name</h3>
+                    <input
+                        id="projectNameInput"
+                        class="project-name-modal-input"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Project name"
+                        autocomplete="off"
+                    />
+                    <div class="project-name-modal-actions">
+                        <button type="button" class="btn secondary" id="projectNameCancel">Cancel</button>
+                        <button type="submit" class="btn" id="projectNameSave">Save</button>
+                    </div>
+                </form>
             </div>
         </div>
         <i

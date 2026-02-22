@@ -38,6 +38,8 @@ va_lidar_context = [
   "templates/*.html",
   "static/*.css",
   "static/*.js",
+  "static/*.png",
+  "static/*.svg",
   "parcels/sources.json",
   "py.typed",
 ]

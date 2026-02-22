@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import threading
 import time
 import zipfile
@@ -244,6 +245,27 @@ def test_recent_jobs_use_user_sequence_labels(auth_webapp_env):
     assert by_job_id["job-6"]["name"] == "Job 6"
 
 
+def test_recent_jobs_include_auto_delete_eta_in_display_name(auth_webapp_env, monkeypatch):
+    monkeypatch.setattr(_webapp_settings._config, "retention_days", 1)
+    _create_job(
+        job_id="job-retention",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+        custom_name="Main House",
+    )
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/recent-jobs")
+    assert resp.status_code == 200
+    jobs = resp.get_json()["jobs"]
+    item = next(j for j in jobs if j["job_id"] == "job-retention")
+    assert item["name"] == "Main House"
+    assert item["display_name"].startswith("Main House (")
+    assert re.search(r"\(\d+ hrs left\)$", item["display_name"])
+
+
 def test_non_owner_cannot_access_job_routes(auth_webapp_env):
     _create_job(
         job_id="job-owned",
@@ -276,6 +298,12 @@ def test_non_owner_cannot_access_job_routes(auth_webapp_env):
         headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
     )
     assert rename_resp.status_code == 403
+
+    cancel_resp = client2.post(
+        "/jobs/job-owned/cancel",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert cancel_resp.status_code == 403
 
 
 def test_download_all_and_inline_download(auth_webapp_env):
@@ -366,6 +394,55 @@ def test_delete_active_job_is_rejected(auth_webapp_env):
     assert delete_resp.status_code == 409
     payload = delete_resp.get_json()
     assert "active job" in payload["error"].lower()
+
+
+def test_cancel_active_job_marks_cancel_requested(auth_webapp_env):
+    _create_job(
+        job_id="job-running-cancel",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=[],
+        status="running",
+        stage_label="generate rasters",
+        stage_index=2,
+        stage_total=6,
+        stage_progress=33,
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.post(
+        "/jobs/job-running-cancel/cancel",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["ok"] is True
+    assert payload["status"] == "canceling"
+
+    with webapp.JOBS_LOCK:
+        job = webapp.JOBS.get("job-running-cancel")
+        assert job is not None
+        assert job.cancel_requested is True
+        assert job.stage_label == "Canceling..."
+
+
+def test_cancel_finished_job_is_rejected(auth_webapp_env):
+    _create_job(
+        job_id="job-done-cancel",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+        status="done",
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.post(
+        "/jobs/job-done-cancel/cancel",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert resp.status_code == 409
+    payload = resp.get_json()
+    assert "not running" in payload["error"].lower()
 
 
 def test_recent_jobs_rehydrate_from_db(auth_webapp_env, monkeypatch):
@@ -632,6 +709,7 @@ def test_recent_jobs_payload_includes_stage_fields(auth_webapp_env):
     assert jobs[0]["stage_index"] == 5
     assert jobs[0]["stage_total"] == 6
     assert jobs[0]["stage_progress"] == 83
+    assert jobs[0]["cancel_url"].endswith("/jobs/job-with-stage/cancel")
 
 
 def test_job_logs_payload_includes_stage_fields(auth_webapp_env):

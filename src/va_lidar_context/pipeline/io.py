@@ -14,6 +14,8 @@ def allocate_output_dir(
 ) -> tuple[Path, str]:
     """Create a unique output directory for a job and return its path + id."""
 
+    reusable_fixed_files = {"build.log", "error.log"}
+
     suffix = 0
     while True:
         effective_id = job_id if suffix == 0 else f"{job_id}-{suffix:02d}"
@@ -23,9 +25,14 @@ def allocate_output_dir(
             return candidate, effective_id
         except FileExistsError:
             if fixed_job_id:
-                raise ValueError(
-                    f"Output folder already exists for job_id={job_id}: {candidate}"
-                )
+                # Web jobs pre-create <out>/<job_id>/ to capture logs before the
+                # pipeline allocates the final output dir. Reuse that directory if
+                # it has no build outputs yet.
+                if candidate.is_dir():
+                    names = {entry.name for entry in candidate.iterdir()}
+                    if names.issubset(reusable_fixed_files):
+                        return candidate, effective_id
+                raise ValueError(f"Output folder already exists for job_id={job_id}: {candidate}")
             suffix += 1
 
 

@@ -10,6 +10,8 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from ..util import run_subprocess
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover
@@ -59,7 +61,7 @@ class FootprintHeight:
 
 def get_laz_crs_wkt(laz_path: str) -> str:
     """Read LAZ CRS WKT from PDAL metadata."""
-    proc = subprocess.run(
+    proc = run_subprocess(
         ["pdal", "info", "--metadata", laz_path],
         check=True,
         capture_output=True,
@@ -322,7 +324,7 @@ def _extract_laz_points(
                 "order": order,
             }
         )
-        subprocess.run(
+        run_subprocess(
             ["pdal", "pipeline", "--stdin"],
             input=json.dumps(pipeline).encode("utf-8"),
             check=True,
