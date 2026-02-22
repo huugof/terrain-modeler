@@ -485,6 +485,7 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
         "stage_index": job.stage_index,
         "stage_total": job.stage_total,
         "stage_progress": job.stage_progress,
+        "rename_url": url_for("bp.job_rename", job_id=job.job_id),
     }
     if job.status not in ("queued", "running"):
         payload["delete_url"] = url_for("bp.job_delete", job_id=job.job_id)

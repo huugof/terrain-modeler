@@ -14,6 +14,28 @@
         <div id="topBar" class="top-bar">
             <button
                 type="button"
+                id="previewPrevButton"
+                class="theme-toggle preview-nav-toggle"
+                aria-label="Previous recent preview"
+                title="Previous recent preview"
+                aria-pressed="false"
+                disabled
+            >
+                <i data-lucide="chevron-left"></i>
+            </button>
+            <button
+                type="button"
+                id="previewNextButton"
+                class="theme-toggle preview-nav-toggle"
+                aria-label="Next recent preview"
+                title="Next recent preview"
+                aria-pressed="false"
+                disabled
+            >
+                <i data-lucide="chevron-right"></i>
+            </button>
+            <button
+                type="button"
                 id="wireframeToggle"
                 class="theme-toggle wireframe-toggle"
                 aria-label="Toggle wireframe preview"
@@ -95,7 +117,7 @@
                             <polyline points="80,148 120,120 160,92 200,72 240,78 275,96 308,78 340,62 372,76 395,92" fill="none" stroke="currentColor" stroke-opacity="0.34" stroke-width="1.5"/>
                             <polyline points="120,138 158,106 196,76 230,55 265,62 295,80 325,62 355,46 382,60" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
                         </svg>
-                        <p class="inline-preview-demo-label">Build to preview terrain</p>
+                        <p class="inline-preview-demo-label">Save to preview terrain</p>
                     </div>
                     <iframe
                         id="inlinePreviewFrame"
@@ -180,6 +202,17 @@
                                                     aria-label="Delete job"
                                                     title="Delete job"
                                                 ><i data-lucide="trash-2"></i></button>
+                                                {% endif %}
+                                                {% if job.rename_url %}
+                                                <button
+                                                    type="button"
+                                                    class="recent-job-pill recent-job-pill-edit"
+                                                    data-job-rename-url="{{ job.rename_url }}"
+                                                    data-job-id="{{ job.job_id }}"
+                                                    data-job-name="{{ job.name }}"
+                                                    aria-label="Edit job name"
+                                                    title="Edit job name"
+                                                ><i data-lucide="pencil"></i></button>
                                                 {% endif %}
                                             </div>
                                             {% endif %}
@@ -437,7 +470,7 @@
                     <div id="parcelAlert" class="status hidden"></div>
                     <div class="footer-divider"></div>
                     <button class="btn btn-full" id="runBtn" type="submit">
-                        Build
+                        Save
                     </button>
                     <div class="form-byline">
                         &copy; 2026 Meshd &nbsp;&middot;&nbsp; <a class="byline-source-link" href="{{ url_for('bp.data_sources') }}">Data Sources</a>

@@ -377,6 +377,10 @@ body {
     opacity: 0.55;
     cursor: default;
 }
+.preview-nav-toggle:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
 .wireframe-toggle.is-active {
     border-color: var(--accent-strong);
     background: var(--accent-strong);
@@ -1014,6 +1018,16 @@ main {
     border-color: rgba(216, 93, 93, 0.75);
     background: rgba(216, 93, 93, 0.18);
     color: #ffb3b3;
+}
+.recent-job-pill-edit {
+    border-color: rgba(134, 177, 225, 0.75);
+    background: rgba(134, 177, 225, 0.18);
+    color: #d7ebff;
+}
+.recent-job-pill-edit:hover {
+    background: rgba(134, 177, 225, 0.28);
+    border-color: rgba(134, 177, 225, 0.95);
+    color: #eef7ff;
 }
 .recent-job-pill-delete:hover {
     background: rgba(216, 93, 93, 0.3);

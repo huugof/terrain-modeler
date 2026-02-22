@@ -13,9 +13,9 @@
 - [x] what exactly does contour smoothing do
 - [x] what exactly does output resolution do?
 - [ ] do logo
-- [ ] Scroll through recent jobs with arrows on the preview
-- [ ] Edit name of recent job
-- [ ] Save instead of build. Prompt for project name 
+- [x] Scroll through recent jobs with arrows on the preview
+- [x] Edit name of recent job
+- [x] Save instead of build. Prompt for project name 
 - [ ] Can we stream the data for preview instead of processing it?
 - [x] Add error logging
 - [x] Add status messages during build

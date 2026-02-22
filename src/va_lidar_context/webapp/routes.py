@@ -1017,6 +1017,44 @@ def job_delete(job_id: str):
     return jsonify({"ok": True, "job_id": job_id})
 
 
+@bp.route("/jobs/<job_id>/rename", methods=["POST"])
+def job_rename(job_id: str):
+    denied = _enforce_job_access(job_id, "Not allowed to rename this job.")
+    if denied is not None:
+        return denied
+    if not validate_csrf():
+        return jsonify({"error": "Invalid CSRF token."}), 400
+
+    payload = request.get_json(silent=True) if request.is_json else None
+    if isinstance(payload, dict):
+        raw_name = payload.get("name")
+    else:
+        raw_name = request.form.get("name")
+    name = str(raw_name or "").strip()
+    if not name:
+        return jsonify({"error": "Name is required."}), 400
+    if len(name) > 120:
+        return jsonify({"error": "Name must be 120 characters or fewer."}), 400
+
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    with job.change_cond:
+        summary = job.summary if isinstance(job.summary, dict) else {}
+        job.summary = summary
+        summary["custom_name"] = name
+        summary["name"] = name
+        defaults = summary.get("form_defaults")
+        if isinstance(defaults, dict):
+            defaults["job_name"] = name
+        _jobs_module._notify_job_change_locked(job)
+    _notify_recent_jobs_change()
+    _persist_job_snapshot(job)
+    return jsonify({"ok": True, "job_id": job_id, "name": name})
+
+
 @bp.route("/internal/worker/jobs/<job_id>/complete", methods=["POST"])
 def worker_job_complete(job_id: str):
     if not verify_hmac_request():

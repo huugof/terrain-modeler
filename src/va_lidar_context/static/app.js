@@ -30,6 +30,8 @@ let clerkReadyPromise = null;
 let clerkListenerAttached = false;
 let authExchangeInFlight = false;
 let clerkDarkThemePromise = null;
+let recentJobsData = [];
+let currentPreviewPath = "";
 
 function setFaviconFromLucide() {
   const icon = document.getElementById("faviconSource");
@@ -46,6 +48,71 @@ function setFaviconFromLucide() {
   if (link) {
     link.href = `data:image/svg+xml,${encoded}`;
   }
+}
+
+function normalizePreviewPath(value) {
+  if (!value) return "";
+  try {
+    const parsed = new URL(String(value), window.location.origin);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch (err) {
+    return String(value || "").trim();
+  }
+}
+
+function getPreviewJobs() {
+  if (!Array.isArray(recentJobsData)) return [];
+  return recentJobsData.filter((job) => {
+    return Boolean(
+      job && typeof job.preview_url === "string" && job.preview_url,
+    );
+  });
+}
+
+function updatePreviewNavButtons() {
+  const prevBtn = document.getElementById("previewPrevButton");
+  const nextBtn = document.getElementById("previewNextButton");
+  if (!prevBtn || !nextBtn) return;
+  const previewJobs = getPreviewJobs();
+  if (previewJobs.length < 2) {
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+  const normalizedPaths = previewJobs.map((job) =>
+    normalizePreviewPath(job.preview_url),
+  );
+  const current = normalizePreviewPath(currentPreviewPath);
+  const currentIndex = normalizedPaths.indexOf(current);
+  if (currentIndex < 0) {
+    prevBtn.disabled = false;
+    nextBtn.disabled = false;
+    return;
+  }
+  prevBtn.disabled = currentIndex <= 0;
+  nextBtn.disabled = currentIndex >= normalizedPaths.length - 1;
+}
+
+function navigatePreview(direction) {
+  const previewJobs = getPreviewJobs();
+  if (previewJobs.length < 2) return;
+  const normalizedPaths = previewJobs.map((job) =>
+    normalizePreviewPath(job.preview_url),
+  );
+  const current = normalizePreviewPath(currentPreviewPath);
+  const currentIndex = normalizedPaths.indexOf(current);
+  let targetIndex = 0;
+  if (currentIndex >= 0) {
+    targetIndex = currentIndex + direction;
+  } else {
+    targetIndex = direction > 0 ? 0 : previewJobs.length - 1;
+  }
+  if (targetIndex < 0 || targetIndex >= previewJobs.length) {
+    return;
+  }
+  const targetJob = previewJobs[targetIndex];
+  if (!targetJob || !targetJob.preview_url) return;
+  applyRecentJobPreview(targetJob.preview_url, targetJob.form_defaults || {});
 }
 
 function parseCoords(value) {
@@ -274,6 +341,59 @@ async function deleteRecentJob(deleteUrl, jobId) {
   }
 }
 
+async function renameRecentJob(renameUrl, jobId, currentName) {
+  if (!renameUrl) return;
+  const initialName = String(currentName || "").trim();
+  const next = window.prompt("Project name", initialName);
+  if (next === null) return;
+  const name = String(next || "").trim();
+  if (!name) {
+    setAlert("Project name is required.", true);
+    return;
+  }
+  if (name.length > 120) {
+    setAlert("Name must be 120 characters or fewer.", true);
+    return;
+  }
+  const csrfToken = getCsrfToken();
+  const formData = new FormData();
+  formData.set("name", name);
+  try {
+    const resp = await fetch(renameUrl, {
+      method: "POST",
+      headers: {
+        "X-Requested-With": "fetch",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: formData,
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const message =
+        (payload && payload.error) || `Failed to rename job ${jobId || ""}.`;
+      setAlert(message, true);
+      return;
+    }
+    if (buildErrorMessage) {
+      buildErrorMessage = "";
+      updateAlerts();
+    }
+    const hiddenName = document.querySelector('input[name="job_name"]');
+    if (
+      hiddenName &&
+      jobId &&
+      normalizePreviewPath(currentPreviewPath).includes(
+        `/jobs/${encodeURIComponent(jobId)}`,
+      )
+    ) {
+      hiddenName.value = name;
+    }
+    await refreshRecentJobs();
+  } catch (err) {
+    setAlert("Failed to rename job.", true);
+  }
+}
+
 function applyJobFormDefaults(formDefaults) {
   if (!formDefaults || typeof formDefaults !== "object") return;
   const setValue = (selector, value) => {
@@ -344,6 +464,18 @@ function applyRecentJobPreview(previewUrl, formDefaults) {
     setInlinePreview(previewUrl);
   }
   applyJobFormDefaults(formDefaults);
+}
+
+function initPreviewNavButtons() {
+  const prevBtn = document.getElementById("previewPrevButton");
+  const nextBtn = document.getElementById("previewNextButton");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => navigatePreview(-1));
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => navigatePreview(1));
+  }
+  updatePreviewNavButtons();
 }
 
 function renderRecentJobs(container, jobs) {
@@ -419,6 +551,20 @@ function renderRecentJobs(container, jobs) {
         deleteBtn.setAttribute("title", "Delete job");
         actions.appendChild(deleteBtn);
       }
+      if (job.rename_url) {
+        const renameBtn = document.createElement("button");
+        renameBtn.type = "button";
+        renameBtn.className = "recent-job-pill recent-job-pill-edit";
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", "pencil");
+        renameBtn.appendChild(icon);
+        renameBtn.dataset.jobRenameUrl = job.rename_url;
+        renameBtn.dataset.jobId = job.job_id;
+        renameBtn.dataset.jobName = job.name || job.job_id;
+        renameBtn.setAttribute("aria-label", "Edit job name");
+        renameBtn.setAttribute("title", "Edit job name");
+        actions.appendChild(renameBtn);
+      }
       item.appendChild(actions);
     }
 
@@ -428,6 +574,8 @@ function renderRecentJobs(container, jobs) {
   if (window.lucide) {
     window.lucide.createIcons();
   }
+  recentJobsData = jobs || [];
+  updatePreviewNavButtons();
 }
 
 function openPreviewModal(url) {
@@ -467,6 +615,16 @@ function initPreviewModal() {
       deleteRecentJob(
         deleteButton.dataset.jobDeleteUrl,
         deleteButton.dataset.jobId,
+      );
+      return;
+    }
+    const renameButton = event.target.closest("button[data-job-rename-url]");
+    if (renameButton) {
+      event.preventDefault();
+      renameRecentJob(
+        renameButton.dataset.jobRenameUrl,
+        renameButton.dataset.jobId,
+        renameButton.dataset.jobName,
       );
       return;
     }
@@ -775,6 +933,8 @@ async function refreshRecentJobs(options = {}) {
     }
     const data = await resp.json();
     renderRecentJobs(container, data.jobs || []);
+    recentJobsData = data.jobs || [];
+    updatePreviewNavButtons();
     if (typeof data.version === "number") {
       recentJobsVersion = data.version;
     }
@@ -960,12 +1120,32 @@ async function runBuild(event) {
     return;
   }
 
+  const jobNameInput = form.querySelector('input[name="job_name"]');
+  if (jobNameInput) {
+    const current = String(jobNameInput.value || "").trim();
+    let nextName = current;
+    if (!nextName) {
+      const prompted = window.prompt("Project name");
+      if (prompted === null) return;
+      nextName = String(prompted || "").trim();
+    }
+    if (!nextName) {
+      setAlert("Project name is required.", true);
+      return;
+    }
+    if (nextName.length > 120) {
+      setAlert("Name must be 120 characters or fewer.", true);
+      return;
+    }
+    jobNameInput.value = nextName;
+  }
+
   buildErrorMessage = "";
   updateAlerts();
   runBtn.disabled = true;
   const originalText = runBtn.textContent;
-  runBtn.textContent = "Running...";
-  setInlineBuildStatus("Queued...");
+  runBtn.textContent = "Saving...";
+  setInlineBuildStatus("Saving...");
   setInlineBuildingOverlay(true);
 
   const formData = new FormData(form);
@@ -1212,6 +1392,7 @@ function setInlinePreview(previewUrl) {
   const demo = document.getElementById("inlinePreviewDemo");
   if (!frame) return;
   const embedUrl = _makeEmbedUrl(previewUrl);
+  currentPreviewPath = normalizePreviewPath(previewUrl);
   let nextHref = embedUrl;
   let currentHref = frame.src || "";
   try {
@@ -1223,6 +1404,7 @@ function setInlinePreview(previewUrl) {
   if (currentHref === nextHref) {
     if (demo) demo.classList.add("hidden");
     syncPreviewToggleButtons();
+    updatePreviewNavButtons();
     return;
   }
   _setWireframeToggleState(false, false);
@@ -1239,6 +1421,7 @@ function setInlinePreview(previewUrl) {
   try {
     localStorage.setItem(LAST_PREVIEW_KEY, previewUrl);
   } catch (e) {}
+  updatePreviewNavButtons();
 }
 
 function setInlineBuildingOverlay(active) {
@@ -1398,6 +1581,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   initWireframeToggle();
   initBuildingsToggle();
+  initPreviewNavButtons();
   initInlinePreview();
   scheduleCoverageCheck();
 });

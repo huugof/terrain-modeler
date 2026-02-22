@@ -270,6 +270,13 @@ def test_non_owner_cannot_access_job_routes(auth_webapp_env):
     )
     assert delete_resp.status_code == 403
 
+    rename_resp = client2.post(
+        "/jobs/job-owned/rename",
+        data={"name": "Not allowed"},
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert rename_resp.status_code == 403
+
 
 def test_download_all_and_inline_download(auth_webapp_env):
     _create_job(
@@ -546,6 +553,58 @@ def test_recent_jobs_long_poll_times_out_without_change(auth_webapp_env):
     payload = resp.get_json()
     assert int(payload["version"]) == since_version
     assert elapsed >= 0.08
+
+
+def test_rename_job_updates_recent_jobs_name(auth_webapp_env):
+    _create_job(
+        job_id="job-rename",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+
+    rename_resp = client.post(
+        "/jobs/job-rename/rename",
+        data={"name": "Main House"},
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert rename_resp.status_code == 200
+    assert rename_resp.get_json()["name"] == "Main House"
+
+    with webapp.JOBS_LOCK:
+        job = webapp.JOBS.get("job-rename")
+        assert job is not None
+        assert job.summary.get("custom_name") == "Main House"
+        assert job.summary.get("name") == "Main House"
+
+    recent_resp = client.get("/recent-jobs")
+    assert recent_resp.status_code == 200
+    jobs = recent_resp.get_json()["jobs"]
+    assert jobs and jobs[0]["job_id"] == "job-rename"
+    assert jobs[0]["name"] == "Main House"
+    assert jobs[0]["rename_url"].endswith("/jobs/job-rename/rename")
+
+
+def test_rename_job_rejects_empty_name(auth_webapp_env):
+    _create_job(
+        job_id="job-rename-empty",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+
+    resp = client.post(
+        "/jobs/job-rename-empty/rename",
+        data={"name": "   "},
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert resp.status_code == 400
+    payload = resp.get_json()
+    assert "required" in payload["error"].lower()
 
 
 def test_recent_jobs_payload_includes_stage_fields(auth_webapp_env):
