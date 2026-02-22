@@ -35,9 +35,7 @@ from .config import (
     DEFAULT_XYZ_MODE,
     BuildConfig,
 )
-from .pipeline.build import build
-
-OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
+from .pipeline.build import OUTPUT_CHOICES, build
 
 
 def parse_outputs(value: str | None) -> tuple[str, ...]:

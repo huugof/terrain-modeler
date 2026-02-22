@@ -64,29 +64,23 @@ def _collect_end_ms(feature: Dict[str, Any]) -> int:
         return 0
 
 
+def _feature_sort_key(f: Dict[str, Any]) -> tuple[int, int]:
+    ql = _ql_rank(f.get("attributes", {}).get("ql"))
+    end_ms = _collect_end_ms(f)
+    return (ql, -end_ms)
+
+
 def select_best_feature(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Pick the highest-quality, most recent feature from the index list."""
     if not features:
         raise ValueError("No LiDAR features returned")
-
-    def sort_key(f: Dict[str, Any]) -> tuple[int, int]:
-        ql = _ql_rank(f.get("attributes", {}).get("ql"))
-        end_ms = _collect_end_ms(f)
-        return (ql, -end_ms)
-
-    return sorted(features, key=sort_key)[0]
+    return sorted(features, key=_feature_sort_key)[0]
 
 
 def sort_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Sort index features by quality level and collection end date."""
     if not features:
         return []
-
-    def sort_key(f: Dict[str, Any]) -> tuple[int, int]:
-        ql = _ql_rank(f.get("attributes", {}).get("ql"))
-        end_ms = _collect_end_ms(f)
-        return (ql, -end_ms)
-
-    return sorted(features, key=sort_key)
+    return sorted(features, key=_feature_sort_key)
 
 

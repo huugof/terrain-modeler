@@ -13,6 +13,7 @@ import requests
 from flask import g, jsonify, redirect, request, session, url_for
 
 from .. import auth_store
+from ..constants import DEFAULT_PREVIEW_JOB_ID
 from ..hmac_auth import (
     canonical_payload,
     choose_secret,
@@ -23,7 +24,6 @@ from . import settings as _settings
 
 _auth_started: bool = False
 _auth_lock = threading.Lock()
-_PUBLIC_PREVIEW_JOB_ID = "grand-canyon-default"
 
 
 def ensure_auth_store() -> None:
@@ -152,7 +152,7 @@ def user_can_access_job(job_id: str) -> bool:
     user = current_user()
     owner_id = auth_store.get_job_owner_id(_settings.DB_PATH, job_id)
     if user is None:
-        if job_id != _PUBLIC_PREVIEW_JOB_ID or owner_id is not None:
+        if job_id != DEFAULT_PREVIEW_JOB_ID or owner_id is not None:
             return False
         from .jobs import JOBS, JOBS_LOCK  # avoid circular at module level
 

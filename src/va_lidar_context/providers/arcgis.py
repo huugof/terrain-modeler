@@ -17,14 +17,25 @@ def paged_query_geojson(
     max_record_count: int = MAX_RECORD_COUNT,
     where: str = "1=1",
     timeout: int = 60,
+    max_pages: int = 500,
 ) -> Dict[str, Any]:
-    """Fetch an ArcGIS FeatureServer layer with paging and return GeoJSON."""
+    """Fetch an ArcGIS FeatureServer layer with paging and return GeoJSON.
+
+    Raises RuntimeError if the server returns more than *max_pages* pages,
+    which prevents an infinite loop against a misbehaving endpoint.
+    """
 
     xmin, ymin, xmax, ymax = bbox
     all_features: List[Dict[str, Any]] = []
     offset = 0
+    pages_fetched = 0
 
     while True:
+        if pages_fetched >= max_pages:
+            raise RuntimeError(
+                f"ArcGIS paged query exceeded {max_pages} pages at {query_url!r}; "
+                "the server may not be honoring resultOffset pagination correctly."
+            )
         params = {
             "where": where,
             "geometry": f"{xmin},{ymin},{xmax},{ymax}",
@@ -47,5 +58,6 @@ def paged_query_geojson(
             break
         all_features.extend(features)
         offset += max_record_count
+        pages_fetched += 1
 
     return {"type": "FeatureCollection", "features": all_features}

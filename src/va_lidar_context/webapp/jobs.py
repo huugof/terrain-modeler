@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from .. import auth_store
 from ..config import BuildConfig
 from ..pipeline.build import build as build_pipeline
+from ..util import is_path_within
 from . import settings as _settings
 from .forms import merge_prefill_defaults
 
@@ -86,14 +87,6 @@ OUTPUT_ARTIFACT_CANDIDATES = (
 PREVIEW_ARTIFACT_CANDIDATES = ("terrain.obj", "buildings.obj", "combined.obj")
 
 
-def _is_path_within(base_dir: Path, candidate: Path) -> bool:
-    try:
-        candidate.resolve().relative_to(base_dir.resolve())
-        return True
-    except Exception:
-        return False
-
-
 def _dir_has_known_outputs(path: Path) -> bool:
     return any((path / name).is_file() for name in OUTPUT_ARTIFACT_CANDIDATES)
 
@@ -111,7 +104,7 @@ def _discover_output_dir_for_job(job_id: str) -> Optional[Path]:
     job_root = _settings.OUT_DIR / job_id
     if not (job_root.exists() and job_root.is_dir()):
         return None
-    if not _is_path_within(_settings.OUT_DIR, job_root):
+    if not is_path_within(_settings.OUT_DIR, job_root):
         return None
     if _dir_has_known_outputs(job_root):
         return job_root
@@ -136,7 +129,7 @@ def _discover_output_dir_for_job(job_id: str) -> Optional[Path]:
                 if (
                     candidate.exists()
                     and candidate.is_dir()
-                    and _is_path_within(_settings.OUT_DIR, candidate)
+                    and is_path_within(_settings.OUT_DIR, candidate)
                 ):
                     return candidate
         parent_dir = report_path.parent
@@ -166,7 +159,7 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
             if (
                 candidate.exists()
                 and candidate.is_dir()
-                and _is_path_within(_settings.OUT_DIR, candidate)
+                and is_path_within(_settings.OUT_DIR, candidate)
             ):
                 return candidate
 
@@ -175,7 +168,7 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
         report_file = Path(report_path).expanduser()
         if report_file.exists() and report_file.is_file():
             candidate = report_file.parent
-            if _is_path_within(_settings.OUT_DIR, candidate):
+            if is_path_within(_settings.OUT_DIR, candidate):
                 return candidate
 
     discovered = _discover_output_dir_for_job(job.job_id)
@@ -185,7 +178,7 @@ def _resolve_job_output_dir(job: Job) -> Optional[Path]:
     if (
         default_dir.exists()
         and default_dir.is_dir()
-        and _is_path_within(_settings.OUT_DIR, default_dir)
+        and is_path_within(_settings.OUT_DIR, default_dir)
     ):
         return default_dir
     return None
@@ -485,6 +478,7 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                 job.status = "done"
             else:
                 job.status = "error"
+                job.error = job.error or _GENERIC_BUILD_ERROR
     except Exception as exc:  # pragma: no cover - surface to UI
         with job.change_cond:
             job.status = "error"

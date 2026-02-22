@@ -16,6 +16,13 @@ from ..config import (
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
 )
+from ..constants import (
+    DEFAULT_PREVIEW_CENTER,
+    MSBFP2_LAYER,
+    USGS_LIDAR_INDEX_LAYER,
+    VGIN_FOOTPRINTS_LAYER,
+    VGIN_LIDAR_LAYER,
+)
 from ..parcels.registry import load_sources
 from . import settings as _settings
 
@@ -140,8 +147,8 @@ def snapshot_defaults() -> Dict[str, Any]:
         "units": "feet",
         "provider": "national",
         "provider_label": "USGS 3DEP (National)",
-        "center1": 36.09841234052352,
-        "center2": -112.0952885242688,
+        "center1": DEFAULT_PREVIEW_CENTER[0],
+        "center2": DEFAULT_PREVIEW_CENTER[1],
         "job_name": "",
         "clip_size": 3000.0,
         "resolution": DEFAULT_RESOLUTION,
@@ -291,22 +298,10 @@ def _base_service_url(url: str) -> str:
 
 def data_sources_payload(parcel_sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     static_sources = [
-        {
-            "name": "VGIN LiDAR",
-            "url": "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Download/Virginia_LiDAR_Downloads/MapServer/1",
-        },
-        {
-            "name": "VGIN Footprints",
-            "url": "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Building_Footprints/FeatureServer/0",
-        },
-        {
-            "name": "USGS 3DEP LiDAR",
-            "url": "https://index.nationalmap.gov/arcgis/rest/services/3DEPElevationIndex/MapServer/8",
-        },
-        {
-            "name": "Microsoft Footprints",
-            "url": "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0",
-        },
+        {"name": "VGIN LiDAR", "url": VGIN_LIDAR_LAYER},
+        {"name": "VGIN Footprints", "url": VGIN_FOOTPRINTS_LAYER},
+        {"name": "USGS 3DEP LiDAR", "url": USGS_LIDAR_INDEX_LAYER},
+        {"name": "Microsoft Footprints", "url": MSBFP2_LAYER},
         {
             "name": "NAIP Imagery",
             "url": "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer",

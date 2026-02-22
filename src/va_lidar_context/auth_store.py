@@ -168,6 +168,15 @@ def upsert_user(db_path: Path, email: str, is_admin: bool = False, is_active: bo
         conn.commit()
 
 
+def _row_to_user(row) -> Dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "email": str(row["email"]),
+        "is_admin": bool(row["is_admin"]),
+        "is_active": bool(row["is_active"]),
+    }
+
+
 def find_user_by_email(db_path: Path, email: str) -> Optional[Dict[str, Any]]:
     with _connect(db_path) as conn:
         row = conn.execute(
@@ -176,12 +185,7 @@ def find_user_by_email(db_path: Path, email: str) -> Optional[Dict[str, Any]]:
         ).fetchone()
     if row is None:
         return None
-    return {
-        "id": int(row["id"]),
-        "email": str(row["email"]),
-        "is_admin": bool(row["is_admin"]),
-        "is_active": bool(row["is_active"]),
-    }
+    return _row_to_user(row)
 
 
 def get_user_by_id(db_path: Path, user_id: int) -> Optional[Dict[str, Any]]:
@@ -192,12 +196,7 @@ def get_user_by_id(db_path: Path, user_id: int) -> Optional[Dict[str, Any]]:
         ).fetchone()
     if row is None:
         return None
-    return {
-        "id": int(row["id"]),
-        "email": str(row["email"]),
-        "is_admin": bool(row["is_admin"]),
-        "is_active": bool(row["is_active"]),
-    }
+    return _row_to_user(row)
 
 
 def list_users(db_path: Path) -> List[Dict[str, Any]]:
@@ -263,12 +262,7 @@ def get_user_by_session(db_path: Path, sid: str) -> Optional[Dict[str, Any]]:
         ).fetchone()
     if row is None:
         return None
-    return {
-        "id": int(row["id"]),
-        "email": str(row["email"]),
-        "is_admin": bool(row["is_admin"]),
-        "is_active": bool(row["is_active"]),
-    }
+    return _row_to_user(row)
 
 
 def record_job_owner(db_path: Path, job_id: str, user_id: int | None) -> None:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
@@ -225,9 +224,3 @@ def __getattr__(name: str) -> object:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# ---------------------------------------------------------------------------
-# Background-thread state (not config values — stay as module globals)
-# ---------------------------------------------------------------------------
-
-_cleanup_started: bool = False
-_cleanup_lock: threading.Lock = threading.Lock()

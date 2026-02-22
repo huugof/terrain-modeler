@@ -638,6 +638,34 @@ def test_auth_store_connect_enables_wal(tmp_path):
     assert str(mode).lower() == "wal"
 
 
+def test_run_build_job_sets_error_on_nonzero_exit_code(monkeypatch):
+    """B3: job.error must be set when build returns exit_code != 0 without raising."""
+    import va_lidar_context.webapp.jobs as jobs_mod
+    from va_lidar_context.pipeline.types import BuildResult
+    from va_lidar_context.webapp.jobs import Job
+
+    cfg = load_config(overrides={"desktop_mode": True, "job_history_enabled": False})
+    monkeypatch.setattr(_webapp_settings, "_config", cfg)
+    monkeypatch.setattr(jobs_mod.auth_store, "set_job_status", lambda *a, **k: None)
+    monkeypatch.setattr(jobs_mod.auth_store, "set_active_job", lambda *a, **k: None)
+    monkeypatch.setattr(jobs_mod.auth_store, "finish_active_job", lambda *a, **k: None)
+    monkeypatch.setattr(jobs_mod, "build_pipeline", lambda cfg: BuildResult(exit_code=1))
+    monkeypatch.setattr(jobs_mod, "_persist_job_snapshot", lambda job: None)
+
+    from va_lidar_context.config import BuildConfig
+
+    job = Job(job_id="job-nonzero-exit", status="queued", created_at=0.0)
+    cfg_build = BuildConfig(
+        center=(36.0, -112.0),
+        size=1000,
+        outputs=("terrain",),
+    )
+    jobs_mod._run_build_job(job, cfg_build)
+
+    assert job.status == "error"
+    assert job.error is not None, "B3: job.error must be set when exit_code != 0"
+
+
 def test_persist_job_snapshot_logs_database_errors(monkeypatch):
     import logging
 

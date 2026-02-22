@@ -4,7 +4,7 @@ import json
 import random
 from pathlib import Path
 from statistics import mean, median
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 from pyproj import CRS, Transformer
 from shapely.geometry import box
@@ -66,6 +66,26 @@ from ..util import download_file, ensure_dir, get_logger, write_json
 OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
 
 
+class _UvContext(NamedTuple):
+    """Projection context for terrain UV computation.
+
+    Note: bbox_3857 uses (xmin, xmax, ymin, ymax) ordering, matching the
+    non-standard order in which the EPSG:3857 bounding box is computed from
+    the LAZ corner points. This is intentional — _compute_terrain_uv expects
+    this ordering in its bbox_3857 parameter.
+    """
+
+    xmin: float
+    xmax: float
+    ymin: float
+    ymax: float
+    to_3857_from_laz: Any
+    transform: Any
+    raster_width: int
+    raster_height: int
+    use_raster_uv: bool
+
+
 def _validate_outputs(outputs: Iterable[str]) -> set[str]:
     cleaned = []
     for value in outputs:
@@ -115,6 +135,23 @@ def _image_job_name(lat: float, lon: float, size: float, units: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _ept_clip_bounds(
+    ept_wkt: str,
+    wgs_bb: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    """Project a WGS-84 bbox into EPT CRS and return (xmin, ymin, xmax, ymax)."""
+    ept_crs = CRS.from_wkt(ept_wkt)
+    to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
+    c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
+    c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
+    return (
+        min(c1[0], c2[0]),
+        min(c1[1], c2[1]),
+        max(c1[0], c2[0]),
+        max(c1[1], c2[1]),
+    )
+
+
 def _stage_image_only(
     cfg: BuildConfig,
     lat: float,
@@ -148,34 +185,7 @@ def _stage_image_only(
     to_merc = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
     cx, cy = to_merc.transform(lon, lat)
     bbox_3857 = (cx - half, cy - half, cx + half, cy + half)
-    try:
-        if cfg.naip_tiled:
-            download_naip_image_tiled(
-                bbox_3857,
-                terrain_tex_path,
-                pixel_size=cfg.naip_pixel_size,
-                tile_max_size=cfg.naip_max_size,
-            )
-        else:
-            download_naip_image(
-                bbox_3857,
-                terrain_tex_path,
-                pixel_size=cfg.naip_pixel_size,
-                max_size=cfg.naip_max_size,
-            )
-    except Exception as exc:
-        if cfg.naip_tiled:
-            raise
-        msg = f"Single NAIP download failed; retrying tiled ({exc})"
-        logger.warning(msg)
-        warnings.append(msg)
-        naip_tiled_used = True
-        download_naip_image_tiled(
-            bbox_3857,
-            terrain_tex_path,
-            pixel_size=cfg.naip_pixel_size,
-            tile_max_size=cfg.naip_max_size,
-        )
+    naip_tiled_used = _stage_download_naip(cfg, bbox_3857, terrain_tex_path, warnings)
 
     report: Dict[str, Any] = {
         "job_id": job_id,
@@ -324,17 +334,8 @@ def _stage_download_laz_va(
                 lon, lat, logger=logger, cache_dir=cache_dir
             )
         if ept_source is not None and ept_source.crs_wkt:
-            ept_crs = CRS.from_wkt(ept_source.crs_wkt)
-            to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
             wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
-            c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
-            c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
-            bounds = (
-                min(c1[0], c2[0]),
-                min(c1[1], c2[1]),
-                max(c1[0], c2[0]),
-                max(c1[1], c2[1]),
-            )
+            bounds = _ept_clip_bounds(ept_source.crs_wkt, wgs_bb)
             try:
                 ept_to_laz(ept_source.uri, laz_path, bounds)
                 source_type_used = "ept"
@@ -392,17 +393,8 @@ def _stage_download_laz_national(
             ept_wkt = ept_source.crs_wkt
             tile_info["crs_wkt"] = ept_wkt
             write_json(tile_json, tile_info)
-        ept_crs = CRS.from_wkt(ept_wkt)
-        to_laz = Transformer.from_crs("EPSG:4326", ept_crs, always_xy=True)
         wgs_bb = clip_bbox_wgs84_hint or bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
-        c1 = to_laz.transform(wgs_bb[0], wgs_bb[1])
-        c2 = to_laz.transform(wgs_bb[2], wgs_bb[3])
-        bounds = (
-            min(c1[0], c2[0]),
-            min(c1[1], c2[1]),
-            max(c1[0], c2[0]),
-            max(c1[1], c2[1]),
-        )
+        bounds = _ept_clip_bounds(ept_wkt, wgs_bb)
         try:
             if cfg.force or not laz_path.exists():
                 ept_to_laz(ept_url, laz_path, bounds)
@@ -1226,16 +1218,16 @@ def build(cfg: BuildConfig) -> BuildResult:
             use_raster_uv = True
         if abs(transform.b) > 1e-9 or abs(transform.d) > 1e-9:
             use_raster_uv = True
-        uv_context = (
-            xmin,
-            xmax,
-            ymin,
-            ymax,
-            to_3857_from_laz,
-            transform,
-            raster_width,
-            raster_height,
-            use_raster_uv,
+        uv_context = _UvContext(
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            to_3857_from_laz=to_3857_from_laz,
+            transform=transform,
+            raster_width=raster_width,
+            raster_height=raster_height,
+            use_raster_uv=use_raster_uv,
         )
 
         naip_tiled_used = _stage_download_naip(
@@ -1246,28 +1238,17 @@ def build(cfg: BuildConfig) -> BuildResult:
         )
 
     if export_naip and export_terrain and terrain_mesh is not None and uv_context is not None:
-        (
-            xmin,
-            xmax,
-            ymin,
-            ymax,
-            to_3857_from_laz,
-            transform,
-            raster_width,
-            raster_height,
-            use_raster_uv,
-        ) = uv_context
         # Compute UVs before any scene-level transform (flip/rotate), so the
         # texture remains locked to terrain geometry after rotation.
         terrain_uv = _compute_terrain_uv(
             terrain_mesh.vertices,
             xy_scale=xy_scale,
-            to_3857_from_laz=to_3857_from_laz,
-            transform=transform,
-            raster_width=raster_width,
-            raster_height=raster_height,
-            bbox_3857=(xmin, xmax, ymin, ymax),
-            use_raster_uv=use_raster_uv,
+            to_3857_from_laz=uv_context.to_3857_from_laz,
+            transform=uv_context.transform,
+            raster_width=uv_context.raster_width,
+            raster_height=uv_context.raster_height,
+            bbox_3857=(uv_context.xmin, uv_context.xmax, uv_context.ymin, uv_context.ymax),
+            use_raster_uv=uv_context.use_raster_uv,
             flip_u=cfg.naip_flip_u,
             flip_v=cfg.naip_flip_v,
         )

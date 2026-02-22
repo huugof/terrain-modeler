@@ -28,6 +28,12 @@ from flask import (
 )
 
 from .. import auth_store
+from ..constants import (
+    DEFAULT_PREVIEW_CENTER,
+    DEFAULT_PREVIEW_JOB_ID,
+    DEFAULT_PREVIEW_NAME,
+    DEFAULT_PREVIEW_SIZE_FEET,
+)
 from ..config import (
     DEFAULT_EPT_ONLY,
     DEFAULT_FILL_MAX_DIST,
@@ -44,7 +50,7 @@ from ..config import (
 )
 from ..pipeline.io import generate_job_id
 from ..providers.usgs_index import query_for_point
-from ..util import ensure_dir, get_logger
+from ..util import ensure_dir, get_logger, is_path_within
 from . import jobs as _jobs_module
 from . import rate_limiter as _rl
 from . import settings as _settings
@@ -116,10 +122,6 @@ _coverage_cache_lock = threading.Lock()
 _LONGPOLL_COUNTS: Dict[str, int] = {}
 _LONGPOLL_LOCK = threading.Lock()
 _LONGPOLL_MAX_PER_USER = int(os.getenv("LONGPOLL_MAX_PER_USER", "3"))
-_DEFAULT_PREVIEW_BASE_JOB_ID = "grand-canyon-default"
-_DEFAULT_PREVIEW_NAME = "Grand Canyon"
-_DEFAULT_PREVIEW_CENTER = (36.09841234052352, -112.0952885242688)
-_DEFAULT_PREVIEW_SIZE_FEET = 3000.0
 
 
 class _LongPollSlot:
@@ -201,8 +203,8 @@ def _enforce_job_access(job_id: str, message: str) -> Any:
 
 def _default_preview_job_id_for_user(user: Optional[Dict[str, Any]]) -> str:
     if _settings.AUTH_ENABLED and isinstance(user, dict) and isinstance(user.get("id"), int):
-        return f"{_DEFAULT_PREVIEW_BASE_JOB_ID}-u{int(user['id'])}"
-    return _DEFAULT_PREVIEW_BASE_JOB_ID
+        return f"{DEFAULT_PREVIEW_JOB_ID}-u{int(user['id'])}"
+    return DEFAULT_PREVIEW_JOB_ID
 
 
 def _ensure_default_preview_job(user: Optional[Dict[str, Any]]) -> bool:
@@ -215,7 +217,7 @@ def _ensure_default_preview_job(user: Optional[Dict[str, Any]]) -> bool:
         int(user["id"]) if isinstance(user, dict) and isinstance(user.get("id"), int) else None
     )
 
-    output_dir = _settings.OUT_DIR / _DEFAULT_PREVIEW_BASE_JOB_ID
+    output_dir = _settings.OUT_DIR / DEFAULT_PREVIEW_JOB_ID
     if not output_dir.exists() or not output_dir.is_dir():
         return False
 
@@ -229,18 +231,18 @@ def _ensure_default_preview_job(user: Optional[Dict[str, Any]]) -> bool:
 
     job_id = _default_preview_job_id_for_user(user)
     target = (
-        f"latlon:{_DEFAULT_PREVIEW_CENTER[0]},{_DEFAULT_PREVIEW_CENTER[1]} "
-        f"size={_DEFAULT_PREVIEW_SIZE_FEET}"
+        f"latlon:{DEFAULT_PREVIEW_CENTER[0]},{DEFAULT_PREVIEW_CENTER[1]} "
+        f"size={DEFAULT_PREVIEW_SIZE_FEET}"
     )
     form_defaults = snapshot_defaults()
-    form_defaults["job_name"] = _DEFAULT_PREVIEW_NAME
+    form_defaults["job_name"] = DEFAULT_PREVIEW_NAME
     summary = {
         "out": str(_settings.OUT_DIR),
         "target": target,
         "provider": "national",
         "provider_label": provider_label("national"),
-        "name": _DEFAULT_PREVIEW_NAME,
-        "custom_name": _DEFAULT_PREVIEW_NAME,
+        "name": DEFAULT_PREVIEW_NAME,
+        "custom_name": DEFAULT_PREVIEW_NAME,
         "form_defaults": form_defaults,
         "outputs": {"dir": str(output_dir), "files": files},
     }
@@ -288,14 +290,6 @@ def _cleanup_out_dir(logger: Any) -> None:
             logger.info(f"Cleanup: removed {entry}")
         except Exception as exc:
             logger.warning(f"Cleanup failed for {entry}: {exc}")
-
-
-def _path_within_out_dir(path: Path) -> bool:
-    try:
-        path.resolve().relative_to(_settings.OUT_DIR.resolve())
-        return True
-    except Exception:
-        return False
 
 
 def _cleanup_loop() -> None:
@@ -400,7 +394,7 @@ def auth_clerk_exchange():
         return jsonify({"error": f"Clerk auth failed: {exc}"}), 403
 
     sid = auth_store.create_session(
-        _settings.DB_PATH, int(user["id"]), _settings.SESSION_TTL_SECONDS
+        _settings.DB_PATH, int(user["id"]), _settings._config.session_ttl_seconds
     )
     session["sid"] = sid
     get_csrf_token()
@@ -588,6 +582,9 @@ def run_job():
 
     user = current_user()
     user_id = int(user["id"]) if user else None
+    # Desktop mode (AUTH_ENABLED=False) intentionally has no per-user build
+    # rate limit: the binary runs locally for a single operator, so throttling
+    # would add friction without a meaningful security benefit.
     if _settings.AUTH_ENABLED and user_id is not None:
         limit_error = enforce_rate_limits(user_id)
         if limit_error:
@@ -994,7 +991,7 @@ def job_delete(job_id: str):
         if resolved in seen_paths:
             continue
         seen_paths.add(resolved)
-        if not _path_within_out_dir(resolved):
+        if not is_path_within(_settings.OUT_DIR, resolved):
             continue
         try:
             if resolved.is_dir():

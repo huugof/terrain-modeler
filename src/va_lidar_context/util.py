@@ -79,3 +79,12 @@ def iter_offsets(total: int, step: int) -> Iterable[int]:
         if offset >= total:
             break
 
+
+def is_path_within(base_dir: Path, candidate: Path) -> bool:
+    """Return True if *candidate* resolves to a path inside *base_dir*."""
+    try:
+        candidate.resolve().relative_to(base_dir.resolve())
+        return True
+    except Exception:
+        return False
+
