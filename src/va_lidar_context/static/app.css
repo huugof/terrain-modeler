@@ -515,6 +515,11 @@ main {
     text-transform: uppercase;
     transform: translateX(210px);
 }
+#inlinePreviewBuildStatus {
+    text-align: center;
+    max-width: 280px;
+    line-height: 1.35;
+}
 .inline-preview-building-spinner {
     width: 36px;
     height: 36px;
@@ -948,6 +953,12 @@ main {
     border-radius: 0;
     background: transparent;
 }
+.recent-job-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
 .recent-job-title {
     font-size: 12px;
     font-weight: 600;
@@ -956,6 +967,14 @@ main {
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+}
+.recent-job-stage {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
 }
 .recent-job-actions {
     display: flex;

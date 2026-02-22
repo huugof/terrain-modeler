@@ -1,6 +1,6 @@
 - [x] ability to create and export contour curves
-- [ ] better building height data
-- [ ] expand parcel source coverage (state + county)
+- [x] better building height data
+- [-] expand parcel source coverage (state + county)
 - [x] buildings are not included when multiple tiles are needed
 - [x] recent jobs should update automatically
 - [x] figure out how to import this into a model effectively
@@ -8,7 +8,18 @@
 - [x] package in a way that doesn't need cli
 - [x] user to input coordinates and size only and script to select correct tile programmatically
 - [x] enable selecting more than one tile and tiling them correctly
-- [ ] how do i host this?
+- [x] how do i host this?
 - [x] simplify droplet deployment to one stack (production-only, no parallel dev stack)
-- [ ] what exactly does contour smoothing do
-- [ ] what exactly does output resolution do?
+- [x] what exactly does contour smoothing do
+- [x] what exactly does output resolution do?
+- [ ] do logo
+- [ ] Scroll through recent jobs with arrows on the preview
+- [ ] Edit name of recent job
+- [ ] Save instead of build. Prompt for project name 
+- [ ] Can we stream the data for preview instead of processing it?
+- [x] Add error logging
+- [x] Add status messages during build
+- [x] Turn off buildings by default (somewhere also put a not that buildings will increase build time and heights are calculated by the mesh and can be inaccurate 
+- [ ] refactor again 
+- [x] check for security
+- [ ] verify output still works for archicad

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from .. import auth_store
 from ..config import BuildConfig
 from ..pipeline.build import build as build_pipeline
-from ..util import is_path_within
+from ..util import ensure_dir, is_path_within
 from . import settings as _settings
 from .forms import merge_prefill_defaults
 
@@ -30,6 +32,10 @@ class Job:
     error: Optional[str] = None
     logs: List[str] = field(default_factory=list)
     summary: Dict[str, Any] = field(default_factory=dict)
+    stage_label: Optional[str] = None
+    stage_index: Optional[int] = None
+    stage_total: Optional[int] = None
+    stage_progress: Optional[int] = None
     change_cond: threading.Condition = field(default_factory=threading.Condition, repr=False)
     change_version: int = 0
 
@@ -47,10 +53,73 @@ class JobLogHandler(logging.Handler):
         self.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 
     def emit(self, record: logging.LogRecord) -> None:
+        raw = str(record.getMessage() or "").strip()
         msg = self.format(record)
+        stage_changed = False
         with self.job.change_cond:
+            if raw:
+                stage_changed = _update_job_stage(self.job, raw)
             self.job.logs.append(msg)
             _notify_job_change_locked(self.job)
+        if stage_changed:
+            _notify_recent_jobs_change()
+
+
+_STAGE_RE = re.compile(r"^Stage\s+(\d+)\s*/\s*(\d+)\s*:\s*(.+?)\s*$")
+
+
+class _ThreadFilter(logging.Filter):
+    def __init__(self, thread_id: int) -> None:
+        super().__init__()
+        self._thread_id = int(thread_id)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return int(getattr(record, "thread", -1)) == self._thread_id
+
+
+def _set_job_stage(
+    job: Job,
+    *,
+    label: str | None,
+    index: int | None = None,
+    total: int | None = None,
+) -> bool:
+    if index is not None and total and total > 0:
+        index = max(1, min(index, total))
+        progress = int(round((100.0 * float(index)) / float(total)))
+    else:
+        progress = None
+        index = None
+        total = None
+    stage_label = str(label or "").strip() or None
+    changed = (
+        job.stage_label != stage_label
+        or job.stage_index != index
+        or job.stage_total != total
+        or job.stage_progress != progress
+    )
+    job.stage_label = stage_label
+    job.stage_index = index
+    job.stage_total = total
+    job.stage_progress = progress
+    status_payload = {
+        "label": stage_label,
+        "index": index,
+        "total": total,
+        "progress": progress,
+    }
+    job.summary["build_status"] = status_payload
+    return changed
+
+
+def _update_job_stage(job: Job, message: str) -> bool:
+    match = _STAGE_RE.match(message)
+    if not match:
+        return False
+    index = int(match.group(1))
+    total = int(match.group(2))
+    label = match.group(3).strip()
+    return _set_job_stage(job, label=label, index=index, total=total)
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +323,21 @@ def _rehydrate_jobs_from_store() -> None:
         job_id = str(item.get("job_id"))
         summary_raw = item.get("summary")
         summary = summary_raw if isinstance(summary_raw, dict) else {}
+        stage_info = summary.get("build_status") if isinstance(summary, dict) else None
+        stage_label = None
+        stage_index = None
+        stage_total = None
+        stage_progress = None
+        if isinstance(stage_info, dict):
+            raw_label = stage_info.get("label")
+            if isinstance(raw_label, str) and raw_label.strip():
+                stage_label = raw_label.strip()
+            if isinstance(stage_info.get("index"), int):
+                stage_index = int(stage_info["index"])
+            if isinstance(stage_info.get("total"), int):
+                stage_total = int(stage_info["total"])
+            if isinstance(stage_info.get("progress"), int):
+                stage_progress = int(stage_info["progress"])
 
         artifacts_raw = item.get("artifacts")
         if isinstance(artifacts_raw, list) and artifacts_raw:
@@ -311,6 +395,10 @@ def _rehydrate_jobs_from_store() -> None:
                 ),
                 error=error,
                 summary=summary,
+                stage_label=stage_label,
+                stage_index=stage_index,
+                stage_total=stage_total,
+                stage_progress=stage_progress,
             )
         )
 
@@ -393,6 +481,10 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
         "status": job.status,
         "display_title": name if is_done else "Job running...",
         "form_defaults": _safe_form_defaults(job.summary.get("form_defaults")),
+        "stage_label": job.stage_label,
+        "stage_index": job.stage_index,
+        "stage_total": job.stage_total,
+        "stage_progress": job.stage_progress,
     }
     if job.status not in ("queued", "running"):
         payload["delete_url"] = url_for("bp.job_delete", job_id=job.job_id)
@@ -449,14 +541,25 @@ def _job_logs_payload(job: Job, offset: int) -> Dict[str, Any]:
         "offset": next_offset,
         "error": job.error,
         "exit_code": job.exit_code,
+        "stage_label": job.stage_label,
+        "stage_index": job.stage_index,
+        "stage_total": job.stage_total,
+        "stage_progress": job.stage_progress,
         "summary": _sanitize_summary_for_response(raw_summary),
     }
 
 
 def _run_build_job(job: Job, cfg: BuildConfig) -> None:
+    job_root = cfg.out_dir / job.job_id
+    ensure_dir(job_root)
+    build_log_path = job_root / "build.log"
+    error_log_path = job_root / "error.log"
+
     with job.change_cond:
         job.status = "running"
         job.started_at = time.time()
+        _set_job_stage(job, label="Queued")
+        job.summary["build_log"] = build_log_path.name
         _notify_job_change_locked(job)
     _notify_recent_jobs_change()
     if _settings.AUTH_ENABLED:
@@ -467,28 +570,55 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
     job_logger = logging.getLogger(f"va_lidar_context.job.{job.job_id}")
     job_logger.setLevel(logging.DEBUG)
     job_logger.propagate = False
+    pipeline_logger = logging.getLogger("va_lidar_context")
+    thread_filter = _ThreadFilter(threading.get_ident())
     handler = JobLogHandler(job)
+    handler.addFilter(thread_filter)
+    file_handler = logging.FileHandler(build_log_path, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s: %(message)s"))
+    file_handler.addFilter(thread_filter)
     job_logger.addHandler(handler)
+    job_logger.addHandler(file_handler)
+    pipeline_logger.addHandler(handler)
+    pipeline_logger.addHandler(file_handler)
     result = None
     try:
+        with job.change_cond:
+            _set_job_stage(job, label="Starting build")
+            _notify_job_change_locked(job)
         result = build_pipeline(cfg)
         with job.change_cond:
             job.exit_code = result.exit_code
             if job.exit_code == 0:
                 job.status = "done"
+                _set_job_stage(job, label="Completed", index=1, total=1)
             else:
                 job.status = "error"
                 job.error = job.error or _GENERIC_BUILD_ERROR
+                _set_job_stage(job, label="Failed")
+                error_log_path.write_text(
+                    f"Build returned a non-zero exit code.\nexit_code={job.exit_code}\n",
+                    encoding="utf-8",
+                )
+                job.summary["error_log"] = error_log_path.name
     except Exception as exc:  # pragma: no cover - surface to UI
+        tb = traceback.format_exc()
+        error_log_path.write_text(tb, encoding="utf-8")
         with job.change_cond:
             job.status = "error"
             job.error = sanitize_job_error(exc)
+            _set_job_stage(job, label="Failed")
+            job.summary["error_log"] = error_log_path.name
         logging.getLogger(__name__).exception("Build %s failed", job.job_id)
         job_logger.exception("Build failed")
     finally:
         with job.change_cond:
             job.finished_at = time.time()
         job_logger.removeHandler(handler)
+        job_logger.removeHandler(file_handler)
+        pipeline_logger.removeHandler(handler)
+        pipeline_logger.removeHandler(file_handler)
+        file_handler.close()
         if _settings.AUTH_ENABLED:
             auth_store.set_job_status(_settings.DB_PATH, job.job_id, job.status)
             if job.user_id is not None:
@@ -510,6 +640,9 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
                     job.summary["outputs"] = _collect_outputs(report_path.parent)
             except Exception:
                 pass
+        with job.change_cond:
+            if job.status == "error":
+                job.summary["error"] = job.error
         with job.change_cond:
             _notify_job_change_locked(job)
         _notify_recent_jobs_change()

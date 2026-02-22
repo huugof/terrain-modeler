@@ -56,13 +56,13 @@ All outputs land in `./out/<job_id>/` where job_id is a hash of the inputs.
 
 | Variable | Default | Description |
 |---|---|---|
-| `VA_SESSION_SECRET` | required in server mode | Flask session signing key. Startup fails in server mode when unset. |
-| `VA_OUT_DIR` | `./out` | Where job outputs are written. |
-| `VA_RETENTION_DAYS` | `7` | Days before outputs are cleaned up. |
-| `VA_CLEANUP_INTERVAL` | `3600` | Cleanup loop interval in seconds. |
-| `VA_DB_PATH` | `./data/app.db` | SQLite database path. In Docker: `/data/app/app.db`. |
-| `VA_JOB_HISTORY_ENABLED` | `1` | Persist job metadata across restarts. |
-| `VA_JOB_REHYDRATE_LIMIT` | `500` | Max jobs loaded from DB on startup. |
+| `SESSION_SECRET` | required in server mode | Flask session signing key. Startup fails in server mode when unset. |
+| `OUT_DIR` | `./out` | Where job outputs are written. |
+| `RETENTION_DAYS` | `7` | Days before outputs are cleaned up. |
+| `CLEANUP_INTERVAL` | `3600` | Cleanup loop interval in seconds. |
+| `DB_PATH` | `./data/app.db` | SQLite database path. In Docker: `/data/app/app.db`. |
+| `JOB_HISTORY_ENABLED` | `1` | Persist job metadata across restarts. |
+| `JOB_REHYDRATE_LIMIT` | `500` | Max jobs loaded from DB on startup. |
 
 ### Docker / Caddy deployment
 
@@ -76,41 +76,41 @@ All outputs land in `./out/<job_id>/` where job_id is a hash of the inputs.
 
 | Variable | Description |
 |---|---|
-| `VA_AUTH_PROVIDER=clerk` | Enables Clerk authentication. |
-| `VA_CLERK_PUBLISHABLE_KEY` | Clerk publishable key. |
-| `VA_CLERK_SECRET_KEY` | Clerk secret key. |
-| `VA_CLERK_FRONTEND_API_URL` | Recommended. E.g. `https://<your-frontend-api>`. |
-| `VA_CLERK_SIGN_IN_URL` | Optional fallback link to hosted sign-in page. |
-| `VA_CLERK_JWKS_URL` | Optional override if not inferable from token `iss`. |
-| `VA_CLERK_ISSUER` | Optional strict issuer check. |
-| `VA_CLERK_API_URL` | Default `https://api.clerk.com/v1`. |
-| `VA_CLERK_ALLOWED_DOMAIN` | Restrict sign-in to this email domain. |
-| `VA_CLERK_AUTHORIZED_PARTIES` | Comma-separated allowed `azp` values. |
-| `VA_REQUIRE_LOCAL_ALLOWLIST` | `0` — set `1` to require local allowlist membership. |
-| `VA_ADMIN_EMAIL` | Bootstraps first admin user in the local allowlist. |
+| `AUTH_PROVIDER=clerk` | Enables Clerk authentication. |
+| `CLERK_PUBLISHABLE_KEY` | Clerk publishable key. |
+| `CLERK_SECRET_KEY` | Clerk secret key. |
+| `CLERK_FRONTEND_API_URL` | Recommended. E.g. `https://<your-frontend-api>`. |
+| `CLERK_SIGN_IN_URL` | Optional fallback link to hosted sign-in page. |
+| `CLERK_JWKS_URL` | Optional override if not inferable from token `iss`. |
+| `CLERK_ISSUER` | Optional strict issuer check. |
+| `CLERK_API_URL` | Default `https://api.clerk.com/v1`. |
+| `CLERK_ALLOWED_DOMAIN` | Restrict sign-in to this email domain. |
+| `CLERK_AUTHORIZED_PARTIES` | Comma-separated allowed `azp` values. |
+| `REQUIRE_LOCAL_ALLOWLIST` | `0` — set `1` to require local allowlist membership. |
+| `ADMIN_EMAIL` | Bootstraps first admin user in the local allowlist. |
 
 ### Rate limiting
 
 | Variable | Default | Description |
 |---|---|---|
-| `VA_RATE_LIMIT_HOURLY` | `3` | Max builds per user per hour. |
-| `VA_RATE_LIMIT_DAILY` | `10` | Max builds per user per day. |
-| `VA_MAX_ACTIVE_JOBS_PER_USER` | `1` | Max concurrent jobs per user. |
+| `RATE_LIMIT_HOURLY` | `3` | Max builds per user per hour. |
+| `RATE_LIMIT_DAILY` | `10` | Max builds per user per day. |
+| `MAX_ACTIVE_JOBS_PER_USER` | `1` | Max concurrent jobs per user. |
 
 ### Worker callback auth (optional)
 
 Secure the `/internal/worker/jobs/<job_id>/complete` endpoint with either:
 
-- `VA_WORKER_SHARED_TOKEN` — simple shared token sent as `X-Worker-Token`.
-- `VA_HMAC_KEYS_JSON` — JSON object of key-id → secret, e.g. `{"k1":"secret"}`. Request must include `X-Key-Id`, `X-Signature`, `X-Timestamp`, `X-Nonce` headers.
+- `WORKER_SHARED_TOKEN` — simple shared token sent as `X-Worker-Token`.
+- `HMAC_KEYS_JSON` — JSON object of key-id → secret, e.g. `{"k1":"secret"}`. Request must include `X-Key-Id`, `X-Signature`, `X-Timestamp`, `X-Nonce` headers.
 
 ## Authentication Behaviour
 
-With `VA_AUTH_PROVIDER=clerk`:
+With `AUTH_PROVIDER=clerk`:
 - The main form is publicly browseable; **Build** requires login.
 - Unauthenticated users see a **Login to Build** button instead.
 - Any authenticated Clerk user can sign in by default.
-- Set `VA_REQUIRE_LOCAL_ALLOWLIST=1` to restrict to an explicit allowlist managed at `/admin/users`.
+- Set `REQUIRE_LOCAL_ALLOWLIST=1` to restrict to an explicit allowlist managed at `/admin/users`.
 - Job downloads are owner-only. Programmatic access: `GET /jobs/<job_id>/artifacts` and `GET /jobs/<job_id>/download/<name>`.
 
 ## Parcel Sources

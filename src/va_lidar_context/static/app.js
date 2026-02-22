@@ -363,10 +363,22 @@ function renderRecentJobs(container, jobs) {
     const canAct = job.status === "done" || job.status === "error";
     const name = job.name || job.job_id;
 
+    const meta = document.createElement("div");
+    meta.className = "recent-job-meta";
     const title = document.createElement("div");
     title.className = "recent-job-title";
     title.textContent = name;
-    item.appendChild(title);
+    meta.appendChild(title);
+    if (!canAct && job.stage_label) {
+      const stage = document.createElement("div");
+      stage.className = "recent-job-stage";
+      const progress = Number.isFinite(job.stage_progress)
+        ? ` (${job.stage_progress}%)`
+        : "";
+      stage.textContent = `${job.stage_label}${progress}`;
+      meta.appendChild(stage);
+    }
+    item.appendChild(meta);
 
     if (canAct) {
       const actions = document.createElement("div");
@@ -953,6 +965,7 @@ async function runBuild(event) {
   runBtn.disabled = true;
   const originalText = runBtn.textContent;
   runBtn.textContent = "Running...";
+  setInlineBuildStatus("Queued...");
   setInlineBuildingOverlay(true);
 
   const formData = new FormData(form);
@@ -969,6 +982,7 @@ async function runBuild(event) {
     updateAlerts();
     runBtn.disabled = false;
     runBtn.textContent = originalText;
+    setInlineBuildStatus("Build failed to start.");
     setInlineBuildingOverlay(false);
     return;
   }
@@ -978,6 +992,7 @@ async function runBuild(event) {
       openAuthModal(nextPath);
       runBtn.disabled = false;
       runBtn.textContent = originalText;
+      setInlineBuildStatus("Sign in required.");
       setInlineBuildingOverlay(false);
       return;
     }
@@ -993,6 +1008,7 @@ async function runBuild(event) {
     updateAlerts();
     runBtn.disabled = false;
     runBtn.textContent = originalText;
+    setInlineBuildStatus("Build failed to start.");
     setInlineBuildingOverlay(false);
     return;
   }
@@ -1027,14 +1043,26 @@ async function runBuild(event) {
       if (typeof logData.offset === "number") {
         offset = logData.offset;
       }
+      if (logData.stage_label) {
+        const progress = Number.isFinite(logData.stage_progress)
+          ? ` (${logData.stage_progress}%)`
+          : "";
+        setInlineBuildStatus(`${logData.stage_label}${progress}`);
+      } else if (logData.status === "queued") {
+        setInlineBuildStatus("Queued...");
+      } else if (logData.status === "running") {
+        setInlineBuildStatus("Running...");
+      }
       if (logData.status === "running" || logData.status === "queued") {
         continue;
       }
       if (logData.status === "error") {
         const reason = logData.error ? ` ${logData.error}` : "";
         buildErrorMessage = `Build failed.${reason}`;
+        setInlineBuildStatus("Build failed.");
         updateAlerts();
       } else if (logData.status === "done") {
+        setInlineBuildStatus("Build complete.");
         buildSucceeded = true;
       }
       break;
@@ -1218,6 +1246,15 @@ function setInlineBuildingOverlay(active) {
   if (!overlay) return;
   overlay.classList.toggle("active", active);
   overlay.setAttribute("aria-hidden", active ? "false" : "true");
+  if (!active) {
+    setInlineBuildStatus("Building...");
+  }
+}
+
+function setInlineBuildStatus(message) {
+  const statusEl = document.getElementById("inlinePreviewBuildStatus");
+  if (!statusEl) return;
+  statusEl.textContent = String(message || "Building...");
 }
 
 function initInlinePreview() {

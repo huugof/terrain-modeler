@@ -621,6 +621,28 @@
         }
       }
 
+      function sanitizeMtlText(mtlText) {
+        const lines = String(mtlText || '').split(/\r?\n/);
+        const kept = [];
+        let removedTextureRefs = false;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          const mapMatch = /^map_kd\s+(.+)$/i.exec(trimmed);
+          if (mapMatch) {
+            // Keep the last token (path) and ignore optional map flags.
+            const parts = mapMatch[1].trim().split(/\s+/);
+            const rawPath = parts.length ? parts[parts.length - 1] : '';
+            const texName = rawPath.split(/[\\/]/).pop();
+            if (texName && !previewState.filesByName.has(texName)) {
+              removedTextureRefs = true;
+              continue;
+            }
+          }
+          kept.push(line);
+        }
+        return { text: kept.join('\n'), removedTextureRefs };
+      }
+
       function loadObjPart(part) {
         const manager = new THREE.LoadingManager();
         manager.setURLModifier((url) => {
@@ -638,10 +660,14 @@
             try {
               const mtlResp = await fetch(buildDownloadUrl(part.mtl), { cache: 'no-store' });
               if (mtlResp.ok) {
-                const mtlText = await mtlResp.text();
+                const mtlRaw = await mtlResp.text();
+                const mtlSanitized = sanitizeMtlText(mtlRaw);
+                if (mtlSanitized.removedTextureRefs) {
+                  console.warn(`Preview texture file missing for ${part.mtl}; using untextured material.`);
+                }
                 const mtlLoader = new window.MTLLoader(manager);
                 const mtlPath = `/jobs/${previewState.jobId}/download/`;
-                const materials = mtlLoader.parse(mtlText, mtlPath);
+                const materials = mtlLoader.parse(mtlSanitized.text, mtlPath);
                 materials.preload();
                 for (const key of Object.keys(materials.materials)) {
                   const material = materials.materials[key];

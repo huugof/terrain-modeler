@@ -228,6 +228,10 @@ def _ensure_default_preview_job(user: Optional[Dict[str, Any]]) -> bool:
         return False
     if not any(name in {"terrain.obj", "buildings.obj", "combined.obj"} for name in files):
         return False
+    # Prevent seeding a textured preview with a broken texture reference.
+    has_textured_mtl = any(name in {"terrain.mtl", "combined.mtl"} for name in files)
+    if has_textured_mtl and "terrain.png" not in files:
+        return False
 
     job_id = _default_preview_job_id_for_user(user)
     target = (

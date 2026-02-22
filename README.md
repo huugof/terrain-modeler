@@ -88,6 +88,11 @@ python3 scripts/preload_grand_canyon_default.py --out ./out
 The web UI will auto-seed this preloaded job from `./out/grand-canyon-default/`
 for users with no existing jobs.
 
+Web control notes:
+- Buildings are off by default in the web form; enabling them increases build time and inferred heights may be inaccurate in some areas.
+- `Output Resolution` controls terrain mesh detail (higher = more detail, slower builds, larger files).
+- `Contour Smoothing` simplifies/resamples contour lines (higher = cleaner curves, less local detail).
+
 ## Docker
 
 **Production (Caddy + TLS + blue/green):**
@@ -97,7 +102,7 @@ for users with no existing jobs.
 
 # 2) Create deployment env file.
 cp .env.example .env
-# edit .env and set APP_DOMAIN, ACME_EMAIL, VA_SESSION_SECRET
+# edit .env and set APP_DOMAIN, ACME_EMAIL, SESSION_SECRET
 # generate a secret with: python3 -c "import secrets; print(secrets.token_hex(32))"
 
 # 3) Prepare persistent volumes for the app container user (uid 10001).
@@ -128,5 +133,12 @@ Blue/green deploy:
 ./deploy/switch_traffic.sh green
 ./deploy/rollback.sh   # if needed
 ```
+
+Production hosting checklist:
+- Create persistent volumes: `/data/out` and `/data/app` owned by uid `10001`.
+- Set `.env` with `APP_DOMAIN`, `ACME_EMAIL`, and `SESSION_SECRET` (64-char random hex).
+- Run `./deploy/preflight.sh` before every deploy.
+- Deploy with `docker compose up -d --build` and verify `/healthz` responds through your domain.
+- Keep all traffic on a single stack (`terrain-ui-blue`) unless you intentionally run blue/green cutover scripts.
 
 See [DOCUMENTATION.md](docs/DOCUMENTATION.md) for all CLI flags, environment variables, auth configuration, output file reference, and parcel source setup.

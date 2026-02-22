@@ -9,3 +9,5 @@ def test_snapshot_defaults_use_grand_canyon_seed_values():
     assert defaults["center2"] == -112.0952885242688
     assert defaults["clip_size"] == 3000.0
     assert defaults["output_naip"] is True
+    assert defaults["output_terrain"] is True
+    assert defaults["output_buildings"] is False

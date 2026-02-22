@@ -75,6 +75,10 @@ def _create_job(
     status: str = "done",
     created_at: float | None = None,
     custom_name: str = "",
+    stage_label: str | None = None,
+    stage_index: int | None = None,
+    stage_total: int | None = None,
+    stage_progress: int | None = None,
 ) -> webapp.Job:
     job_dir = out_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +91,10 @@ def _create_job(
         status=status,
         created_at=created_at if created_at is not None else time.time(),
         user_id=owner_id,
+        stage_label=stage_label,
+        stage_index=stage_index,
+        stage_total=stage_total,
+        stage_progress=stage_progress,
         summary={
             "name": summary_name,
             "custom_name": custom_name,
@@ -154,6 +162,24 @@ def test_index_seeds_preloaded_default_preview_for_new_user(auth_webapp_env):
     assert isinstance(outputs, dict)
     assert outputs.get("dir") == str(preloaded_dir)
     assert "terrain.obj" in (outputs.get("files") or [])
+
+
+def test_index_does_not_seed_default_preview_with_missing_texture(auth_webapp_env):
+    preloaded_dir = auth_webapp_env["out_dir"] / "grand-canyon-default"
+    preloaded_dir.mkdir(parents=True, exist_ok=True)
+    (preloaded_dir / "terrain.obj").write_text("dummy terrain\n")
+    (preloaded_dir / "terrain.mtl").write_text("newmtl material0\nmap_Kd terrain.png\n")
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/")
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+
+    user_id = int(auth_webapp_env["user1"]["id"])
+    seeded_job_id = f"grand-canyon-default-u{user_id}"
+    with webapp.JOBS_LOCK:
+        assert seeded_job_id not in webapp.JOBS
+    assert seeded_job_id not in page
 
 
 def test_index_exposes_default_preview_to_anonymous_user(auth_webapp_env):
@@ -520,3 +546,55 @@ def test_recent_jobs_long_poll_times_out_without_change(auth_webapp_env):
     payload = resp.get_json()
     assert int(payload["version"]) == since_version
     assert elapsed >= 0.08
+
+
+def test_recent_jobs_payload_includes_stage_fields(auth_webapp_env):
+    owner_id = int(auth_webapp_env["user1"]["id"])
+    _create_job(
+        job_id="job-with-stage",
+        owner_id=owner_id,
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=[],
+        status="running",
+        stage_label="compute heights",
+        stage_index=5,
+        stage_total=6,
+        stage_progress=83,
+    )
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/recent-jobs")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    jobs = payload["jobs"]
+    assert jobs and jobs[0]["job_id"] == "job-with-stage"
+    assert jobs[0]["stage_label"] == "compute heights"
+    assert jobs[0]["stage_index"] == 5
+    assert jobs[0]["stage_total"] == 6
+    assert jobs[0]["stage_progress"] == 83
+
+
+def test_job_logs_payload_includes_stage_fields(auth_webapp_env):
+    owner_id = int(auth_webapp_env["user1"]["id"])
+    _create_job(
+        job_id="job-log-stage",
+        owner_id=owner_id,
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=[],
+        status="running",
+        stage_label="generate rasters",
+        stage_index=4,
+        stage_total=6,
+        stage_progress=67,
+    )
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/logs/job-log-stage?offset=0")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["stage_label"] == "generate rasters"
+    assert payload["stage_index"] == 4
+    assert payload["stage_total"] == 6
+    assert payload["stage_progress"] == 67

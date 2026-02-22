@@ -142,6 +142,7 @@ def coverage_cache_key(lon: float, lat: float) -> str:
 
 def snapshot_defaults() -> Dict[str, Any]:
     outputs = set(DEFAULT_OUTPUTS)
+    outputs.discard("buildings")
     return {
         "out": str(_settings._config.out_dir),
         "units": "feet",
@@ -160,7 +161,7 @@ def snapshot_defaults() -> Dict[str, Any]:
         "dxf_include_parcels": DEFAULT_DXF_INCLUDE_PARCELS,
         "dxf_include_buildings": DEFAULT_DXF_INCLUDE_BUILDINGS,
         "output_terrain": "terrain" in outputs,
-        "output_buildings": "buildings" in outputs,
+        "output_buildings": False,
         "output_contours": "contours" in outputs,
         "output_naip": True,
         "output_xyz": "xyz" in outputs,

@@ -666,6 +666,70 @@ def test_run_build_job_sets_error_on_nonzero_exit_code(monkeypatch):
     assert job.error is not None, "B3: job.error must be set when exit_code != 0"
 
 
+def test_run_build_job_writes_error_log_for_exceptions(tmp_path, monkeypatch):
+    import va_lidar_context.webapp.jobs as jobs_mod
+    from va_lidar_context.webapp.jobs import Job
+
+    cfg = load_config(
+        overrides={
+            "desktop_mode": True,
+            "job_history_enabled": False,
+            "out_dir": tmp_path / "out",
+        }
+    )
+    monkeypatch.setattr(_webapp_settings, "_config", cfg)
+    monkeypatch.setattr(jobs_mod.auth_store, "set_job_status", lambda *a, **k: None)
+    monkeypatch.setattr(jobs_mod.auth_store, "set_active_job", lambda *a, **k: None)
+    monkeypatch.setattr(jobs_mod.auth_store, "finish_active_job", lambda *a, **k: None)
+
+    def _boom(_cfg):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(jobs_mod, "build_pipeline", _boom)
+    monkeypatch.setattr(jobs_mod, "_persist_job_snapshot", lambda job: None)
+
+    from va_lidar_context.config import BuildConfig
+
+    job = Job(job_id="job-error-log", status="queued", created_at=0.0)
+    cfg_build = BuildConfig(
+        center=(36.0, -112.0),
+        size=1000,
+        outputs=("terrain",),
+        out_dir=cfg.out_dir,
+    )
+    jobs_mod._run_build_job(job, cfg_build)
+
+    error_log = cfg.out_dir / "job-error-log" / "error.log"
+    assert error_log.is_file()
+    text = error_log.read_text()
+    assert "RuntimeError: boom" in text
+    assert job.summary.get("error_log") == "error.log"
+
+
+def test_job_log_handler_extracts_stage_progress():
+    import logging
+
+    from va_lidar_context.webapp.jobs import Job, JobLogHandler
+
+    job = Job(job_id="job-stage", status="running", created_at=0.0)
+    handler = JobLogHandler(job)
+    record = logging.LogRecord(
+        name="va_lidar_context",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Stage 4/6: generate rasters",
+        args=(),
+        exc_info=None,
+    )
+    handler.emit(record)
+
+    assert job.stage_label == "generate rasters"
+    assert job.stage_index == 4
+    assert job.stage_total == 6
+    assert job.stage_progress == 67
+
+
 def test_persist_job_snapshot_logs_database_errors(monkeypatch):
     import logging
 
