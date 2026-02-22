@@ -355,8 +355,20 @@
         controls: null,
         currentObject: null,
         pendingBuildingsLoad: false,
+        renderQueued: false,
       };
       const EMBED_MODE = {{ embed_mode | tojson }};
+
+      function requestPreviewRender() {
+        if (previewState.renderQueued) return;
+        if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
+        previewState.renderQueued = true;
+        requestAnimationFrame(() => {
+          previewState.renderQueued = false;
+          if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
+          previewState.renderer.render(previewState.scene, previewState.camera);
+        });
+      }
 
       function setActiveTab(tabName) {
         const isPreview = tabName === 'preview';
@@ -477,8 +489,8 @@
         scene.background = new THREE.Color(0x1a1a1a);
         const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000000);
         camera.up.set(0, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.shadowMap.enabled = false;
         renderer.domElement.style.width = '100%';
@@ -486,11 +498,11 @@
         container.appendChild(renderer.domElement);
 
         const controls = new OrbitControlsCtor(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.07;
+        controls.enableDamping = false;
         controls.screenSpacePanning = true;
+        controls.addEventListener('change', requestPreviewRender);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.85));
         const directional = new THREE.DirectionalLight(0xffffff, 1.0);
         directional.position.set(200, -150, 300);
         scene.add(directional);
@@ -514,17 +526,11 @@
           previewState.camera.setViewOffset(virtualWidth, height, viewOffsetX, 0, width, height);
           previewState.camera.updateProjectionMatrix();
           previewState.renderer.setSize(width, height, false);
+          requestPreviewRender();
         };
         window.addEventListener('resize', resize);
         resize();
-
-        const animate = () => {
-          if (!previewState.renderer || !previewState.scene || !previewState.camera) return;
-          requestAnimationFrame(animate);
-          if (previewState.controls) previewState.controls.update();
-          previewState.renderer.render(previewState.scene, previewState.camera);
-        };
-        animate();
+        requestPreviewRender();
         return true;
       }
 
@@ -552,18 +558,58 @@
             material.needsUpdate = true;
           }
         });
+        requestPreviewRender();
+      }
+
+      function disposeObject3D(obj) {
+        if (!obj) return;
+        obj.traverse((node) => {
+          if (!node || !node.isMesh) return;
+          if (node.geometry && typeof node.geometry.dispose === 'function') {
+            node.geometry.dispose();
+          }
+          if (!node.material) return;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            if (!material) continue;
+            const textures = new Set();
+            if (material.map && typeof material.map.dispose === 'function') {
+              textures.add(material.map);
+            }
+            if (
+              material.userData &&
+              material.userData.savedMap &&
+              typeof material.userData.savedMap.dispose === 'function'
+            ) {
+              textures.add(material.userData.savedMap);
+            }
+            textures.forEach((tex) => tex.dispose());
+            if (typeof material.dispose === 'function') {
+              material.dispose();
+            }
+          }
+        });
       }
 
       function clearCurrentObject() {
         if (!previewState.scene || !previewState.currentObject) return;
+        disposeObject3D(previewState.currentObject);
         previewState.scene.remove(previewState.currentObject);
         previewState.currentObject = null;
+        requestPreviewRender();
       }
 
       function centerAndPrepareObject(obj) {
         obj.traverse((node) => {
           if (!node.isMesh) return;
-          if (node.geometry) node.geometry.computeVertexNormals();
+          if (
+            node.geometry &&
+            node.geometry.attributes &&
+            !node.geometry.attributes.normal &&
+            typeof node.geometry.computeVertexNormals === 'function'
+          ) {
+            node.geometry.computeVertexNormals();
+          }
           if (!node.material) return;
           const materials = Array.isArray(node.material) ? node.material : [node.material];
           for (const material of materials) material.side = THREE.DoubleSide;
@@ -647,6 +693,7 @@
           updateWireframeButton();
           updateSceneSelect();
           if (shouldResetView) resetCamera();
+          requestPreviewRender();
           setPreviewMessage('');
           try {
             if (
@@ -813,6 +860,7 @@
           buildingsPart.visible = Boolean(visible);
           previewState.currentModelKey = visible ? 'scene' : 'terrain';
           updateSceneSelect();
+          requestPreviewRender();
           try {
             if (
               window.parent &&
@@ -828,6 +876,7 @@
         if (!visible) {
           previewState.currentModelKey = 'terrain';
           updateSceneSelect();
+          requestPreviewRender();
           try {
             if (
               window.parent &&
@@ -853,6 +902,7 @@
             applyWireframeMode(previewState.wireframe);
             previewState.currentModelKey = 'scene';
             updateSceneSelect();
+            requestPreviewRender();
             setPreviewMessage('');
             try {
               if (
@@ -896,6 +946,7 @@
         previewState.controls.target.set(0, 0, 0);
         previewState.camera.updateProjectionMatrix();
         previewState.controls.update();
+        requestPreviewRender();
       }
 
       function updateSceneSelect() {
@@ -952,6 +1003,7 @@
         previewState.camera.position.copy(target.add(offset));
         previewState.camera.updateProjectionMatrix();
         previewState.controls.update();
+        requestPreviewRender();
       }
 
       function zoomIn() {
