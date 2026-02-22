@@ -72,6 +72,20 @@ Opens at `http://127.0.0.1:5000`. To bind to all interfaces:
 va-lidar-context-web --host 0.0.0.0 --port 8000
 ```
 
+Default first-load form values are preconfigured to Grand Canyon:
+- Center: `36.09841234052352, -112.0952885242688`
+- Size: `3000` feet
+- Satellite image (NAIP): enabled
+
+To preload the matching first-load preview artifacts for live deployments:
+
+```bash
+python3 scripts/preload_grand_canyon_default.py --out ./out
+```
+
+The web UI will auto-seed this preloaded job from `./out/grand-canyon-default/`
+for users with no existing jobs.
+
 ## Docker
 
 **Production (Caddy + TLS + blue/green):**

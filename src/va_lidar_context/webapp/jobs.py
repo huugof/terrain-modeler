@@ -14,6 +14,7 @@ from .. import auth_store
 from ..config import BuildConfig
 from ..pipeline.build import build as build_pipeline
 from . import settings as _settings
+from .forms import merge_prefill_defaults
 
 
 @dataclass
@@ -386,6 +387,11 @@ def _recent_job_display_name(job: Job, sequence_number: int) -> str:
 def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
     from flask import url_for  # imported here to avoid requiring app context at import
 
+    def _safe_form_defaults(value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        return merge_prefill_defaults({}, value)
+
     name = _recent_job_display_name(job, sequence_number)
     is_done = job.status == "done"
     payload: Dict[str, Any] = {
@@ -393,7 +399,10 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
         "name": name,
         "status": job.status,
         "display_title": name if is_done else "Job running...",
+        "form_defaults": _safe_form_defaults(job.summary.get("form_defaults")),
     }
+    if job.status not in ("queued", "running"):
+        payload["delete_url"] = url_for("bp.job_delete", job_id=job.job_id)
     if not is_done:
         return payload
 

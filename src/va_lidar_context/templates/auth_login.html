@@ -130,7 +130,12 @@
                     if (!resp.ok) {
                         throw new Error(data.error || 'Unable to establish session.');
                     }
-                    window.location.href = data.next || '/';
+                    const nextUrl = data.next || '/';
+                    if (window.top && window.top !== window.self) {
+                        window.top.location.href = nextUrl;
+                        return;
+                    }
+                    window.location.href = nextUrl;
                 } catch (err) {
                     exchangeInFlight = false;
                     setStatus(String(err.message || err));

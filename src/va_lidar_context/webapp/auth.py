@@ -1,4 +1,5 @@
 """Authentication, session management, CSRF, Clerk integration, and HMAC verification."""
+
 from __future__ import annotations
 
 import secrets
@@ -22,6 +23,7 @@ from . import settings as _settings
 
 _auth_started: bool = False
 _auth_lock = threading.Lock()
+_PUBLIC_PREVIEW_JOB_ID = "grand-canyon-default"
 
 
 def ensure_auth_store() -> None:
@@ -94,6 +96,7 @@ def validate_csrf() -> bool:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _is_api_request() -> bool:
     if request.headers.get("X-Requested-With") == "fetch":
         return True
@@ -147,9 +150,15 @@ def user_can_access_job(job_id: str) -> bool:
     if not _settings.AUTH_ENABLED:
         return True
     user = current_user()
-    if user is None:
-        return False
     owner_id = auth_store.get_job_owner_id(_settings.DB_PATH, job_id)
+    if user is None:
+        if job_id != _PUBLIC_PREVIEW_JOB_ID or owner_id is not None:
+            return False
+        from .jobs import JOBS, JOBS_LOCK  # avoid circular at module level
+
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+        return job is not None and job.user_id is None and job.status == "done"
     return owner_id is not None and owner_id == user["id"]
 
 
@@ -198,10 +207,9 @@ def verify_hmac_request() -> bool:
 # Clerk integration
 # ---------------------------------------------------------------------------
 
+
 def clerk_auth_ready() -> bool:
-    return bool(
-        _settings._config.clerk_publishable_key and _settings._config.clerk_secret_key
-    )
+    return bool(_settings._config.clerk_publishable_key and _settings._config.clerk_secret_key)
 
 
 _JWKS_CLIENT_CACHE: dict[str, tuple[jwt.PyJWKClient, float]] = {}
@@ -308,9 +316,7 @@ def _exchange_clerk_token(raw_token: str) -> Dict[str, Any]:
             raise RuntimeError("Access denied for this account.")
         return user
 
-    is_admin = bool(
-        _settings._config.admin_email and email == _settings._config.admin_email
-    )
+    is_admin = bool(_settings._config.admin_email and email == _settings._config.admin_email)
     merged_admin = is_admin or bool(user and user.get("is_admin"))
     auth_store.upsert_user(_settings.DB_PATH, email, is_admin=merged_admin, is_active=True)
     user = auth_store.find_user_by_email(_settings.DB_PATH, email)

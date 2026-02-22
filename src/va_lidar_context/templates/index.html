@@ -9,103 +9,209 @@
             rel="stylesheet"
             href="{{ url_for('static', filename='app.css') }}"
         />
-        <script>
-            (function(){var t=localStorage.getItem('terrain-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');})();
-        </script>
     </head>
     <body>
         <div id="topBar" class="top-bar">
-            {% if auth_enabled and current_user %}
-            {% set profile_name = current_user.get('name') or ((current_user.get('email') or '').split('@')[0]) or 'User' %}
-            {% set profile_initial = (profile_name[:1] if profile_name else 'U')|upper %}
-            <div id="profileShell" class="profile-shell">
-                <button
-                    type="button"
-                    id="profileButton"
-                    class="profile-button"
-                    aria-label="Account menu"
-                    aria-haspopup="menu"
-                    aria-expanded="false"
-                    aria-controls="profileDropdown"
-                >
-                    {{ profile_initial }}
-                </button>
-                <div id="profileDropdown" class="profile-dropdown hidden" role="menu" aria-labelledby="profileButton">
-                    <p class="profile-row">
-                        Signed in as <strong>{{ current_user.email }}</strong>
-                    </p>
-                    {% if current_user.is_admin %}
-                    <a class="profile-link" href="{{ url_for('bp.admin_users') }}">Admin</a>
-                    {% endif %}
-                    <form method="post" action="{{ url_for('bp.auth_logout') }}" class="profile-form">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <button class="btn secondary profile-logout" type="submit">Sign out</button>
-                    </form>
-                </div>
-            </div>
-            {% elif auth_enabled %}
-            <a id="topLoginBtn" class="top-login-btn" href="{{ url_for('bp.auth_login', next='/') }}">
-                <i data-lucide="log-in"></i>
-                Sign in
-            </a>
-            {% endif %}
             <button
                 type="button"
-                id="themeToggle"
-                class="theme-toggle"
-                aria-label="Toggle light/dark mode"
-                title="Toggle light/dark mode"
+                id="wireframeToggle"
+                class="theme-toggle wireframe-toggle"
+                aria-label="Toggle wireframe preview"
+                title="Toggle wireframe preview"
+                aria-pressed="false"
+                disabled
             >
-                <i data-lucide="sun" id="themeIconLight"></i>
-                <i data-lucide="moon" id="themeIconDark"></i>
+                <i data-lucide="box"></i>
             </button>
+            <button
+                type="button"
+                id="buildingsToggle"
+                class="theme-toggle buildings-toggle"
+                aria-label="Toggle buildings in preview"
+                title="Toggle buildings in preview"
+                aria-pressed="false"
+                disabled
+            >
+                <i data-lucide="house"></i>
+            </button>
+            {% if auth_enabled and current_user %}
+            {% set top_profile_display = current_user.get('name') or current_user.email %}
+            <div id="topProfileShell" class="profile-shell">
+                <button
+                    type="button"
+                    id="topProfileButton"
+                    class="theme-toggle top-profile-icon-btn"
+                    aria-label="Profile menu"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="topProfileDropdown"
+                    title="{{ current_user.email }}"
+                >
+                    <i data-lucide="user" aria-hidden="true"></i>
+                </button>
+                <div id="topProfileDropdown" class="top-profile-dropdown hidden" role="menu">
+                    <div class="top-profile-item top-profile-identity">
+                        {{ top_profile_display }}
+                    </div>
+                    <a
+                        href="#"
+                        id="topRecentJobsLink"
+                        class="top-profile-item"
+                        role="menuitem"
+                    >
+                        Recent jobs
+                    </a>
+                    <button
+                        class="top-profile-item"
+                        type="submit"
+                        form="logoutForm"
+                        role="menuitem"
+                    >
+                        Sign out
+                    </button>
+                </div>
+            </div>
+            {% elif auth_enabled and not current_user %}
+            <a class="top-login-btn" href="{{ url_for('bp.auth_login', next='/') }}" data-auth-open="1">Sign in</a>
+            {% endif %}
         </div>
-        {% if auth_enabled and not current_user %}
-        <div id="loginBanner" class="login-banner">
-            <i data-lucide="lock"></i>
-            <span>Sign in to run builds and access your files.</span>
-            <a class="login-banner-btn" href="{{ url_for('bp.auth_login', next='/') }}">Sign in</a>
-        </div>
-        {% endif %}
-        <header>
-            <h1>Terrain Modeler</h1>
-            <p class="sub">
-                Generate site context and contour models for anywhere in the
-                USA.
-            </p>
-        </header>
         <main>
+            <div class="layout-split">
+            <div class="layout-preview-col" id="inlinePreviewCol">
+                <div class="inline-preview-panel" id="inlinePreviewPanel">
+                    <div class="inline-preview-demo" id="inlinePreviewDemo" aria-hidden="true">
+                        <svg class="inline-preview-demo-graphic" viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <defs>
+                                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="currentColor" stop-opacity="0.06"/>
+                                    <stop offset="100%" stop-color="currentColor" stop-opacity="0.01"/>
+                                </linearGradient>
+                            </defs>
+                            <rect width="400" height="260" fill="url(#sky)"/>
+                            <polyline points="20,220 60,210 100,200 140,195 180,200 220,205 260,200 300,190 340,195 380,205" fill="none" stroke="currentColor" stroke-opacity="0.18" stroke-width="1.5"/>
+                            <polyline points="20,200 60,185 100,170 140,160 180,165 220,175 260,165 300,150 340,158 380,175" fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5"/>
+                            <polyline points="30,180 70,160 110,140 150,125 190,130 230,145 270,130 310,112 350,122 385,140" fill="none" stroke="currentColor" stroke-opacity="0.26" stroke-width="1.5"/>
+                            <polyline points="50,162 90,138 130,115 170,96 210,100 250,118 290,100 325,82 360,95 390,112" fill="none" stroke="currentColor" stroke-opacity="0.30" stroke-width="1.5"/>
+                            <polyline points="80,148 120,120 160,92 200,72 240,78 275,96 308,78 340,62 372,76 395,92" fill="none" stroke="currentColor" stroke-opacity="0.34" stroke-width="1.5"/>
+                            <polyline points="120,138 158,106 196,76 230,55 265,62 295,80 325,62 355,46 382,60" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
+                        </svg>
+                        <p class="inline-preview-demo-label">Build to preview terrain</p>
+                    </div>
+                    <iframe
+                        id="inlinePreviewFrame"
+                        class="inline-preview-frame"
+                        title="Terrain preview"
+                        src="about:blank"
+                    ></iframe>
+                    <div class="inline-preview-building" id="inlinePreviewBuilding" aria-hidden="true">
+                        <div class="inline-preview-building-inner">
+                            <svg class="inline-preview-building-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                            </svg>
+                            <span>Building&hellip;</span>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /.layout-preview-col -->
+            <div class="layout-form-col">
             <form
                 class="card app-card"
                 method="post"
                 action="{{ url_for('bp.run_job') }}"
             >
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <div class="card-header">
+                    <span class="card-logo">
+                        <img
+                            class="card-logo-mark"
+                            src="{{ url_for('static', filename='logo-canyon-lowpoly.svg') }}"
+                            alt=""
+                            aria-hidden="true"
+                        />
+                        <span>Meshd</span>
+                    </span>
+                    <div class="card-header-actions">
+                        <div id="menuShell" class="menu-shell">
+                            <button
+                                type="button"
+                                id="menuButton"
+                                class="menu-button"
+                                aria-label="Recent jobs"
+                                title="Recent jobs"
+                                aria-haspopup="menu"
+                                aria-expanded="false"
+                                aria-controls="menuDropdown"
+                            >
+                                <i data-lucide="rotate-ccw"></i>
+                            </button>
+                            <div id="menuDropdown" class="menu-dropdown hidden" role="menu">
+                                <div class="menu-section-title">Recent Jobs</div>
+                                <div id="recentJobs" class="recent-jobs-scroll">
+                                    {% if recent_jobs %}
+                                    <ul class="recent-job-list">
+                                        {% for job in recent_jobs %}
+                                        <li class="recent-job-row">
+                                            <div class="recent-job-title">{{ job.name }}</div>
+                                            {% if job.status in ['done', 'error'] %}
+                                            <div class="recent-job-actions">
+                                                {% if job.preview_url %}
+                                                <a
+                                                    class="recent-job-pill"
+                                                    href="{{ job.preview_url }}"
+                                                    data-preview-inline="1"
+                                                    data-preview-url="{{ job.preview_url }}"
+                                                    data-form-defaults="{{ job.form_defaults | tojson | forceescape }}"
+                                                >Preview</a>
+                                                {% endif %}
+                                                {% if job.download_all_url %}
+                                                <a class="recent-job-pill" href="{{ job.download_all_url }}" aria-label="Download job files" title="Download job files"><i data-lucide="download"></i></a>
+                                                {% endif %}
+                                                {% if job.delete_url %}
+                                                <button
+                                                    type="button"
+                                                    class="recent-job-pill recent-job-pill-delete"
+                                                    data-job-delete-url="{{ job.delete_url }}"
+                                                    data-job-id="{{ job.job_id }}"
+                                                    aria-label="Delete job"
+                                                    title="Delete job"
+                                                ><i data-lucide="trash-2"></i></button>
+                                                {% endif %}
+                                            </div>
+                                            {% endif %}
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% else %}
+                                    <p class="footer">No jobs yet.</p>
+                                    {% endif %}
+                                </div>
+                                {% if auth_enabled and current_user %}
+                                <div class="menu-divider"></div>
+                                {% if current_user.is_admin %}
+                                <a class="menu-link" href="{{ url_for('bp.admin_users') }}">Admin</a>
+                                {% endif %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-header-divider"></div>
                 <div class="form-body">
-                    <div class="section-title">Location</div>
-                    <div class="grid">
+                    <div>
+                        <label>Coordinates</label>
+                        <input
+                            type="text"
+                            name="coords"
+                            value="{{ defaults.center1 }}, {{ defaults.center2 }}"
+                            placeholder="lat, lon"
+                        />
+                    </div>
+                    <input type="hidden" name="job_name" value="{{ defaults.job_name }}" />
+                    <div class="grid two-col">
                         <div>
-                            <label>Coordinates</label>
+                            <label>Map Size</label>
                             <input
-                                type="text"
-                                name="coords"
-                                value="{{ defaults.center1 }}, {{ defaults.center2 }}"
-                                placeholder="lat, lon"
-                            />
-                        </div>
-                        <div>
-                            <label>Name (Optional)</label>
-                            <input
-                                type="text"
-                                name="job_name"
-                                value="{{ defaults.job_name }}"
-                                placeholder="Custom name"
-                                maxlength="120"
-                            />
-                        </div>
-                        <div>
-                            <label>Map Size (Square)</label>
-                            <input
+                                id="mapSizeInput"
                                 type="number"
                                 step="any"
                                 name="size"
@@ -121,90 +227,25 @@
                         </div>
                     </div>
 
-                    <div class="section-title" style="margin-top: 16px">
-                        Outputs
-                    </div>
-                    <div class="check-row">
-                        <label class="check" title="contours.dxf (DXF)"
-                            ><input
-                                type="checkbox"
-                                id="output_contours"
-                                name="output_contours"
-                                {%
-                                if
-                                defaults.output_contours
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Contours</label
-                        >
-                        <label class="check" title="terrain.xyz (XYZ)"
-                            ><input
-                                type="checkbox"
-                                id="output_xyz"
-                                name="output_xyz"
-                                {%
-                                if
-                                defaults.output_xyz
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Point Cloud</label
-                        >
-                        <label class="check" title="terrain.png (PNG)"
-                            ><input
-                                type="checkbox"
-                                id="output_naip"
-                                name="output_naip"
-                                {%
-                                if
-                                defaults.output_naip
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Satellite Image</label
-                        >
-                    </div>
-                    <div class="check-row" style="margin-top: 6px">
-                        <label class="check" title="terrain.obj (OBJ)"
-                            ><input
-                                type="checkbox"
-                                id="output_terrain"
-                                name="output_terrain"
-                                {%
-                                if
-                                defaults.output_terrain
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Terrain Mesh</label
-                        >
-                        <label class="check" title="buildings.obj (OBJ)"
-                            ><input
-                                type="checkbox"
-                                id="output_buildings"
-                                name="output_buildings"
-                                {%
-                                if
-                                defaults.output_buildings
-                                %}checked{%
-                                endif
-                                %}
-                            />
-                            Building Massing</label
-                        >
+                    <div class="outputs-block">
+                        <label class="outputs-label">Outputs</label>
+                        <div class="output-toggle-grid">
+                            <button type="button" class="output-toggle-btn {% if defaults.output_contours %}active{% endif %}" data-input="output_contours" title="contours.dxf">Contours</button>
+                            <button type="button" class="output-toggle-btn {% if defaults.output_xyz %}active{% endif %}" data-input="output_xyz" title="terrain.xyz">Point Cloud</button>
+                            <button type="button" class="output-toggle-btn {% if defaults.output_naip %}active{% endif %}" data-input="output_naip" title="terrain.png">Satellite Image</button>
+                            <button type="button" class="output-toggle-btn {% if defaults.output_terrain %}active{% endif %}" data-input="output_terrain" title="terrain.obj">Mesh</button>
+                            <button type="button" class="output-toggle-btn {% if defaults.output_buildings %}active{% endif %}" data-input="output_buildings" title="buildings.obj">Buildings</button>
+                        </div>
+                        <input type="checkbox" id="output_contours" name="output_contours" class="visually-hidden" {% if defaults.output_contours %}checked{% endif %} />
+                        <input type="checkbox" id="output_xyz" name="output_xyz" class="visually-hidden" {% if defaults.output_xyz %}checked{% endif %} />
+                        <input type="checkbox" id="output_naip" name="output_naip" class="visually-hidden" {% if defaults.output_naip %}checked{% endif %} />
+                        <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" {% if defaults.output_terrain %}checked{% endif %} />
+                        <input type="checkbox" id="output_buildings" name="output_buildings" class="visually-hidden" {% if defaults.output_buildings %}checked{% endif %} />
                     </div>
 
-                    <div class="section-title" style="margin-top: 18px">
-                        Settings
-                    </div>
                     <div id="advancedControls" class="advanced-controls">
                         <div id="meshResolutionSection">
-                            <label>Output Resolution</label>
+                            <label>Resolution</label>
                             <div class="slider-row">
                                 <input
                                     type="range"
@@ -225,19 +266,18 @@
                             </div>
                         </div>
 
-                        <div class="grid two-col">
-                            <div id="rotationSection">
-                                <label
-                                    title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point. terrain.png stays north-up on disk, while texture mapping remains aligned to the rotated terrain mesh."
-                                    >Project North (Deg)</label
-                                >
-                                <input
-                                    type="number"
-                                    step="any"
-                                    name="rotate_z"
-                                    value="{{ defaults.rotate_z }}"
-                                />
-                            </div>
+                        <div id="rotationSection">
+                            <label
+                                title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point. terrain.png stays north-up on disk, while texture mapping remains aligned to the rotated terrain mesh."
+                                >North (degrees)</label
+                            >
+                            <input
+                                id="northInput"
+                                type="number"
+                                step="any"
+                                name="rotate_z"
+                                value="{{ defaults.rotate_z }}"
+                            />
                         </div>
 
                         <div id="contourSmoothingSection">
@@ -266,9 +306,7 @@
                         <div class="grid two-col">
                             <div id="contourIntervalSection">
                                 <label
-                                    >Contour Interval (<span data-unit-label
-                                        >feet</span
-                                    >)</label
+                                    >Contour Interval</label
                                 >
                                 <div
                                     class="segmented"
@@ -352,14 +390,14 @@
 
                         <div class="grid two-col">
                             <div id="xyzSamplingSection">
-                                <label>Point Cloud Mode</label>
+                                <label>Point Cloud</label>
                                 <select id="xyz_mode" name="xyz_mode">
                                     <option value="contours" {% if defaults.xyz_mode is equalto 'contours' %}selected{% endif %}>Contours</option>
                                     <option value="grid" {% if defaults.xyz_mode is equalto 'grid' %}selected{% endif %}>Uniform Grid</option>
                                 </select>
                             </div>
                             <div id="imageQualitySection">
-                                <label>Satellite Image Quality</label>
+                                <label>Image Quality</label>
                                 <div
                                     class="segmented"
                                     data-target="image_quality"
@@ -382,99 +420,32 @@
                                 />
                             </div>
                         </div>
-                        <div id="buildingHeightsSection" class="grid two-col">
-                            <div>
-                                <label>Min Building Height</label>
-                                <input
-                                    type="number"
-                                    step="any"
-                                    name="random_min_height"
-                                    value="{{ defaults.random_min_height }}"
-                                />
-                            </div>
-                            <div>
-                                <label>Max Building Height</label>
-                                <input
-                                    type="number"
-                                    step="any"
-                                    name="random_max_height"
-                                    value="{{ defaults.random_max_height }}"
-                                />
-                            </div>
-                        </div>
                     </div>
                 </div>
 
                 <div class="form-footer">
                     <div id="parcelAlert" class="status hidden"></div>
-                    <div class="form-actions">
-                        {% if can_build %}
-                        <button class="btn" id="runBtn" type="submit">
-                            Build
-                        </button>
-                        {% elif auth_enabled %}
-                        <a class="btn" id="loginBtn" href="{{ url_for('bp.auth_login', next='/') }}">
-                            Login to Build
-                        </a>
-                        {% endif %}
-                        <button class="btn secondary" type="reset">
-                            Reset
-                        </button>
+                    <div class="footer-divider"></div>
+                    <button class="btn btn-full" id="runBtn" type="submit">
+                        Build
+                    </button>
+                    <div class="form-byline">
+                        &copy; 2026 Meshd &nbsp;&middot;&nbsp; <a class="byline-source-link" href="{{ url_for('bp.data_sources') }}">Data Sources</a>
                     </div>
                 </div>
             </form>
-            <div class="card">
-                <div class="section-title">Recent Jobs</div>
-                <div id="recentJobs">
-                    {% if not can_build %}
-                    <p class="footer">Sign in to view your jobs and downloads.</p>
-                    {% elif recent_jobs %}
-                    <ul class="recent-job-list">
-                        {% for job in recent_jobs %}
-                        <li class="recent-job-row">
-                            <div class="recent-job-title">{{ job.display_title }}</div>
-                            {% if job.status == 'done' %}
-                            <div class="recent-job-actions">
-                                {% if job.preview_url %}
-                                <a
-                                    class="recent-job-pill"
-                                    href="{{ job.preview_url }}"
-                                    data-preview-modal="1"
-                                    data-preview-url="{{ job.preview_url }}"
-                                    data-preview-title="{{ job.name }}"
-                                >Preview</a>
-                                {% endif %}
-                                {% if job.download_all_url %}
-                                <a class="recent-job-pill" href="{{ job.download_all_url }}">Download</a>
-                                {% endif %}
-                                {% if job.match_settings_url %}
-                                <a class="recent-job-pill" href="{{ job.match_settings_url }}">Match Settings</a>
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="footer">No jobs yet.</p>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="note data-sources">
-                <span class="data-sources-label">Data sources:</span>
-                <div class="data-source-group">
-                    {% for source in data_sources %}
-                    <a
-                        class="data-pill"
-                        href="{{ source.url }}"
-                        target="_blank"
-                        rel="noopener"
-                        title="{{ source.details | join(', ') }}"
-                        >{{ source.name }}</a
-                    >
-                    {% endfor %}
-                </div>
-            </div>
+            {% if auth_enabled and current_user %}
+            <form
+                id="logoutForm"
+                method="post"
+                action="{{ url_for('bp.auth_logout') }}"
+                class="hidden"
+            >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            </form>
+            {% endif %}
+            </div><!-- /.layout-form-col -->
+            </div><!-- /.layout-split -->
         </main>
         <div id="previewModal" class="preview-modal hidden" aria-hidden="true">
             <div class="preview-modal-backdrop" data-preview-close="1"></div>
@@ -495,6 +466,11 @@
           window.APP_CONFIG = {
             parcelSources: {{ parcel_sources | tojson }},
             canBuild: {{ can_build | tojson }},
+            authEnabled: {{ auth_enabled | tojson }},
+            authLoginUrl: {{ url_for('bp.auth_login') | tojson }},
+            clerkPublishableKey: {{ clerk_publishable_key | tojson }},
+            clerkFrontendApiUrl: {{ clerk_frontend_api_url | tojson }},
+            initialPreviewUrl: {{ initial_preview_url | tojson }},
           };
         </script>
         <script src="{{ url_for('static', filename='app.js') }}" defer></script>

@@ -1,4 +1,5 @@
 """Form parsing, defaults, provider helpers, and parcel/data-source payloads."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -18,10 +19,10 @@ from ..config import (
 from ..parcels.registry import load_sources
 from . import settings as _settings
 
-
 # ---------------------------------------------------------------------------
 # Low-level parsers
 # ---------------------------------------------------------------------------
+
 
 def parse_float(value: str | None) -> Optional[float]:
     if value is None:
@@ -81,6 +82,7 @@ def provider_label(provider: str) -> str:
 # Status display helpers
 # ---------------------------------------------------------------------------
 
+
 def status_label(status: str) -> str:
     mapping = {
         "queued": "Queued",
@@ -121,6 +123,7 @@ def resolve_image_quality(value: str | None) -> tuple[float, int, bool]:
 # Coverage cache
 # ---------------------------------------------------------------------------
 
+
 def coverage_cache_key(lon: float, lat: float) -> str:
     return f"{round(lon, 4)},{round(lat, 4)}"
 
@@ -129,17 +132,18 @@ def coverage_cache_key(lon: float, lat: float) -> str:
 # Form defaults / prefill
 # ---------------------------------------------------------------------------
 
+
 def snapshot_defaults() -> Dict[str, Any]:
     outputs = set(DEFAULT_OUTPUTS)
     return {
         "out": str(_settings._config.out_dir),
         "units": "feet",
-        "provider": "va",
-        "provider_label": "VGIN (Virginia)",
-        "center1": 37.5390116184146,
-        "center2": -77.43353162833343,
+        "provider": "national",
+        "provider_label": "USGS 3DEP (National)",
+        "center1": 36.09841234052352,
+        "center2": -112.0952885242688,
         "job_name": "",
-        "clip_size": 1500.0,
+        "clip_size": 3000.0,
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 5,
         "rotate_z": 0.0,
@@ -151,7 +155,7 @@ def snapshot_defaults() -> Dict[str, Any]:
         "output_terrain": "terrain" in outputs,
         "output_buildings": "buildings" in outputs,
         "output_contours": "contours" in outputs,
-        "output_naip": "naip" in outputs,
+        "output_naip": True,
         "output_xyz": "xyz" in outputs,
         "min_height": DEFAULT_MIN_HEIGHT,
         "max_height": DEFAULT_MAX_HEIGHT,
@@ -194,9 +198,7 @@ def extract_form_defaults(
         "rotate_z": rotate_z,
         "contour_interval": contour_interval if contour_interval is not None else 2.0,
         "dxf_contour_spacing": (
-            dxf_contour_spacing
-            if dxf_contour_spacing is not None
-            else DEFAULT_DXF_CONTOUR_SPACING
+            dxf_contour_spacing if dxf_contour_spacing is not None else DEFAULT_DXF_CONTOUR_SPACING
         ),
         "dxf_include_parcels": dxf_include_parcels,
         "dxf_include_buildings": dxf_include_buildings,
@@ -249,6 +251,7 @@ def merge_prefill_defaults(
 # Parcel / data-source payloads
 # ---------------------------------------------------------------------------
 
+
 def parcel_sources_payload() -> List[Dict[str, Any]]:
     sources = []
     for source in load_sources():
@@ -266,8 +269,7 @@ def parcel_sources_payload() -> List[Dict[str, Any]]:
             }
         if source.exclude:
             payload["exclude"] = [
-                {"xmin": b[0], "ymin": b[1], "xmax": b[2], "ymax": b[3]}
-                for b in source.exclude
+                {"xmin": b[0], "ymin": b[1], "xmax": b[2], "ymax": b[3]} for b in source.exclude
             ]
         sources.append(payload)
     return sources

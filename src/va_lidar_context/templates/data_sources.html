@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Data Sources – Meshd</title>
+        <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+        <script>
+            (function(){var t=localStorage.getItem('terrain-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');})();
+        </script>
+    </head>
+    <body class="sources-page">
+        <div class="sources-container">
+            <a class="sources-back" href="{{ url_for('bp.index') }}">← Back</a>
+            <h1 class="sources-title">Data Sources</h1>
+            <p class="sources-intro">Meshd uses the following third-party data sources to generate terrain models.</p>
+            <ul class="sources-list">
+                {% for source in sources %}
+                <li class="sources-item">
+                    <div class="sources-item-name">{{ source.name }}</div>
+                    <a class="sources-item-url" href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a>
+                    {% if source.details %}
+                    <ul class="sources-item-details">
+                        {% for detail in source.details %}
+                        <li>{{ detail }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="sources-footer">&copy; 2026 Meshd</p>
+        </div>
+    </body>
+</html>

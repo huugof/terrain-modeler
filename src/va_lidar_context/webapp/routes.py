@@ -116,6 +116,10 @@ _coverage_cache_lock = threading.Lock()
 _LONGPOLL_COUNTS: Dict[str, int] = {}
 _LONGPOLL_LOCK = threading.Lock()
 _LONGPOLL_MAX_PER_USER = int(os.getenv("LONGPOLL_MAX_PER_USER", "3"))
+_DEFAULT_PREVIEW_BASE_JOB_ID = "grand-canyon-default"
+_DEFAULT_PREVIEW_NAME = "Grand Canyon"
+_DEFAULT_PREVIEW_CENTER = (36.09841234052352, -112.0952885242688)
+_DEFAULT_PREVIEW_SIZE_FEET = 3000.0
 
 
 class _LongPollSlot:
@@ -183,6 +187,84 @@ def _safe_next_path(value: Any) -> str:
     return path
 
 
+def _job_access_denied_response(message: str) -> Any:
+    if _settings.AUTH_ENABLED and current_user() is None:
+        return _unauthorized_response()
+    return _forbidden_response(message)
+
+
+def _enforce_job_access(job_id: str, message: str) -> Any:
+    if user_can_access_job(job_id):
+        return None
+    return _job_access_denied_response(message)
+
+
+def _default_preview_job_id_for_user(user: Optional[Dict[str, Any]]) -> str:
+    if _settings.AUTH_ENABLED and isinstance(user, dict) and isinstance(user.get("id"), int):
+        return f"{_DEFAULT_PREVIEW_BASE_JOB_ID}-u{int(user['id'])}"
+    return _DEFAULT_PREVIEW_BASE_JOB_ID
+
+
+def _ensure_default_preview_job(user: Optional[Dict[str, Any]]) -> bool:
+    """Seed a default preview job from preloaded artifacts when a user has no jobs.
+
+    Expected preloaded location: ``<OUT_DIR>/grand-canyon-default/`` containing
+    at least one preview mesh artifact (terrain.obj/buildings.obj/combined.obj).
+    """
+    user_id = (
+        int(user["id"]) if isinstance(user, dict) and isinstance(user.get("id"), int) else None
+    )
+
+    output_dir = _settings.OUT_DIR / _DEFAULT_PREVIEW_BASE_JOB_ID
+    if not output_dir.exists() or not output_dir.is_dir():
+        return False
+
+    outputs = _collect_outputs(output_dir)
+    files_raw = outputs.get("files") if isinstance(outputs, dict) else []
+    files = [str(name) for name in files_raw if isinstance(name, str)]
+    if not files:
+        return False
+    if not any(name in {"terrain.obj", "buildings.obj", "combined.obj"} for name in files):
+        return False
+
+    job_id = _default_preview_job_id_for_user(user)
+    target = (
+        f"latlon:{_DEFAULT_PREVIEW_CENTER[0]},{_DEFAULT_PREVIEW_CENTER[1]} "
+        f"size={_DEFAULT_PREVIEW_SIZE_FEET}"
+    )
+    form_defaults = snapshot_defaults()
+    form_defaults["job_name"] = _DEFAULT_PREVIEW_NAME
+    summary = {
+        "out": str(_settings.OUT_DIR),
+        "target": target,
+        "provider": "national",
+        "provider_label": provider_label("national"),
+        "name": _DEFAULT_PREVIEW_NAME,
+        "custom_name": _DEFAULT_PREVIEW_NAME,
+        "form_defaults": form_defaults,
+        "outputs": {"dir": str(output_dir), "files": files},
+    }
+
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            return False
+        job = Job(
+            job_id=job_id,
+            status="done",
+            created_at=1.0,
+            user_id=user_id,
+            finished_at=time.time(),
+            summary=summary,
+        )
+        JOBS[job_id] = job
+
+    if _settings.AUTH_ENABLED and user_id is not None:
+        auth_store.record_job_owner(_settings.DB_PATH, job_id, user_id)
+    _persist_job_snapshot(job)
+    _notify_recent_jobs_change()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Cleanup helpers (live in routes since they depend on app-level settings)
 # ---------------------------------------------------------------------------
@@ -206,6 +288,14 @@ def _cleanup_out_dir(logger: Any) -> None:
             logger.info(f"Cleanup: removed {entry}")
         except Exception as exc:
             logger.warning(f"Cleanup failed for {entry}: {exc}")
+
+
+def _path_within_out_dir(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(_settings.OUT_DIR.resolve())
+        return True
+    except Exception:
+        return False
 
 
 def _cleanup_loop() -> None:
@@ -261,6 +351,13 @@ def inject_user_context():
 @_rate_limit("healthz", hourly=120, daily=2000)
 def healthz():
     return jsonify({"status": "ok"})
+
+
+@bp.route("/sources")
+def data_sources():
+    parcel_sources = parcel_sources_payload()
+    sources = data_sources_payload(parcel_sources)
+    return render_template("data_sources.html", sources=sources)
 
 
 @bp.route("/auth/login")
@@ -343,11 +440,28 @@ def index():
     user = current_user()
     can_build = (not _settings.AUTH_ENABLED) or (user is not None)
     jobs = _jobs_for_user(user)
+    initial_preview_url = None
+    if not jobs:
+        _ensure_default_preview_job(user)
+        jobs = _jobs_for_user(user)
+    if _settings.AUTH_ENABLED and user is None:
+        preview_job_id = _default_preview_job_id_for_user(None)
+        if user_can_access_job(preview_job_id):
+            with JOBS_LOCK:
+                preview_job = JOBS.get(preview_job_id)
+            if preview_job is not None:
+                initial_preview_url = _recent_job_payload(preview_job, 1).get("preview_url")
     sequence_by_job_id = {job.job_id: idx + 1 for idx, job in enumerate(jobs)}
     recent_jobs = jobs[-RECENT_JOBS_LIMIT:][::-1]
     recent_jobs_data = [
         _recent_job_payload(job, sequence_by_job_id.get(job.job_id, 0)) for job in recent_jobs
     ]
+    if initial_preview_url is None:
+        for item in recent_jobs_data:
+            preview_url = item.get("preview_url")
+            if isinstance(preview_url, str) and preview_url:
+                initial_preview_url = preview_url
+                break
     return render_template(
         "index.html",
         defaults=defaults,
@@ -355,6 +469,9 @@ def index():
         parcel_sources=parcel_sources,
         recent_jobs=recent_jobs_data,
         can_build=can_build,
+        clerk_publishable_key=_settings.CLERK_PUBLISHABLE_KEY,
+        clerk_frontend_api_url=_settings.CLERK_FRONTEND_API_URL,
+        initial_preview_url=initial_preview_url,
         retention_days=_settings.RETENTION_DAYS,
     )
 
@@ -709,10 +826,9 @@ def run_job():
 
 @bp.route("/jobs/<job_id>")
 def job_status(job_id: str):
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
-    if not user_can_access_job(job_id):
-        return _forbidden_response("Not allowed to access this job.")
+    denied = _enforce_job_access(job_id, "Not allowed to access this job.")
+    if denied is not None:
+        return denied
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
@@ -729,10 +845,9 @@ def job_status(job_id: str):
 
 @bp.route("/logs/<job_id>")
 def job_logs(job_id: str):
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
-    if not user_can_access_job(job_id):
-        return _forbidden_response("Not allowed to access this job.")
+    denied = _enforce_job_access(job_id, "Not allowed to access this job.")
+    if denied is not None:
+        return denied
     offset = parse_int(request.args.get("offset")) or 0
     wait_seconds = parse_float(request.args.get("wait")) or 0.0
     offset = max(0, offset)
@@ -770,10 +885,9 @@ def job_logs(job_id: str):
 
 @bp.route("/jobs/<job_id>/artifacts")
 def job_artifacts(job_id: str):
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
-    if not user_can_access_job(job_id):
-        return _forbidden_response("Not allowed to access this job.")
+    denied = _enforce_job_access(job_id, "Not allowed to access this job.")
+    if denied is not None:
+        return denied
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
@@ -796,10 +910,9 @@ def job_artifacts(job_id: str):
 def job_download(job_id: str, name: str):
     if "/" in name or "\\" in name:
         return jsonify({"error": "Invalid file name."}), 400
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
-    if not user_can_access_job(job_id):
-        return _forbidden_response("Not allowed to access this job.")
+    denied = _enforce_job_access(job_id, "Not allowed to access this job.")
+    if denied is not None:
+        return denied
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
@@ -823,10 +936,9 @@ def job_download(job_id: str, name: str):
 
 @bp.route("/jobs/<job_id>/download-all")
 def job_download_all(job_id: str):
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
-    if not user_can_access_job(job_id):
-        return _forbidden_response("Not allowed to access this job.")
+    denied = _enforce_job_access(job_id, "Not allowed to access this job.")
+    if denied is not None:
+        return denied
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
@@ -852,6 +964,60 @@ def job_download_all(job_id: str):
         as_attachment=True,
         download_name=f"{job_id}_artifacts.zip",
     )
+
+
+@bp.route("/jobs/<job_id>/delete", methods=["POST"])
+def job_delete(job_id: str):
+    denied = _enforce_job_access(job_id, "Not allowed to delete this job.")
+    if denied is not None:
+        return denied
+    if not validate_csrf():
+        return jsonify({"error": "Invalid CSRF token."}), 400
+
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is not None and job.status in ("queued", "running"):
+            return jsonify({"error": "Cannot delete an active job."}), 409
+
+    candidate_paths: list[Path] = [_settings.OUT_DIR / job_id]
+    if job is not None:
+        output_dir = _resolve_job_output_dir(job)
+        if output_dir is not None:
+            candidate_paths.append(output_dir)
+
+    seen_paths: set[Path] = set()
+    for path in candidate_paths:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            continue
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        if not _path_within_out_dir(resolved):
+            continue
+        try:
+            if resolved.is_dir():
+                shutil.rmtree(resolved)
+            elif resolved.exists():
+                resolved.unlink()
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            get_logger().warning("Failed to delete job path %s: %s", resolved, exc)
+            return jsonify({"error": "Failed to delete job files."}), 500
+
+    with JOBS_LOCK:
+        JOBS.pop(job_id, None)
+
+    try:
+        auth_store.delete_job(_settings.DB_PATH, job_id)
+    except Exception as exc:
+        get_logger().warning("Failed to delete persisted job %s: %s", job_id, exc)
+        return jsonify({"error": "Failed to delete job record."}), 500
+
+    _notify_recent_jobs_change()
+    return jsonify({"ok": True, "job_id": job_id})
 
 
 @bp.route("/internal/worker/jobs/<job_id>/complete", methods=["POST"])

@@ -315,6 +315,14 @@ def get_job_owner_id(db_path: Path, job_id: str) -> Optional[int]:
     return int(value) if value is not None else None
 
 
+def delete_job(db_path: Path, job_id: str) -> None:
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM job_artifacts WHERE job_id = ?", (job_id,))
+        conn.execute("DELETE FROM active_jobs WHERE job_id = ?", (job_id,))
+        conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+        conn.commit()
+
+
 def upsert_job_snapshot(
     db_path: Path,
     job_id: str,

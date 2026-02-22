@@ -253,6 +253,27 @@ def test_security_headers_on_response():
     assert "https://unpkg.com" in csp
 
 
+def test_security_headers_include_clerk_frontend_in_script_and_connect(monkeypatch):
+    from va_lidar_context.webapp import create_app
+
+    cfg = load_config(
+        overrides={
+            "desktop_mode": True,
+            "clerk_frontend_api_url": "https://clerk.example.com",
+        }
+    )
+    monkeypatch.setattr(_webapp_settings, "_config", cfg)
+    flask_app = create_app(config=cfg)
+    client = flask_app.test_client()
+    resp = client.get("/healthz")
+    csp = resp.headers["Content-Security-Policy"]
+    assert (
+        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://clerk.example.com"
+        in csp
+    )
+    assert "connect-src 'self' https://clerk.example.com" in csp
+
+
 def test_auth_login_template_has_no_unpkg_clerk_fallback_and_uses_sri():
     content = Path("src/va_lidar_context/templates/auth_login.html").read_text()
     assert "https://unpkg.com/@clerk/clerk-js@" not in content

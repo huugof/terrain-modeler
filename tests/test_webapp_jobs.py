@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from va_lidar_context import auth_store, webapp
 import va_lidar_context.webapp.auth as _webapp_auth
 import va_lidar_context.webapp.jobs as _webapp_jobs
 import va_lidar_context.webapp.settings as _webapp_settings
+from va_lidar_context import auth_store, webapp
 
 
 @pytest.fixture()
@@ -22,7 +22,9 @@ def auth_webapp_env(tmp_path, monkeypatch):
 
     from va_lidar_context.webapp.settings import load_config
 
-    test_config = load_config(overrides={"auth_enabled": True, "db_path": db_path, "out_dir": out_dir})
+    test_config = load_config(
+        overrides={"auth_enabled": True, "db_path": db_path, "out_dir": out_dir}
+    )
     monkeypatch.setattr(_webapp_settings, "_config", test_config)
     monkeypatch.setattr(_webapp_auth, "_auth_started", False)
     monkeypatch.setattr(_webapp_jobs, "_recent_jobs_change_version", 0)
@@ -128,6 +130,69 @@ def test_recent_jobs_scoped_to_current_user(auth_webapp_env):
     assert [j["job_id"] for j in jobs2] == ["job-user2"]
 
 
+def test_index_seeds_preloaded_default_preview_for_new_user(auth_webapp_env):
+    preloaded_dir = auth_webapp_env["out_dir"] / "grand-canyon-default"
+    preloaded_dir.mkdir(parents=True, exist_ok=True)
+    (preloaded_dir / "terrain.obj").write_text("dummy terrain\n")
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/")
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+
+    user_id = int(auth_webapp_env["user1"]["id"])
+    seeded_job_id = f"grand-canyon-default-u{user_id}"
+    assert seeded_job_id in page
+    assert "/jobs/" + seeded_job_id in page
+
+    with webapp.JOBS_LOCK:
+        job = webapp.JOBS.get(seeded_job_id)
+    assert job is not None
+    assert job.status == "done"
+    assert job.summary.get("provider") == "national"
+    outputs = job.summary.get("outputs")
+    assert isinstance(outputs, dict)
+    assert outputs.get("dir") == str(preloaded_dir)
+    assert "terrain.obj" in (outputs.get("files") or [])
+
+
+def test_index_exposes_default_preview_to_anonymous_user(auth_webapp_env):
+    preloaded_dir = auth_webapp_env["out_dir"] / "grand-canyon-default"
+    preloaded_dir.mkdir(parents=True, exist_ok=True)
+    (preloaded_dir / "terrain.obj").write_text("dummy terrain\n")
+
+    client = webapp.app.test_client()
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "test-csrf"
+
+    page_resp = client.get("/")
+    assert page_resp.status_code == 200
+    page = page_resp.get_data(as_text=True)
+    assert 'id="runBtn"' in page
+    assert "Login to Build" not in page
+    assert 'data-auth-open="1"' in page
+    assert "/jobs/grand-canyon-default?tab=preview" in page
+
+    status_resp = client.get("/jobs/grand-canyon-default")
+    assert status_resp.status_code == 200
+
+
+def test_anonymous_user_cannot_access_private_jobs(auth_webapp_env):
+    _create_job(
+        job_id="job-private",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+    )
+
+    client = webapp.app.test_client()
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "test-csrf"
+    status_resp = client.get("/jobs/job-private", headers={"Accept": "application/json"})
+    assert status_resp.status_code == 401
+
+
 def test_recent_jobs_use_user_sequence_labels(auth_webapp_env):
     owner_id = int(auth_webapp_env["user1"]["id"])
     base = time.time()
@@ -173,6 +238,12 @@ def test_non_owner_cannot_access_job_routes(auth_webapp_env):
     download_resp = client2.get("/jobs/job-owned/download/terrain.obj")
     assert download_resp.status_code == 403
 
+    delete_resp = client2.post(
+        "/jobs/job-owned/delete",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert delete_resp.status_code == 403
+
 
 def test_download_all_and_inline_download(auth_webapp_env):
     _create_job(
@@ -195,17 +266,11 @@ def test_download_all_and_inline_download(auth_webapp_env):
 
     attachment_resp = client.get("/jobs/job-zip/download/terrain.obj")
     assert attachment_resp.status_code == 200
-    assert (
-        "attachment"
-        in (attachment_resp.headers.get("Content-Disposition") or "").lower()
-    )
+    assert "attachment" in (attachment_resp.headers.get("Content-Disposition") or "").lower()
 
     inline_resp = client.get("/jobs/job-zip/download/terrain.obj?inline=1")
     assert inline_resp.status_code == 200
-    assert (
-        "attachment"
-        not in (inline_resp.headers.get("Content-Disposition") or "").lower()
-    )
+    assert "attachment" not in (inline_resp.headers.get("Content-Disposition") or "").lower()
 
 
 def test_download_rejects_invalid_file_name(auth_webapp_env):
@@ -220,6 +285,54 @@ def test_download_rejects_invalid_file_name(auth_webapp_env):
     client = _client_for_sid(auth_webapp_env["sid1"])
     resp = client.get("/jobs/job-safe/download/..%5Csecret.txt")
     assert resp.status_code == 400
+
+
+def test_delete_job_removes_outputs_and_recent_entry(auth_webapp_env):
+    _create_job(
+        job_id="job-delete",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+
+    delete_resp = client.post(
+        "/jobs/job-delete/delete",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert delete_resp.status_code == 200
+    payload = delete_resp.get_json()
+    assert payload["ok"] is True
+
+    assert not (auth_webapp_env["out_dir"] / "job-delete").exists()
+    with webapp.JOBS_LOCK:
+        assert "job-delete" not in webapp.JOBS
+
+    recent_resp = client.get("/recent-jobs")
+    assert recent_resp.status_code == 200
+    jobs = recent_resp.get_json()["jobs"]
+    assert "job-delete" not in [item["job_id"] for item in jobs]
+
+
+def test_delete_active_job_is_rejected(auth_webapp_env):
+    _create_job(
+        job_id="job-running-delete",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["terrain.obj"],
+        status="running",
+    )
+    client = _client_for_sid(auth_webapp_env["sid1"])
+
+    delete_resp = client.post(
+        "/jobs/job-running-delete/delete",
+        headers={"X-CSRF-Token": "test-csrf", "X-Requested-With": "fetch"},
+    )
+    assert delete_resp.status_code == 409
+    payload = delete_resp.get_json()
+    assert "active job" in payload["error"].lower()
 
 
 def test_recent_jobs_rehydrate_from_db(auth_webapp_env, monkeypatch):

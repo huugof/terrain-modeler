@@ -195,7 +195,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         csp_parts = [
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net",
-            "style-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net",
             "img-src 'self' data: blob:",
             "connect-src 'self'",
             "worker-src 'self' blob:",
@@ -204,6 +204,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         clerk_origin = (_cfg.clerk_frontend_api_url or "").rstrip("/")
         if clerk_origin:
             csp_parts[1] += f" {clerk_origin}"
+            csp_parts[2] += f" {clerk_origin}"
+            csp_parts[3] += f" {clerk_origin}"
+            csp_parts[4] += f" {clerk_origin}"
+            csp_parts[1] += " https://accounts.google.com https://apis.google.com"
+            csp_parts[2] += " https://accounts.google.com"
+            csp_parts[3] += " https://accounts.google.com https://img.clerk.com"
+            csp_parts[4] += " https://accounts.google.com"
+            csp_parts.append(
+                f"font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com {clerk_origin}"
+            )
+            csp_parts.append(f"frame-src 'self' https://accounts.google.com {clerk_origin}")
         response.headers["Content-Security-Policy"] = "; ".join(csp_parts)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"

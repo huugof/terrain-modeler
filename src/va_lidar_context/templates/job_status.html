@@ -133,7 +133,7 @@
       }
       body.embed-mode #preview-controls {
         position: absolute;
-        left: 12px;
+        left: calc(460px + 12px);
         bottom: 12px;
         top: auto;
         right: auto;
@@ -211,6 +211,7 @@
       }
       body.embed-mode #preview-message {
         color: #d9d9d9;
+        left: calc(50% + 210px);
       }
       body.embed-mode .tab-panel {
         flex: 1;
@@ -289,14 +290,14 @@
           <div id="preview-container">
             <div id="preview-message">Waiting for model files...</div>
           </div>
-          <div id="preview-controls">
+          <div id="preview-controls" style="display:none">
             <button id="preview-wireframe-btn" type="button" onclick="toggleWireframe()">Wireframe</button>
             {% if embed_mode %}
             <select id="preview-scene-select" aria-label="Preview model"></select>
             {% endif %}
             <select id="preview-file"></select>
           </div>
-          <div id="preview-zoom-controls" aria-label="Zoom controls">
+          <div id="preview-zoom-controls" style="display:none" aria-label="Zoom controls">
             <button type="button" onclick="zoomOut()" aria-label="Zoom out">-</button>
             <button type="button" onclick="zoomIn()" aria-label="Zoom in">+</button>
           </div>
@@ -353,6 +354,7 @@
         renderer: null,
         controls: null,
         currentObject: null,
+        pendingBuildingsLoad: false,
       };
       const EMBED_MODE = {{ embed_mode | tojson }};
 
@@ -427,8 +429,8 @@
             key: 'scene',
             label: 'Terrain + Buildings',
             parts: [
-              { obj: 'terrain.obj', mtl: terrainMtl },
-              { obj: 'buildings.obj', mtl: null },
+              { key: 'terrain', obj: 'terrain.obj', mtl: terrainMtl },
+              { key: 'buildings', obj: 'buildings.obj', mtl: null },
             ],
           });
         }
@@ -436,21 +438,21 @@
           models.push({
             key: 'combined',
             label: 'Combined',
-            parts: [{ obj: 'combined.obj', mtl: combinedMtl }],
+            parts: [{ key: 'combined', obj: 'combined.obj', mtl: combinedMtl }],
           });
         }
         if (hasTerrain) {
           models.push({
             key: 'terrain',
             label: 'Terrain',
-            parts: [{ obj: 'terrain.obj', mtl: terrainMtl }],
+            parts: [{ key: 'terrain', obj: 'terrain.obj', mtl: terrainMtl }],
           });
         }
         if (hasBuildings) {
           models.push({
             key: 'buildings',
             label: 'Buildings',
-            parts: [{ obj: 'buildings.obj', mtl: null }],
+            parts: [{ key: 'buildings', obj: 'buildings.obj', mtl: null }],
           });
         }
         return models;
@@ -499,11 +501,17 @@
         previewState.controls = controls;
         previewState.initialized = true;
 
+        const VIEW_OFFSET_X = EMBED_MODE ? -420 : 0;
         const resize = () => {
           if (!previewState.renderer || !previewState.camera) return;
           const width = Math.max(container.clientWidth, 1);
           const height = Math.max(container.clientHeight, 1);
-          previewState.camera.aspect = width / height;
+          // Render into a virtual frame and choose a left/right crop to shift framing.
+          const offsetMagnitude = Math.abs(VIEW_OFFSET_X);
+          const virtualWidth = width + offsetMagnitude;
+          const viewOffsetX = VIEW_OFFSET_X >= 0 ? offsetMagnitude : 0;
+          previewState.camera.aspect = virtualWidth / height;
+          previewState.camera.setViewOffset(virtualWidth, height, viewOffsetX, 0, width, height);
           previewState.camera.updateProjectionMatrix();
           previewState.renderer.setSize(width, height, false);
         };
@@ -623,6 +631,8 @@
           for (const part of model.parts) {
             try {
               const partObj = await loadObjPart(part);
+              partObj.userData = partObj.userData || {};
+              partObj.userData.partKey = part.key || part.obj;
               group.add(partObj);
             } catch (error) {
               console.warn('Preview part failed', part.obj, error);
@@ -638,6 +648,15 @@
           updateSceneSelect();
           if (shouldResetView) resetCamera();
           setPreviewMessage('');
+          try {
+            if (
+              window.parent &&
+              window.parent !== window &&
+              typeof window.parent.syncPreviewToggleButtons === 'function'
+            ) {
+              window.parent.syncPreviewToggleButtons();
+            }
+          } catch (_) {}
         } catch (error) {
           const msg = (error && error.message) ? error.message : 'Failed to load preview model.';
           setPreviewMessage(msg);
@@ -695,6 +714,7 @@
         }
         updateSceneSelect();
         const defaultModel =
+          previewState.models.find((model) => model.key === 'terrain') ||
           previewState.models.find((model) => model.key === 'scene') ||
           previewState.models[0];
         if (defaultModel) renderModel(defaultModel.key);
@@ -747,6 +767,117 @@
         const wireframeBtn = document.getElementById('preview-wireframe-btn');
         if (!wireframeBtn) return;
         wireframeBtn.classList.toggle('is-active', previewState.wireframe);
+      }
+
+      function buildingsToggleAvailable() {
+        const keys = new Set(previewState.models.map((model) => model.key));
+        return keys.has('scene') && keys.has('terrain');
+      }
+
+      function getCurrentPartGroup(partKey) {
+        if (!previewState.currentObject || !partKey) return null;
+        for (const child of previewState.currentObject.children || []) {
+          if (child && child.userData && child.userData.partKey === partKey) {
+            return child;
+          }
+        }
+        return null;
+      }
+
+      function getScenePart(partKey) {
+        const sceneModel = previewState.models.find((model) => model.key === 'scene');
+        if (!sceneModel || !Array.isArray(sceneModel.parts)) return null;
+        return sceneModel.parts.find((part) => part.key === partKey) || null;
+      }
+
+      function buildingsVisible() {
+        if (!buildingsToggleAvailable()) return null;
+        const buildingsPart = getCurrentPartGroup('buildings');
+        if (buildingsPart) return buildingsPart.visible !== false;
+        if (previewState.currentModelKey === 'terrain') return false;
+        if (previewState.currentModelKey === 'scene' || previewState.currentModelKey === 'buildings') {
+          return true;
+        }
+        return false;
+      }
+
+      function setBuildingsVisible(visible) {
+        if (!buildingsToggleAvailable()) return false;
+        if (!previewState.currentObject) {
+          renderModel(visible ? 'scene' : 'terrain', { resetView: false });
+          return true;
+        }
+
+        const buildingsPart = getCurrentPartGroup('buildings');
+        if (buildingsPart) {
+          buildingsPart.visible = Boolean(visible);
+          previewState.currentModelKey = visible ? 'scene' : 'terrain';
+          updateSceneSelect();
+          try {
+            if (
+              window.parent &&
+              window.parent !== window &&
+              typeof window.parent.syncPreviewToggleButtons === 'function'
+            ) {
+              window.parent.syncPreviewToggleButtons();
+            }
+          } catch (_) {}
+          return true;
+        }
+
+        if (!visible) {
+          previewState.currentModelKey = 'terrain';
+          updateSceneSelect();
+          try {
+            if (
+              window.parent &&
+              window.parent !== window &&
+              typeof window.parent.syncPreviewToggleButtons === 'function'
+            ) {
+              window.parent.syncPreviewToggleButtons();
+            }
+          } catch (_) {}
+          return true;
+        }
+
+        const buildingsScenePart = getScenePart('buildings');
+        if (!buildingsScenePart || previewState.pendingBuildingsLoad) return false;
+        previewState.pendingBuildingsLoad = true;
+        setPreviewMessage('Loading buildings...');
+        loadObjPart(buildingsScenePart)
+          .then((partObj) => {
+            if (!previewState.currentObject || !previewState.scene) return;
+            partObj.userData = partObj.userData || {};
+            partObj.userData.partKey = 'buildings';
+            previewState.currentObject.add(partObj);
+            applyWireframeMode(previewState.wireframe);
+            previewState.currentModelKey = 'scene';
+            updateSceneSelect();
+            setPreviewMessage('');
+            try {
+              if (
+                window.parent &&
+                window.parent !== window &&
+                typeof window.parent.syncPreviewToggleButtons === 'function'
+              ) {
+                window.parent.syncPreviewToggleButtons();
+              }
+            } catch (_) {}
+          })
+          .catch((error) => {
+            const msg = (error && error.message) ? error.message : 'Failed to load buildings.';
+            setPreviewMessage(msg);
+          })
+          .finally(() => {
+            previewState.pendingBuildingsLoad = false;
+          });
+        return true;
+      }
+
+      function toggleBuildingsVisibility() {
+        const visible = buildingsVisible();
+        if (visible === null) return false;
+        return setBuildingsVisible(!visible);
       }
 
       function resetCamera() {
@@ -832,6 +963,9 @@
       }
 
       window.toggleWireframe = toggleWireframe;
+      window.toggleBuildingsVisibility = toggleBuildingsVisibility;
+      window.buildingsToggleAvailable = buildingsToggleAvailable;
+      window.buildingsVisible = buildingsVisible;
       window.resetCamera = resetCamera;
       window.zoomIn = zoomIn;
       window.zoomOut = zoomOut;
