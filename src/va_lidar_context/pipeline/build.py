@@ -229,23 +229,59 @@ def _stage_resolve_tile(
     """Stage 1: resolve tile / EPT source info. Returns tile_info dict."""
     logger = get_logger()
     provider = cfg.provider
+    explicit_tile_name = cfg.tile_name is not None
 
     if provider == "va":
         if lat is not None and lon is not None and tile_name is None:
             logger.info("Looking up tile from coordinates...")
-            tiles = vgin.tiles_for_point(lon, lat)
-            if len(tiles) > 1:
-                logger.warning(
-                    "Multiple tiles found at this location: "
-                    f"{[t['tile_name'] for t in tiles]}. Using first: {tiles[0]['tile_name']}"
-                )
-            tile_info = tiles[0]
-            tile_name = tile_info["tile_name"]
-            logger.info(f"Found tile: {tile_name}")
+            try:
+                tiles = vgin.tiles_for_point(lon, lat)
+            except Exception as exc:
+                # VGIN endpoints can intermittently fail with 5xx. For web
+                # coordinate-based requests, degrade gracefully to national.
+                if cfg.size is not None and not explicit_tile_name:
+                    logger.warning(
+                        "VGIN tile lookup failed (%s); falling back to national provider",
+                        exc,
+                    )
+                    provider = "national"
+                    tile_name = None
+                else:
+                    raise
+            else:
+                if len(tiles) > 1:
+                    logger.warning(
+                        "Multiple tiles found at this location: "
+                        f"{[t['tile_name'] for t in tiles]}. Using first: {tiles[0]['tile_name']}"
+                    )
+                tile_info = tiles[0]
+                tile_name = tile_info["tile_name"]
+                logger.info(f"Found tile: {tile_name}")
 
-        if tile_name is None:
-            raise ValueError("Either tile_name or --center must be provided")
-        return vgin.tile_lookup(tile_name)
+        if provider == "va":
+            if tile_name is None:
+                raise ValueError("Either tile_name or --center must be provided")
+            try:
+                tile_info = vgin.tile_lookup(tile_name)
+            except Exception as exc:
+                if (
+                    lat is not None
+                    and lon is not None
+                    and cfg.size is not None
+                    and not explicit_tile_name
+                ):
+                    logger.warning(
+                        "VGIN tile metadata lookup failed for %s (%s); falling back to national provider",
+                        tile_name,
+                        exc,
+                    )
+                    provider = "national"
+                    tile_name = None
+                else:
+                    raise
+            else:
+                tile_info.setdefault("provider", "va")
+                return tile_info
 
     # National provider
     if lat is None or lon is None:
@@ -1013,6 +1049,7 @@ def build(cfg: BuildConfig) -> BuildResult:
 
     logger.info("Stage 1/6: tile lookup")
     tile_info = _stage_resolve_tile(cfg, lat, lon, tile_name, clip_bbox_wgs84_hint, cache_dir)
+    provider = str(tile_info.get("provider") or provider)
     tile_name = tile_info.get("tile_name") or tile_name or ""
 
     job_center = None

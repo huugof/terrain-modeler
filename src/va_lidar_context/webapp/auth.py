@@ -236,17 +236,18 @@ def _verify_clerk_session_token(raw_token: str) -> Dict[str, Any]:
         raise RuntimeError("CLERK_JWKS_URL is not configured.")
     jwk_client = _clerk_jwk_client(jwks_url)
     signing_key = jwk_client.get_signing_key_from_jwt(raw_token)
-    # Use only the configured issuer — never derive from the unverified token's
-    # iss claim, as that would allow an attacker to forge a valid token by
-    # pointing iss at a JWKS endpoint they control.
-    issuer = _settings._config.clerk_issuer
+    configured_issuer = str(_settings._config.clerk_issuer or "").strip()
     claims = jwt.decode(
         raw_token,
         signing_key.key,
         algorithms=["RS256"],
-        options={"require": ["sub", "exp", "iat"]},
-        issuer=issuer if issuer else None,
+        options={"require": ["sub", "exp", "iat", "iss"]},
     )
+    # Accept issuer values that differ only by trailing slash.
+    if configured_issuer:
+        token_issuer = str(claims.get("iss") or "").strip()
+        if token_issuer.rstrip("/") != configured_issuer.rstrip("/"):
+            raise RuntimeError("Invalid issuer")
     azp = str(claims.get("azp") or "")
     if (
         _settings._config.clerk_authorized_parties

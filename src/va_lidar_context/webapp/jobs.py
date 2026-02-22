@@ -483,6 +483,7 @@ def _run_build_job(job: Job, cfg: BuildConfig) -> None:
         with job.change_cond:
             job.status = "error"
             job.error = sanitize_job_error(exc)
+        logging.getLogger(__name__).exception("Build %s failed", job.job_id)
         job_logger.exception("Build failed")
     finally:
         with job.change_cond:
