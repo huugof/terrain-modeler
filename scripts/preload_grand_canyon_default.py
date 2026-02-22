@@ -13,11 +13,18 @@ from va_lidar_context.pipeline.build import build
 DEFAULT_JOB_ID = "grand-canyon-default"
 DEFAULT_CENTER = (36.09841234052352, -112.0952885242688)
 DEFAULT_SIZE_FEET = 3000.0
+DEFAULT_TERRAIN_COMPLEXITY = 5
 PREVIEW_ARTIFACTS = ("terrain.obj", "buildings.obj", "combined.obj")
 
 
 def _has_preview_artifacts(path: Path) -> bool:
     return any((path / name).is_file() for name in PREVIEW_ARTIFACTS)
+
+
+def _terrain_sample_for_complexity(complexity: int) -> int:
+    """Mirror web-app mapping: 0..10 complexity -> terrain sample 11..1."""
+    complexity = max(0, min(10, complexity))
+    return max(1, 11 - complexity)
 
 
 def main() -> int:
@@ -52,6 +59,9 @@ def main() -> int:
         out_dir=out_dir,
         provider="national",
         outputs=("buildings", "terrain", "naip"),
+        terrain_sample=_terrain_sample_for_complexity(DEFAULT_TERRAIN_COMPLEXITY),
+        fill_dtm=True,
+        fill_hard=True,
         cleanup_intermediates=True,
     )
     result = build(cfg)
