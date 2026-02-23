@@ -59,6 +59,14 @@
                     borderRadius: '10px',
                     fontFamily: '"Avenir Next", "Avenir", "Futura", "Trebuchet MS", sans-serif',
                 },
+                elements: {
+                    // Show only the core card/form; hide any extra top header copy.
+                    header: { display: 'none' },
+                    logoBox: { display: 'none' },
+                    logoImage: { display: 'none' },
+                    headerTitle: { display: 'none' },
+                    headerSubtitle: { display: 'none' },
+                },
             };
             const LOGIN_REDIRECT_URL = buildLoginRedirectUrl();
             let exchangeInFlight = false;
