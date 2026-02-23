@@ -1224,7 +1224,7 @@ function openAuthModal(nextPath = "/") {
       }
       if (typeof clerk.openSignIn === "function") {
         clerk.openSignIn({
-          afterSignInUrl: normalizedNext,
+          fallbackRedirectUrl: normalizedNext,
         });
         return;
       }

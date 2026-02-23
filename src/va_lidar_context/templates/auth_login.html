@@ -160,7 +160,7 @@
                         return;
                     }
                     clerk.mountSignIn(document.getElementById('clerk-container'), {
-                        afterSignInUrl: window.location.href,
+                        fallbackRedirectUrl: window.location.href,
                         appearance: CLERK_APPEARANCE,
                     });
                     if (typeof clerk.addListener === 'function') {
