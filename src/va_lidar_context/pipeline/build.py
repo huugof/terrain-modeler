@@ -69,6 +69,37 @@ from ..util import download_file, ensure_dir, get_logger, write_json
 OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
 
 
+def parse_outputs(value: str | None, default: tuple[str, ...] = ("buildings", "terrain")) -> tuple[str, ...]:
+    """Parse and validate a comma-separated outputs string.
+
+    Returns a deduplicated tuple of valid output names. Raises ``ValueError``
+    for unknown names or an empty result.
+    """
+    if value is None:
+        return default
+    cleaned = [v.strip().lower() for v in value.split(",") if v.strip()]
+    if not cleaned:
+        raise ValueError("--outputs must contain at least one value")
+    unknown = [v for v in cleaned if v not in OUTPUT_CHOICES]
+    if unknown:
+        raise ValueError(
+            "Unknown outputs: "
+            + ", ".join(sorted(set(unknown)))
+            + f" (valid: {', '.join(sorted(OUTPUT_CHOICES))})"
+        )
+    seen: set[str] = set()
+    result: list[str] = []
+    for v in cleaned:
+        if v not in seen:
+            result.append(v)
+            seen.add(v)
+    return tuple(result)
+
+
+def _validate_outputs(outputs: Iterable[str]) -> set[str]:
+    return set(parse_outputs(",".join(str(o) for o in outputs if o is not None)))
+
+
 class _UvContext(NamedTuple):
     """Projection context for terrain UV computation.
 
@@ -87,38 +118,6 @@ class _UvContext(NamedTuple):
     raster_width: int
     raster_height: int
     use_raster_uv: bool
-
-
-def _validate_outputs(outputs: Iterable[str]) -> set[str]:
-    cleaned = []
-    for value in outputs:
-        if value is None:
-            continue
-        name = value.strip().lower()
-        if not name:
-            continue
-        cleaned.append(name)
-
-    if not cleaned:
-        raise ValueError("No outputs specified. Provide --outputs with at least one value.")
-
-    unknown = [name for name in cleaned if name not in OUTPUT_CHOICES]
-    if unknown:
-        raise ValueError(
-            "Unknown outputs: "
-            + ", ".join(sorted(set(unknown)))
-            + f" (valid: {', '.join(sorted(OUTPUT_CHOICES))})"
-        )
-
-    # Preserve order while de-duplicating
-    result: list[str] = []
-    seen: set[str] = set()
-    for name in cleaned:
-        if name in seen:
-            continue
-        result.append(name)
-        seen.add(name)
-    return set(result)
 
 
 def _national_job_name(lat: float, lon: float, size: float | None, units: str) -> str:
@@ -471,7 +470,6 @@ def _stage_download_laz_national(
             source_type = "laz"
 
     if source_type == "laz":
-        tile_name = tile_info.get("tile_name", "")
         health = rockyweb_health.check_rockyweb(cache_dir / "rockyweb_health.json", logger=logger)
         if not health.get("ok"):
             raise ValueError(

@@ -13,7 +13,6 @@ from ..config import (
     DEFAULT_MIN_HEIGHT,
     DEFAULT_OUTPUTS,
     DEFAULT_RESOLUTION,
-    DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
 )
 from ..constants import (

@@ -593,8 +593,6 @@ def test_rate_limiter_cleanup_removes_expired():
 def test_longpoll_slot_acquires_and_releases():
     import va_lidar_context.webapp.routes as routes_mod
     from va_lidar_context.webapp.routes import (
-        _LONGPOLL_COUNTS,
-        _LONGPOLL_MAX_PER_USER,
         _LongPollSlot,
     )
 
@@ -677,8 +675,9 @@ def test_web_cli_main_rejects_server_mode(monkeypatch):
     import sys
 
     import va_lidar_context.webapp as webapp
+    import va_lidar_context.webapp.settings as _webapp_settings
 
-    monkeypatch.setattr(webapp, "DESKTOP_MODE", False)
+    monkeypatch.setattr(_webapp_settings._config, "desktop_mode", False)
     monkeypatch.setattr(sys, "argv", ["va-lidar-context-web"])
     with pytest.raises(RuntimeError, match="desktop mode only"):
         webapp.main()
@@ -811,8 +810,12 @@ def test_persist_job_snapshot_logs_database_errors(monkeypatch):
 
     monkeypatch.setattr(jobs_mod.auth_store, "upsert_job_snapshot", _boom)
     job = Job(job_id="job-db-lock", status="queued", created_at=0.0)
+    with jobs_mod.JOBS_LOCK:
+        jobs_mod.JOBS["job-db-lock"] = job
     try:
         jobs_mod._persist_job_snapshot(job)
     finally:
+        with jobs_mod.JOBS_LOCK:
+            jobs_mod.JOBS.pop("job-db-lock", None)
         logger.removeHandler(handler)
     assert any("Failed to persist job snapshot for job-db-lock" in r.getMessage() for r in records)

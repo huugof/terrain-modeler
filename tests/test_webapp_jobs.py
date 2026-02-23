@@ -753,3 +753,40 @@ def test_job_logs_payload_includes_stage_fields(auth_webapp_env):
     assert payload["stage_index"] == 4
     assert payload["stage_total"] == 6
     assert payload["stage_progress"] == 67
+
+
+def test_persist_snapshot_after_delete_does_not_resurrect_job(auth_webapp_env):
+    """Regression test: _persist_job_snapshot must not recreate a deleted job in the DB.
+
+    Race condition: the build background thread may call _persist_job_snapshot
+    (e.g. during final teardown) after job_delete has already removed the job from
+    JOBS and the database. Without the JOBS_LOCK guard added to _persist_job_snapshot,
+    the INSERT ... ON CONFLICT upsert would recreate the deleted row, causing the job
+    to reappear in recent-jobs after a server restart.
+    """
+    owner_id = int(auth_webapp_env["user1"]["id"])
+    db_path = auth_webapp_env["db_path"]
+
+    job = _create_job(
+        job_id="job-delete-race",
+        owner_id=owner_id,
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=db_path,
+        files=["terrain.obj"],
+        status="done",
+    )
+
+    # Simulate job_delete: remove from JOBS dict and DB (as the route handler does).
+    with webapp.JOBS_LOCK:
+        webapp.JOBS.pop(job.job_id, None)
+    auth_store.delete_job(db_path, job.job_id)
+
+    # Simulate the build thread calling _persist_job_snapshot after deletion.
+    # This should be a no-op since the job is no longer in JOBS.
+    _webapp_jobs._persist_job_snapshot(job)
+
+    # The job must NOT be in the DB after the snapshot call.
+    rows = auth_store.list_recent_jobs(db_path)
+    assert not any(r["job_id"] == job.job_id for r in rows), (
+        "_persist_job_snapshot resurrected a deleted job in the DB"
+    )

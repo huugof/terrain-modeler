@@ -32,6 +32,7 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+.zed/
 
 # Runtime outputs / local data
 out/

@@ -8,9 +8,7 @@ import threading
 import time
 from pathlib import Path
 
-from va_lidar_context import webapp
 from va_lidar_context.webapp import Job, JobLogHandler
-
 
 # ---------------------------------------------------------------------------
 # 2.6: Log isolation — two concurrent jobs must not share log entries

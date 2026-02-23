@@ -16,7 +16,6 @@ from urllib.parse import urlparse as _urlparse
 
 from flask import (
     Blueprint,
-    g,
     jsonify,
     redirect,
     render_template,
@@ -105,9 +104,7 @@ from .jobs import (
 from .settings import (
     CLEANUP_INTERVAL_SECONDS,
     COVERAGE_CACHE_TTL_SECONDS,
-    DESKTOP_HOST,
     DESKTOP_MODE,
-    DESKTOP_PORT,
     JOB_LOG_WAIT_MAX_SECONDS,
     RECENT_JOBS_LIMIT,
     RECENT_JOBS_WAIT_MAX_SECONDS,
@@ -685,11 +682,6 @@ def run_job():
         outputs.append("xyz")
     if not outputs:
         return jsonify({"error": "Select at least one output."}), 400
-    output_terrain = "terrain" in outputs
-    output_buildings = "buildings" in outputs
-    output_contours = "contours" in outputs
-    output_naip = "naip" in outputs
-    output_xyz = "xyz" in outputs
 
     combine_output = False  # not exposed in web form; available via CLI --combine-output
 
@@ -802,11 +794,11 @@ def run_job():
             else "standard",
             random_min_height=random_min,
             random_max_height=random_max,
-            output_terrain=output_terrain,
-            output_buildings=output_buildings,
-            output_contours=output_contours,
-            output_naip=output_naip,
-            output_xyz=output_xyz,
+            output_terrain="terrain" in outputs,
+            output_buildings="buildings" in outputs,
+            output_contours=contours_enabled,
+            output_naip="naip" in outputs,
+            output_xyz=xyz_enabled,
             custom_name=custom_name,
         ),
     }

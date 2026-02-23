@@ -65,8 +65,7 @@ def main() -> int:
         cleanup_intermediates=True,
     )
     result = build(cfg)
-    output_dir = result.get("output_dir") if isinstance(result, dict) else None
-    print(f"Preloaded default preview ready at {output_dir or target_dir}")
+    print(f"Preloaded default preview ready at {result.output_dir or target_dir}")
     return 0
 
 

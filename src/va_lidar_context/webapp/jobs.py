@@ -415,6 +415,13 @@ def _rehydrate_jobs_from_store() -> None:
 def _persist_job_snapshot(job: Job) -> None:
     if not _settings.AUTH_ENABLED and not _settings.HMAC_KEYS and not _settings.JOB_HISTORY_ENABLED:
         return
+    # Guard against a race where the build thread calls this after job_delete has already
+    # removed the job from JOBS and the DB. Without this check, upsert_job_snapshot's
+    # INSERT ... ON CONFLICT would recreate the deleted row, causing the job to reappear
+    # in the recent-jobs list after a server restart.
+    with JOBS_LOCK:
+        if job.job_id not in JOBS:
+            return
     try:
         from .auth import ensure_auth_store  # avoid circular at module level
 

@@ -76,6 +76,18 @@ class TestParseInt:
 # ---------------------------------------------------------------------------
 
 
+class _ImmediateThread:
+    """Thread stub that runs the target synchronously in the calling thread."""
+
+    def __init__(self, target=None, args=(), daemon=None):
+        self._target = target
+        self._args = args
+
+    def start(self):
+        if self._target is not None:
+            self._target(*self._args)
+
+
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(_webapp_settings._config, "auth_enabled", False)
@@ -112,8 +124,6 @@ def test_invalid_coords_returns_400_not_500(client):
 
 def test_invalid_terrain_complexity_falls_back_to_default(client, monkeypatch):
     """Non-numeric terrain_complexity should fall through to default (2), not 500."""
-    import unittest.mock as mock
-
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
 
     # We only want to test that the form parsing doesn't blow up, not run the pipeline.
@@ -130,15 +140,6 @@ def test_invalid_terrain_complexity_falls_back_to_default(client, monkeypatch):
 def test_run_defaults_to_computed_heights_without_random_override(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
-
-    class _ImmediateThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self._target = target
-            self._args = args
-
-        def start(self):
-            if self._target is not None:
-                self._target(*self._args)
 
     def _capture_cfg(_job, cfg):
         captured["cfg"] = cfg
@@ -162,15 +163,6 @@ def test_run_maps_resolution_slider_to_upstream_terrain_resolution(client, monke
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
     monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", True)
 
-    class _ImmediateThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self._target = target
-            self._args = args
-
-        def start(self):
-            if self._target is not None:
-                self._target(*self._args)
-
     def _capture_cfg(_job, cfg):
         captured["cfg"] = cfg
 
@@ -192,15 +184,6 @@ def test_run_legacy_slider_mapping_when_upstream_resolution_disabled(client, mon
     captured = {}
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
     monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", False)
-
-    class _ImmediateThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self._target = target
-            self._args = args
-
-        def start(self):
-            if self._target is not None:
-                self._target(*self._args)
 
     def _capture_cfg(_job, cfg):
         captured["cfg"] = cfg
@@ -224,15 +207,6 @@ def test_run_slider_minimum_maps_to_25x_reduction_in_upstream_mode(client, monke
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
     monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", True)
 
-    class _ImmediateThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self._target = target
-            self._args = args
-
-        def start(self):
-            if self._target is not None:
-                self._target(*self._args)
-
     def _capture_cfg(_job, cfg):
         captured["cfg"] = cfg
 
@@ -254,15 +228,6 @@ def test_run_slider_minimum_maps_to_25x_reduction_in_legacy_mode(client, monkeyp
     captured = {}
     monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
     monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", False)
-
-    class _ImmediateThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self._target = target
-            self._args = args
-
-        def start(self):
-            if self._target is not None:
-                self._target(*self._args)
 
     def _capture_cfg(_job, cfg):
         captured["cfg"] = cfg

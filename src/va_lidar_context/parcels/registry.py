@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 from ..constants import MAX_RECORD_COUNT
 from ..providers.arcgis import paged_query_geojson

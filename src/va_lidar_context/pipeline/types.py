@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Tuple
 
 BBoxWGS84 = Tuple[float, float, float, float]
-OutputKind = Literal["buildings", "terrain", "contours", "parcels", "naip"]
+OutputKind = Literal["buildings", "terrain", "contours", "parcels", "naip", "xyz"]
 
 
 @dataclass(frozen=True)

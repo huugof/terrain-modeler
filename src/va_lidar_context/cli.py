@@ -2,63 +2,29 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Iterable
 
 from .config import (
-    DEFAULT_ALLOW_MULTI_TILE,
-    DEFAULT_COMBINE_OUTPUT,
     DEFAULT_DXF_CONTOUR_SPACING,
-    DEFAULT_EPT_ONLY,
-    DEFAULT_FILL_DTM,
-    DEFAULT_FILL_HARD,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
     DEFAULT_FORMAT,
     DEFAULT_MAX_HEIGHT,
     DEFAULT_MIN_HEIGHT,
-    DEFAULT_NAIP_FLIP_U,
-    DEFAULT_NAIP_FLIP_V,
     DEFAULT_NAIP_MAX_SIZE,
     DEFAULT_NAIP_PIXEL_SIZE,
-    DEFAULT_NAIP_TILED,
     DEFAULT_OUT_DIR,
-    DEFAULT_OUTPUTS,
     DEFAULT_PERCENTILE,
     DEFAULT_PREFER_EPT,
     DEFAULT_PROVIDER,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RESOLUTION,
     DEFAULT_ROTATE_Z,
-    DEFAULT_TERRAIN_FLIP_Y,
     DEFAULT_TERRAIN_SAMPLE,
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
     BuildConfig,
 )
-from .pipeline.build import OUTPUT_CHOICES, build
-
-
-def parse_outputs(value: str | None) -> tuple[str, ...]:
-    if value is None:
-        return DEFAULT_OUTPUTS
-    cleaned = [v.strip().lower() for v in value.split(",") if v.strip()]
-    if not cleaned:
-        raise ValueError("--outputs must contain at least one value")
-    unknown = [v for v in cleaned if v not in OUTPUT_CHOICES]
-    if unknown:
-        raise ValueError(
-            "Unknown outputs: "
-            + ", ".join(sorted(set(unknown)))
-            + f" (valid: {', '.join(sorted(OUTPUT_CHOICES))})"
-        )
-    seen = set()
-    result = []
-    for v in cleaned:
-        if v in seen:
-            continue
-        result.append(v)
-        seen.add(v)
-    return tuple(result)
+from .pipeline.build import build, parse_outputs
 
 
 def build_parser() -> argparse.ArgumentParser:

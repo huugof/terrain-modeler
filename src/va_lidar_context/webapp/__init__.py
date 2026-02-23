@@ -1,9 +1,4 @@
-"""Flask application for va_lidar_context.
-
-This package replaced the monolithic webapp.py module. All previously public
-names are re-exported here so that existing imports and tests continue to work
-unchanged.
-"""
+"""Flask application for va_lidar_context."""
 
 from __future__ import annotations
 
@@ -45,100 +40,23 @@ def _bootstrap_local_dev_env() -> None:
 
 _bootstrap_local_dev_env()
 
-# --- settings module (exposed so tests can monkeypatch via webapp.settings.X) ---
-from . import settings
-
-# --- auth ---
-from .auth import (
-    _auth_lock,
-    _auth_started,
-    clerk_auth_ready,
-    current_user,
-    enforce_rate_limits,
-    ensure_auth_store,
-    ensure_logged_user_from_session,
-    get_csrf_token,
-    require_admin,
-    require_login,
-    user_can_access_job,
-    validate_csrf,
-    verify_hmac_request,
+# These imports must come after _bootstrap_local_dev_env() sets env defaults.
+# fmt: off
+from . import settings  # noqa: E402, I001
+from .auth import ensure_auth_store as ensure_auth_store  # noqa: E402
+from .forms import parse_float as parse_float, parse_int as parse_int  # noqa: E402
+from .jobs import (  # noqa: E402
+    JOBS as JOBS,
+    JOBS_LOCK as JOBS_LOCK,
+    Job as Job,
+    JobLogHandler as JobLogHandler,
+    _notify_job_change_locked as _notify_job_change_locked,
+    _notify_recent_jobs_change as _notify_recent_jobs_change,
+    _run_build_job as _run_build_job,
 )
-
-# --- forms ---
-from .forms import (
-    coverage_cache_key,
-    data_sources_payload,
-    extract_form_defaults,
-    is_in_virginia,
-    merge_prefill_defaults,
-    parcel_sources_payload,
-    parse_bool,
-    parse_float,
-    parse_int,
-    provider_label,
-    resolve_image_quality,
-    resolve_provider,
-    snapshot_defaults,
-    status_class,
-    status_label,
-)
-
-# --- jobs ---
-from .jobs import (
-    JOBS,
-    JOBS_LOCK,
-    Job,
-    JobLogHandler,
-    _collect_outputs,
-    _job_logs_payload,
-    _jobs_for_user,
-    _list_job_artifacts,
-    _notify_job_change_locked,
-    _notify_recent_jobs_change,
-    _persist_job_snapshot,
-    _recent_job_display_name,
-    _recent_job_payload,
-    _recent_jobs_change_cond,
-    _recent_jobs_change_version,
-    _rehydrate_jobs_from_store,
-    _resolve_job_output_dir,
-    _run_build_job,
-)
-
-# --- blueprint ---
-from .routes import bp
-
-# --- AppConfig and load_config exposed for test fixtures ---
-# --- settings re-exports (kept for backwards compatibility) ---
-from .settings import (
-    AUTH_ENABLED,
-    CLEANUP_INTERVAL_SECONDS,
-    COVERAGE_CACHE_TTL_SECONDS,
-    DB_PATH,
-    DESKTOP_HOST,
-    DESKTOP_MODE,
-    DESKTOP_PORT,
-    HMAC_KEYS,
-    HMAC_MAX_SKEW_SECONDS,
-    HMAC_NONCE_TTL_SECONDS,
-    JOB_HISTORY_ENABLED,
-    JOB_LOG_WAIT_MAX_SECONDS,
-    JOB_REHYDRATE_LIMIT,
-    MAX_ACTIVE_JOBS_PER_USER,
-    MAX_CLIP_SIZE,
-    OUT_DIR,
-    RATE_LIMIT_DAILY,
-    RATE_LIMIT_HOURLY,
-    RECENT_JOBS_LIMIT,
-    RECENT_JOBS_WAIT_MAX_SECONDS,
-    RETENTION_DAYS,
-    SESSION_COOKIE_SECURE,
-    SESSION_TTL_SECONDS,
-    WORKER_SHARED_TOKEN,
-    AppConfig,
-    load_config,
-)
+from .routes import bp as bp  # noqa: E402
+from .settings import AppConfig as AppConfig, load_config as load_config  # noqa: E402
+# fmt: on
 
 # ---------------------------------------------------------------------------
 # App factory
@@ -261,20 +179,18 @@ app = create_app()
 
 
 def main() -> int:
-    if not DESKTOP_MODE:
+    if not settings.DESKTOP_MODE:
         raise RuntimeError(
             "va-lidar-context-web runs Flask's development server and is intended "
             "for desktop mode only. In server mode use gunicorn, e.g. "
             '"gunicorn -c gunicorn.conf.py va_lidar_context.webapp:app".'
         )
-    default_host = DESKTOP_HOST if DESKTOP_MODE else "127.0.0.1"
-    default_port = DESKTOP_PORT if DESKTOP_MODE else 5000
     parser = argparse.ArgumentParser(prog="va-lidar-context-web")
-    parser.add_argument("--host", default=os.getenv("WEB_HOST", default_host))
+    parser.add_argument("--host", default=os.getenv("WEB_HOST", settings.DESKTOP_HOST))
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("WEB_PORT", str(default_port))),
+        default=int(os.getenv("WEB_PORT", str(settings.DESKTOP_PORT))),
     )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()

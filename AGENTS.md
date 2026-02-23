@@ -3,19 +3,26 @@
 ## Project Overview
 - Builds terrain, building, contour, and parcel context models from LiDAR + GIS sources.
 - CLI: `va-lidar-context`.
-- Web UI: `va-lidar-context-web` (local Flask app).
+- Web UI: `va-lidar-context-web` (Flask app, also serves as a local desktop UI).
 
 ## Repo Layout
-- `src/va_lidar_context/` core Python package
-- `src/va_lidar_context/cli.py` CLI entry point
-- `src/va_lidar_context/webapp.py` local web UI
-- `src/va_lidar_context/core/` raster + mesh + geo helpers
-- `src/va_lidar_context/parcels/` parcel registry + fetchers
-- `src/va_lidar_context/pipeline/` build orchestration
-- `src/va_lidar_context/providers/` data source adapters
-- `out/` output jobs (default)
-- `docs/references/` research notes and links
-- `tests/` pytest suite
+- `src/va_lidar_context/` — core Python package
+  - `cli.py` — CLI entry point (`va-lidar-context` command)
+  - `config.py` — `BuildConfig` frozen dataclass + `DEFAULT_*` constants
+  - `constants.py` — URL constants, default preview job config
+  - `util.py` — subprocess wrapper, cancel machinery, `get_logger()`, `download_file()`
+  - `auth_store.py` — SQLite persistence for users, sessions, jobs, artifacts
+  - `hmac_auth.py` — HMAC signing/verification primitives
+  - `pipeline/` — build orchestration (`build.py`, `io.py`, `types.py`)
+  - `webapp/` — Flask web app (`__init__.py`, `routes.py`, `jobs.py`, `auth.py`, `forms.py`, `settings.py`, `rate_limiter.py`)
+  - `core/` — raster + mesh + geo helpers
+  - `parcels/` — parcel registry + fetchers (`sources.json`)
+  - `providers/` — data source adapters
+- `out/` — output jobs (default, gitignored)
+- `docs/` — project documentation (`DOCUMENTATION.md` is the primary reference)
+- `tests/` — pytest suite
+- `deploy/` — Caddyfile + blue/green deploy scripts
+- `scripts/` — utility scripts
 
 ## Dev Environment
 - Python 3.11+
@@ -28,16 +35,23 @@
 - Run web UI:
   - `va-lidar-context-web`
   - or `python3 -m va_lidar_context.webapp`
+- Run tests: `pytest`
+- Run linter: `python -m ruff check src/ tests/`
+
+## Key Entry Points
+- `va-lidar-context` → `va_lidar_context.cli:main`
+- `va-lidar-context-web` → `va_lidar_context.webapp:main`
+- Docker/Gunicorn → `va_lidar_context.webapp:app`
 
 ## Outputs & Retention
 - Output jobs are written to `./out/<job_id>/` by default.
-- Web UI cleanup is controlled by env vars:
-  - `VA_OUT_DIR`, `VA_RETENTION_DAYS`, `VA_CLEANUP_INTERVAL`
+- Controlled via env vars: `OUT_DIR`, `RETENTION_DAYS`, `CLEANUP_INTERVAL`.
+- See `docs/DOCUMENTATION.md` for the full env var reference.
 
 ## Parcel Sources
 - Parcel boundaries are sourced from `src/va_lidar_context/parcels/sources.json`.
 - Resolver picks the first source whose `coverage` bbox intersects the request area.
-- Only ArcGIS FeatureServer `query` endpoints are supported right now.
+- Only ArcGIS FeatureServer `query` endpoints are supported.
 
 ### Add a Parcel Source
 1. Find a public ArcGIS FeatureServer layer that serves parcel polygons.
@@ -58,18 +72,7 @@ Example entry:
 }
 ```
 
-### Finding Parcel Layers (Quick Checklist)
-- Start at the GIS server root: `https://<domain>/arcgis/rest/services`.
-- Look for folders/services named `Parcels`, `Cadastre`, `TaxParcel`, or `Assessment`.
-- Open the service, then the `FeatureServer` layer list.
-- Use the layer’s `/query` endpoint as `query_url`.
-- Confirm geometry type via `?f=pjson` (`esriGeometryPolygon`).
-
-## Testing
-- Run all tests: `pytest`
-- Some tests may touch networked services; prefer running a targeted test if needed.
-
 ## Conventions
 - Prefer minimal, explicit changes.
 - Keep outputs deterministic where possible.
-- Update README if behavior or user-facing flags change.
+- Update `docs/DOCUMENTATION.md` if behavior or user-facing flags change.
