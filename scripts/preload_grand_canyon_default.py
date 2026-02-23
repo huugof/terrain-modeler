@@ -13,7 +13,7 @@ from va_lidar_context.pipeline.build import build
 DEFAULT_JOB_ID = "grand-canyon-default"
 DEFAULT_CENTER = (36.09841234052352, -112.0952885242688)
 DEFAULT_SIZE_FEET = 3000.0
-DEFAULT_TERRAIN_COMPLEXITY = 5
+DEFAULT_TERRAIN_COMPLEXITY = 3
 PREVIEW_ARTIFACTS = ("terrain.obj", "buildings.obj", "combined.obj")
 
 

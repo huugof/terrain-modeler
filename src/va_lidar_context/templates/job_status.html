@@ -654,6 +654,10 @@
         return { text: kept.join('\n'), removedTextureRefs };
       }
 
+      // 1x1 transparent PNG used as a fallback when a texture file is missing,
+      // so Three.js never fires a network request for an unavailable image.
+      const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
       function loadObjPart(part) {
         const manager = new THREE.LoadingManager();
         manager.setURLModifier((url) => {
@@ -662,6 +666,9 @@
           const clean = url.split('#')[0].split('?')[0];
           const name = clean.slice(clean.lastIndexOf('/') + 1);
           if (previewState.filesByName.has(name)) return buildDownloadUrl(name);
+          // File not in known artifacts — return a blank image placeholder so
+          // Three.js doesn't fire a request that will 404.
+          if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(name)) return BLANK_PNG;
           return url;
         });
 
@@ -683,9 +690,17 @@
                 for (const key of Object.keys(materials.materials)) {
                   const material = materials.materials[key];
                   if (material && material.map) {
-                    // Keep TextureLoader's default flipY behavior; our OBJ UVs
-                    // are already exported in OBJ convention (v flipped once).
-                    material.map.needsUpdate = true;
+                    if (material.map.image) {
+                      // Keep TextureLoader's default flipY behavior; our OBJ UVs
+                      // are already exported in OBJ convention (v flipped once).
+                      material.map.needsUpdate = true;
+                    } else {
+                      // Texture slot exists but image failed to load (e.g. terrain.png
+                      // absent when NAIP was not requested). Dispose and clear it to
+                      // prevent Three.js from warning about a texture with no image data.
+                      material.map.dispose();
+                      material.map = null;
+                    }
                   }
                 }
                 objLoader.setMaterials(materials);
