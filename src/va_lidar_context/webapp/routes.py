@@ -373,6 +373,10 @@ def auth_login():
         return ("Clerk auth is not configured.", 500)
     next_path = _safe_next_path(request.args.get("next"))
     force_sign_out = request.args.get("logged_out", "").lower() in ("1", "true", "yes")
+    if current_user() is not None and not force_sign_out:
+        if _urlparse(next_path).path == url_for("bp.auth_login"):
+            return redirect(url_for("bp.index"))
+        return redirect(next_path)
     from .settings import (
         CLERK_FRONTEND_API_URL,
         CLERK_PUBLISHABLE_KEY,
@@ -474,8 +478,6 @@ def index():
         parcel_sources=parcel_sources,
         recent_jobs=recent_jobs_data,
         can_build=can_build,
-        clerk_publishable_key=_settings.CLERK_PUBLISHABLE_KEY,
-        clerk_frontend_api_url=_settings.CLERK_FRONTEND_API_URL,
         initial_preview_url=initial_preview_url,
         retention_days=_settings.RETENTION_DAYS,
         recent_jobs_limit=RECENT_JOBS_LIMIT,

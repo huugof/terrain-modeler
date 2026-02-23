@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Terrain Modeler</title>
+        <title>Meshd</title>
         <link
             rel="icon"
             type="image/png"
@@ -124,12 +124,12 @@
                             <polyline points="80,148 120,120 160,92 200,72 240,78 275,96 308,78 340,62 372,76 395,92" fill="none" stroke="currentColor" stroke-opacity="0.34" stroke-width="1.5"/>
                             <polyline points="120,138 158,106 196,76 230,55 265,62 295,80 325,62 355,46 382,60" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
                         </svg>
-                        <p class="inline-preview-demo-label">Save to preview terrain</p>
+                        <p class="inline-preview-demo-label">Save to preview model</p>
                     </div>
                     <iframe
                         id="inlinePreviewFrame"
                         class="inline-preview-frame"
-                        title="Terrain preview"
+                        title="Model preview"
                         src="about:blank"
                     ></iframe>
                     <div class="inline-preview-building" id="inlinePreviewBuilding" aria-hidden="true">
@@ -557,8 +557,6 @@
             canBuild: {{ can_build | tojson }},
             authEnabled: {{ auth_enabled | tojson }},
             authLoginUrl: {{ url_for('bp.auth_login') | tojson }},
-            clerkPublishableKey: {{ clerk_publishable_key | tojson }},
-            clerkFrontendApiUrl: {{ clerk_frontend_api_url | tojson }},
             initialPreviewUrl: {{ initial_preview_url | tojson }},
             recentJobsLimit: {{ recent_jobs_limit | tojson }},
           };
