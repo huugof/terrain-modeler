@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Meshd Sign In</title>
+        <title>Sign In</title>
         <link
             rel="stylesheet"
             href="{{ url_for('static', filename='app.css') }}"
@@ -22,37 +22,6 @@
                 margin: 0;
                 padding: 0;
             }
-            .auth-card {
-                border: 1px solid var(--line);
-                border-radius: 14px;
-                background: var(--panel);
-                box-shadow: var(--shadow);
-                padding: 18px 16px 14px;
-            }
-            .auth-header {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-bottom: 12px;
-            }
-            .auth-logo {
-                width: 22px;
-                height: 22px;
-                flex: 0 0 auto;
-            }
-            .auth-title {
-                margin: 0;
-                color: var(--ink);
-                font-size: 16px;
-                font-weight: 600;
-                line-height: 1.2;
-            }
-            .auth-subtitle {
-                margin: 2px 0 0;
-                color: var(--muted);
-                font-size: 12px;
-                line-height: 1.3;
-            }
             #clerk-container {
                 min-height: 330px;
                 display: flex;
@@ -69,24 +38,8 @@
     </head>
     <body class="auth-shell">
         <main class="auth-main">
-            <section class="auth-card" aria-label="Sign in">
-                <header class="auth-header">
-                    <img
-                        class="auth-logo"
-                        src="{{ url_for('static', filename='logo-solid.svg') }}"
-                        alt=""
-                        aria-hidden="true"
-                    />
-                    <div>
-                        <h1 class="auth-title">Sign in to Meshd</h1>
-                        <p class="auth-subtitle">
-                            Use your account to continue.
-                        </p>
-                    </div>
-                </header>
-                <div id="clerk-container"></div>
-                <p id="loginStatus"></p>
-            </section>
+            <div id="clerk-container" aria-label="Sign in"></div>
+            <p id="loginStatus"></p>
         </main>
         <script>
             const NEXT_PATH = {{ next_path|tojson }};
@@ -148,7 +101,6 @@
                     return;
                 }
                 exchangeInFlight = true;
-                setStatus('Finalizing sign-in...');
                 try {
                     const token = await clerk.session.getToken();
                     const resp = await fetch('/auth/clerk/exchange', {
@@ -173,7 +125,6 @@
             }
 
             async function boot() {
-                setStatus('Loading sign-in...');
                 if (!CLERK_PUBLISHABLE_KEY) {
                     setStatus('Missing VA_CLERK_PUBLISHABLE_KEY.');
                     return;
@@ -184,7 +135,6 @@
                     if (FORCE_SIGN_OUT) {
                         stripLoggedOutParamFromAddressBar();
                         if (clerk.session) {
-                            setStatus('Signing out...');
                             await clerk.signOut();
                             exchangeInFlight = false;
                         }
