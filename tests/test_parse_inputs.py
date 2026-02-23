@@ -155,3 +155,127 @@ def test_run_defaults_to_computed_heights_without_random_override(client, monkey
     assert cfg is not None
     assert cfg.random_heights_min is None
     assert cfg.random_heights_max is None
+
+
+def test_run_maps_resolution_slider_to_upstream_terrain_resolution(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
+    monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", True)
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._target = target
+            self._args = args
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args)
+
+    def _capture_cfg(_job, cfg):
+        captured["cfg"] = cfg
+
+    with mock.patch("va_lidar_context.webapp.routes.threading.Thread", _ImmediateThread):
+        with mock.patch("va_lidar_context.webapp.routes._run_build_job", side_effect=_capture_cfg):
+            resp = client.post(
+                "/run",
+                data=_base_form(terrain_complexity="7"),
+            )
+
+    assert resp.status_code in (302, 303)
+    cfg = captured.get("cfg")
+    assert cfg is not None
+    assert cfg.terrain_sample == 1
+    assert cfg.terrain_resolution == pytest.approx(4.0)
+
+
+def test_run_legacy_slider_mapping_when_upstream_resolution_disabled(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
+    monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", False)
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._target = target
+            self._args = args
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args)
+
+    def _capture_cfg(_job, cfg):
+        captured["cfg"] = cfg
+
+    with mock.patch("va_lidar_context.webapp.routes.threading.Thread", _ImmediateThread):
+        with mock.patch("va_lidar_context.webapp.routes._run_build_job", side_effect=_capture_cfg):
+            resp = client.post(
+                "/run",
+                data=_base_form(terrain_complexity="7"),
+            )
+
+    assert resp.status_code in (302, 303)
+    cfg = captured.get("cfg")
+    assert cfg is not None
+    assert cfg.terrain_sample == 4
+    assert cfg.terrain_resolution is None
+
+
+def test_run_slider_minimum_maps_to_25x_reduction_in_upstream_mode(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
+    monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", True)
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._target = target
+            self._args = args
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args)
+
+    def _capture_cfg(_job, cfg):
+        captured["cfg"] = cfg
+
+    with mock.patch("va_lidar_context.webapp.routes.threading.Thread", _ImmediateThread):
+        with mock.patch("va_lidar_context.webapp.routes._run_build_job", side_effect=_capture_cfg):
+            resp = client.post(
+                "/run",
+                data=_base_form(terrain_complexity="0"),
+            )
+
+    assert resp.status_code in (302, 303)
+    cfg = captured.get("cfg")
+    assert cfg is not None
+    assert cfg.terrain_sample == 1
+    assert cfg.terrain_resolution == pytest.approx(25.0)
+
+
+def test_run_slider_minimum_maps_to_25x_reduction_in_legacy_mode(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(_webapp_settings._config, "out_dir", __import__("pathlib").Path("/tmp"))
+    monkeypatch.setattr(_webapp_settings._config, "web_upstream_terrain_resolution", False)
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._target = target
+            self._args = args
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args)
+
+    def _capture_cfg(_job, cfg):
+        captured["cfg"] = cfg
+
+    with mock.patch("va_lidar_context.webapp.routes.threading.Thread", _ImmediateThread):
+        with mock.patch("va_lidar_context.webapp.routes._run_build_job", side_effect=_capture_cfg):
+            resp = client.post(
+                "/run",
+                data=_base_form(terrain_complexity="0"),
+            )
+
+    assert resp.status_code in (302, 303)
+    cfg = captured.get("cfg")
+    assert cfg is not None
+    assert cfg.terrain_sample == 25
+    assert cfg.terrain_resolution is None

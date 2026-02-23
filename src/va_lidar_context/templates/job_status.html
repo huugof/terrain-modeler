@@ -348,6 +348,7 @@
         initialized: false,
         activationStarted: false,
         wireframe: false,
+        wireframeLocked: false,
         filesByName: new Map(),
         models: [],
         currentModelKey: null,
@@ -435,6 +436,7 @@
         const hasTerrain = filesByName.has('terrain.obj');
         const hasBuildings = filesByName.has('buildings.obj');
         const hasCombined = filesByName.has('combined.obj');
+        const hasPreview = filesByName.has('preview.obj');
         const terrainMtl = filesByName.has('terrain.mtl') ? 'terrain.mtl' : null;
         const combinedMtl = filesByName.has('combined.mtl') ? 'combined.mtl' : null;
 
@@ -467,6 +469,13 @@
             key: 'buildings',
             label: 'Buildings',
             parts: [{ key: 'buildings', obj: 'buildings.obj', mtl: null }],
+          });
+        }
+        if (hasPreview && !hasTerrain && !hasBuildings && !hasCombined) {
+          models.push({
+            key: 'preview',
+            label: 'Wireframe Preview',
+            parts: [{ key: 'preview', obj: 'preview.obj', mtl: null }],
           });
         }
         return models;
@@ -717,6 +726,15 @@
           previewState.scene.add(group);
           previewState.currentObject = group;
           previewState.currentModelKey = model.key;
+          if (model.key === 'preview') {
+            previewState.wireframeLocked = true;
+            previewState.wireframe = true;
+          } else {
+            if (previewState.wireframeLocked) {
+              previewState.wireframe = false;
+            }
+            previewState.wireframeLocked = false;
+          }
           applyWireframeMode(previewState.wireframe);
           updateWireframeButton();
           updateSceneSelect();
@@ -759,6 +777,10 @@
         const files = Array.isArray(artifactPayload.files) ? artifactPayload.files : [];
         previewState.filesByName = new Map(files.map((f) => [f.name, f]));
         previewState.models = pickAvailableModels(previewState.filesByName);
+        // Default to wireframe when no satellite texture was exported.
+        previewState.wireframe = !previewState.filesByName.has('terrain.png');
+        previewState.wireframeLocked = false;
+        updateWireframeButton();
         if (!previewState.models.length) {
           previewState.activationStarted = false;
           setPreviewMessage('No 3D model artifacts found for this job.');
@@ -791,6 +813,7 @@
         const defaultModel =
           previewState.models.find((model) => model.key === 'terrain') ||
           previewState.models.find((model) => model.key === 'scene') ||
+          previewState.models.find((model) => model.key === 'preview') ||
           previewState.models[0];
         if (defaultModel) renderModel(defaultModel.key);
       }
@@ -833,6 +856,7 @@
       }
 
       function toggleWireframe() {
+        if (previewState.wireframeLocked) return;
         previewState.wireframe = !previewState.wireframe;
         applyWireframeMode(previewState.wireframe);
         updateWireframeButton();
@@ -841,6 +865,7 @@
       function updateWireframeButton() {
         const wireframeBtn = document.getElementById('preview-wireframe-btn');
         if (!wireframeBtn) return;
+        wireframeBtn.disabled = previewState.wireframeLocked;
         wireframeBtn.classList.toggle('is-active', previewState.wireframe);
       }
 
@@ -988,7 +1013,7 @@
           sceneSelect.dataset.bound = 'true';
         }
 
-        const preferredKeys = new Set(['scene', 'terrain', 'buildings']);
+        const preferredKeys = new Set(['scene', 'terrain', 'buildings', 'preview']);
         let options = previewState.models.filter((model) => preferredKeys.has(model.key));
         if (!options.length) options = previewState.models.slice();
 

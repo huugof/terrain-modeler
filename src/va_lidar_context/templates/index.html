@@ -225,7 +225,7 @@
 
                     <div id="advancedControls" class="advanced-controls">
                         <div id="meshResolutionSection">
-                            <label title="Higher values keep more terrain detail; lower values build faster and export smaller files.">Output Resolution</label>
+                            <label title="Controls terrain detail by changing terrain cell size before meshing. Higher values use smaller cells for more detail; lower values use larger cells for faster builds and smaller files.">Output Resolution</label>
                             <div class="slider-row">
                                 <input
                                     type="range"
@@ -415,9 +415,6 @@
                 </div>
             </form>
             <aside class="recent-jobs-card hidden" id="recentJobsPanel" aria-label="Recent jobs">
-                <div class="recent-jobs-card-header">
-                    <div class="menu-section-title">recent-jobs.log</div>
-                </div>
                 <div id="recentJobs" class="recent-jobs-scroll">
                     {% if recent_jobs %}
                     <ul class="recent-job-list">
@@ -431,7 +428,7 @@
                                     data-preview-inline="1"
                                     data-preview-url="{{ job.preview_url }}"
                                     data-form-defaults="{{ job.form_defaults | tojson | forceescape }}"
-                                >{{ job.display_name or job.name }}</a>
+                                >{{ job.display_name or job.name }}{% if initial_preview_url and job.preview_url == initial_preview_url %}<span class="recent-job-active-tag">(active)</span>{% endif %}</a>
                                 {% else %}
                                 <div class="recent-job-title">{{ job.display_name or job.name }}</div>
                                 {% endif %}
@@ -530,6 +527,21 @@
                 </form>
             </div>
         </div>
+        <div id="deleteJobModal" class="preview-modal hidden" aria-hidden="true">
+            <div class="preview-modal-backdrop" data-delete-job-close="1"></div>
+            <div class="preview-modal-dialog project-name-modal-dialog" role="dialog" aria-modal="true" aria-label="Delete job">
+                <form id="deleteJobForm" class="project-name-modal-form">
+                    <h3 class="project-name-modal-title">Delete this job?</h3>
+                    <p id="deleteJobMessage" class="project-name-modal-message">
+                        This will permanently remove job files and history.
+                    </p>
+                    <div class="project-name-modal-actions">
+                        <button type="button" class="btn secondary" id="deleteJobCancel">Cancel</button>
+                        <button type="submit" class="btn" id="deleteJobConfirm">Delete</button>
+                    </div>
+                </form>
+            </div>
+        </div>
         <i
             id="faviconSource"
             class="visually-hidden"
@@ -548,6 +560,7 @@
             clerkPublishableKey: {{ clerk_publishable_key | tojson }},
             clerkFrontendApiUrl: {{ clerk_frontend_api_url | tojson }},
             initialPreviewUrl: {{ initial_preview_url | tojson }},
+            recentJobsLimit: {{ recent_jobs_limit | tojson }},
           };
         </script>
         <script src="{{ url_for('static', filename='app.js') }}" defer></script>

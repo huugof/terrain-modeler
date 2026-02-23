@@ -66,6 +66,7 @@ class BuildConfig:
     floor_to_floor: float = DEFAULT_FLOOR_TO_FLOOR
     keep_rasters: bool = DEFAULT_KEEP_RASTERS
     terrain_sample: int = DEFAULT_TERRAIN_SAMPLE
+    terrain_resolution: float | None = None
     fill_dtm: bool = DEFAULT_FILL_DTM
     fill_hard: bool = DEFAULT_FILL_HARD
     fill_max_dist: float = DEFAULT_FILL_MAX_DIST

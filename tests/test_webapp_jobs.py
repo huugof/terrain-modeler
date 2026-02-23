@@ -712,6 +712,24 @@ def test_recent_jobs_payload_includes_stage_fields(auth_webapp_env):
     assert jobs[0]["cancel_url"].endswith("/jobs/job-with-stage/cancel")
 
 
+def test_recent_jobs_done_job_includes_preview_url_without_mesh(auth_webapp_env):
+    _create_job(
+        job_id="job-contours-only",
+        owner_id=int(auth_webapp_env["user1"]["id"]),
+        out_dir=auth_webapp_env["out_dir"],
+        db_path=auth_webapp_env["db_path"],
+        files=["contours.dxf"],
+        status="done",
+    )
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get("/recent-jobs")
+    assert resp.status_code == 200
+    jobs = resp.get_json()["jobs"]
+    item = next(j for j in jobs if j["job_id"] == "job-contours-only")
+    assert item["preview_url"].endswith("/jobs/job-contours-only?tab=preview")
+
+
 def test_job_logs_payload_includes_stage_fields(auth_webapp_env):
     owner_id = int(auth_webapp_env["user1"]["id"])
     _create_job(

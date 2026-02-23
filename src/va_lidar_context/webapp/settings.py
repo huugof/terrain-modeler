@@ -50,6 +50,7 @@ class AppConfig:
     rate_limit_hourly: int
     rate_limit_daily: int
     max_active_jobs_per_user: int
+    web_upstream_terrain_resolution: bool
     max_clip_size: float
     job_history_enabled: bool
     job_rehydrate_limit: int
@@ -124,6 +125,9 @@ def load_config(overrides: dict | None = None) -> AppConfig:
     rate_limit_hourly: int = int(os.getenv("RATE_LIMIT_HOURLY", "3"))
     rate_limit_daily: int = int(os.getenv("RATE_LIMIT_DAILY", "10"))
     max_active_jobs_per_user: int = int(os.getenv("MAX_ACTIVE_JOBS_PER_USER", "1"))
+    web_upstream_terrain_resolution: bool = os.getenv(
+        "WEB_UPSTREAM_TERRAIN_RESOLUTION", "1"
+    ).lower() in ("1", "true", "yes")
     max_clip_size: float = float(os.getenv("MAX_CLIP_SIZE", "5000"))
     job_history_enabled: bool = os.getenv("JOB_HISTORY_ENABLED", "1").lower() in (
         "1",
@@ -177,6 +181,7 @@ def load_config(overrides: dict | None = None) -> AppConfig:
         rate_limit_hourly=rate_limit_hourly,
         rate_limit_daily=rate_limit_daily,
         max_active_jobs_per_user=max_active_jobs_per_user,
+        web_upstream_terrain_resolution=web_upstream_terrain_resolution,
         max_clip_size=max_clip_size,
         job_history_enabled=job_history_enabled,
         job_rehydrate_limit=job_rehydrate_limit,

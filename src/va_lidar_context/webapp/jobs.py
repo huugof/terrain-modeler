@@ -161,24 +161,15 @@ OUTPUT_ARTIFACT_CANDIDATES = (
     "buildings.obj",
     "combined.obj",
     "combined.mtl",
+    "preview.obj",
     "terrain.png",
     "contours.dxf",
     "terrain.xyz",
 )
-PREVIEW_ARTIFACT_CANDIDATES = ("terrain.obj", "buildings.obj", "combined.obj")
 
 
 def _dir_has_known_outputs(path: Path) -> bool:
     return any((path / name).is_file() for name in OUTPUT_ARTIFACT_CANDIDATES)
-
-
-def _has_preview_artifacts(artifacts: List[Dict[str, Any]]) -> bool:
-    names = {
-        str(item.get("name"))
-        for item in artifacts
-        if isinstance(item, dict) and str(item.get("name") or "").strip()
-    }
-    return any(name in names for name in PREVIEW_ARTIFACT_CANDIDATES)
 
 
 def _discover_output_dir_for_job(job_id: str) -> Optional[Path]:
@@ -555,10 +546,9 @@ def _recent_job_payload(job: Job, sequence_number: int) -> Dict[str, Any]:
         return payload
 
     artifacts = _list_job_artifacts(job)
+    payload["preview_url"] = url_for("bp.job_status", job_id=job.job_id, tab="preview")
     if artifacts:
         payload["download_all_url"] = url_for("bp.job_download_all", job_id=job.job_id)
-    if _has_preview_artifacts(artifacts):
-        payload["preview_url"] = url_for("bp.job_status", job_id=job.job_id, tab="preview")
     payload["match_settings_url"] = url_for("bp.index", from_job=job.job_id)
     return payload
 

@@ -181,6 +181,7 @@ def _stage_image_only(
     )
     terrain_tex_path = tile_dir / "terrain.png"
     report_path = tile_dir / "report.json"
+    preview_mesh_path = tile_dir / "preview.obj"
 
     logger.info("Stage 1/2: download NAIP image")
     size_m = cfg.size / FEET_PER_METER if cfg.units == "feet" else cfg.size
@@ -189,6 +190,7 @@ def _stage_image_only(
     cx, cy = to_merc.transform(lon, lat)
     bbox_3857 = (cx - half, cy - half, cx + half, cy + half)
     naip_tiled_used = _stage_download_naip(cfg, bbox_3857, terrain_tex_path, warnings)
+    _write_preview_plane_obj(preview_mesh_path, cfg.size or 100.0)
 
     report: Dict[str, Any] = {
         "job_id": job_id,
@@ -216,6 +218,26 @@ def _stage_image_only(
         cleanup_intermediates(tile_dir)
     logger.info("Done (image-only)")
     return BuildResult(exit_code=0, output_dir=tile_dir)
+
+
+def _write_preview_plane_obj(path: Path, size: float) -> None:
+    """Write a simple flat OBJ plane for fallback wireframe preview."""
+    half = max(float(size) / 2.0, 1.0)
+    path.write_text(
+        "\n".join(
+            [
+                "# fallback preview plane",
+                f"v {-half:.6f} {-half:.6f} 0.000000",
+                f"v {half:.6f} {-half:.6f} 0.000000",
+                f"v {half:.6f} {half:.6f} 0.000000",
+                f"v {-half:.6f} {half:.6f} 0.000000",
+                "f 1 2 3",
+                "f 1 3 4",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _stage_resolve_tile(
@@ -736,12 +758,19 @@ def _stage_rasters(
     dtm_path: Path,
     dtm_filled_path: Path,
     dtm_clip_path: Path,
+    terrain_dtm_path: Path,
+    terrain_dtm_filled_path: Path,
+    terrain_dtm_clip_path: Path,
+    contour_clip_path: Path,
     dsm_path: Path,
     ndsm_path: Path,
     export_buildings: bool,
     override_heights: bool,
-) -> Tuple[Path, Path]:
-    """Stage 4: generate rasters. Returns (dtm_use_path, terrain_source_path)."""
+) -> Tuple[Path, Path, Path]:
+    """Stage 4: generate rasters.
+
+    Returns (dtm_use_path, terrain_source_path, contour_source_path).
+    """
     logger = get_logger()
     dtm_use_path = dtm_path
     if cfg.force or not dtm_path.exists():
@@ -767,13 +796,50 @@ def _stage_rasters(
         if cfg.force or not ndsm_path.exists():
             make_ndsm(dsm_path, dtm_use_path, ndsm_path)
 
-    terrain_source_path = dtm_use_path
-    if clip_poly is not None:
-        if cfg.force or not dtm_clip_path.exists():
-            clip_raster(dtm_use_path, dtm_clip_path, clip_poly)
-        terrain_source_path = dtm_clip_path
+    terrain_resolution_enabled = (
+        cfg.terrain_resolution is not None and cfg.terrain_resolution > cfg.resolution
+    )
+    terrain_base_path = dtm_use_path
+    if terrain_resolution_enabled:
+        terrain_resolution = cfg.terrain_resolution
+        if cfg.force or not terrain_dtm_path.exists():
+            make_dtm(laz_processing_path, terrain_dtm_path, terrain_resolution)
+            if not raster_has_data(terrain_dtm_path):
+                logger.warning(
+                    "Terrain DTM contains no ground data; falling back to unclassified min raster"
+                )
+                make_dtm_unclassified(laz_processing_path, terrain_dtm_path, terrain_resolution)
+        if cfg.fill_dtm:
+            if cfg.force or not terrain_dtm_filled_path.exists():
+                fill_nodata_raster(
+                    terrain_dtm_path,
+                    terrain_dtm_filled_path,
+                    max_distance=cfg.fill_max_dist,
+                    smoothing_iterations=cfg.fill_smoothing,
+                    hard_fill=cfg.fill_hard,
+                )
+            terrain_base_path = terrain_dtm_filled_path
+        else:
+            terrain_base_path = terrain_dtm_path
 
-    return dtm_use_path, terrain_source_path
+    contour_source_path = dtm_use_path
+    terrain_source_path = terrain_base_path
+    if clip_poly is not None:
+        if terrain_resolution_enabled:
+            if cfg.force or not contour_clip_path.exists():
+                clip_raster(dtm_use_path, contour_clip_path, clip_poly)
+            contour_source_path = contour_clip_path
+
+            if cfg.force or not terrain_dtm_clip_path.exists():
+                clip_raster(terrain_base_path, terrain_dtm_clip_path, clip_poly)
+            terrain_source_path = terrain_dtm_clip_path
+        else:
+            if cfg.force or not dtm_clip_path.exists():
+                clip_raster(dtm_use_path, dtm_clip_path, clip_poly)
+            contour_source_path = dtm_clip_path
+            terrain_source_path = dtm_clip_path
+
+    return dtm_use_path, terrain_source_path, contour_source_path
 
 
 def _stage_heights(
@@ -1078,7 +1144,12 @@ def build(cfg: BuildConfig) -> BuildResult:
     terrain_tex_path = tile_dir / "terrain.png"
     combined_path = tile_dir / "combined.obj"
     combined_mtl_path = tile_dir / "combined.mtl"
+    preview_mesh_path = tile_dir / "preview.obj"
     dtm_clip_path = tile_dir / "dtm_clip.tif"
+    contour_clip_path = tile_dir / "dtm_contour_clip.tif"
+    terrain_dtm_path = tile_dir / "dtm_terrain.tif"
+    terrain_dtm_filled_path = tile_dir / "dtm_terrain_filled.tif"
+    terrain_dtm_clip_path = tile_dir / "dtm_terrain_clip.tif"
     report_path = tile_dir / "report.json"
     merged_laz_path = tile_dir / "tiles_merged.laz"
     heights_geojson_path = tile_dir / "building_heights.geojson"
@@ -1200,13 +1271,17 @@ def build(cfg: BuildConfig) -> BuildResult:
 
     logger.info("Stage 4/6: generate rasters")
     override_heights = cfg.random_heights_min is not None and cfg.random_heights_max is not None
-    dtm_use_path, terrain_source_path = _stage_rasters(
+    dtm_use_path, terrain_source_path, contour_source_path = _stage_rasters(
         cfg,
         laz_processing_path,
         clip_poly,
         dtm_path,
         dtm_filled_path,
         dtm_clip_path,
+        terrain_dtm_path,
+        terrain_dtm_filled_path,
+        terrain_dtm_clip_path,
+        contour_clip_path,
         dsm_path,
         ndsm_path,
         export_buildings,
@@ -1373,6 +1448,48 @@ def build(cfg: BuildConfig) -> BuildResult:
         export_naip,
     )
 
+    has_preview_geometry = any(path.exists() for path in (combined_path, terrain_path, mesh_path))
+    if not has_preview_geometry:
+        preview_mesh = terrain_mesh
+        if preview_mesh is None:
+            preview_sample = max(cfg.terrain_sample, 25)
+            preview_mesh = terrain_mesh_from_raster(
+                str(terrain_source_path),
+                xy_scale=xy_scale,
+                z_scale=z_scale,
+                sample=preview_sample,
+            )
+        if preview_mesh is not None:
+            if cfg.terrain_flip_y:
+                bounds = preview_mesh.bounds
+                preview_center_x = (bounds[0][0] + bounds[1][0]) / 2.0
+                preview_center_y = (bounds[0][1] + bounds[1][1]) / 2.0
+                apply_scene_transform(preview_mesh, preview_center_x, preview_center_y, flip_y=True)
+            if cfg.flip_x or cfg.flip_y or cfg.rotate_z:
+                preview_center_x = center_x
+                preview_center_y = center_y
+                if preview_center_x is None or preview_center_y is None:
+                    preview_center_x, preview_center_y = _resolve_scene_transform_center(
+                        preview_mesh,
+                        None,
+                        center_laz_x=center_laz_x,
+                        center_laz_y=center_laz_y,
+                        xy_scale=xy_scale,
+                    )
+                apply_scene_transform(
+                    preview_mesh,
+                    preview_center_x,
+                    preview_center_y,
+                    flip_x=cfg.flip_x,
+                    flip_y=cfg.flip_y,
+                    rotate_deg=cfg.rotate_z,
+                )
+            export_mesh(preview_mesh, str(preview_mesh_path))
+            logger.info(f"Exported fallback preview mesh to {preview_mesh_path}")
+        else:
+            _write_preview_plane_obj(preview_mesh_path, cfg.size or 100.0)
+            logger.info(f"Exported flat fallback preview mesh to {preview_mesh_path}")
+
     # Origin offset in scaled output units – centres all DXF/XYZ output on
     # the user's --center point so coordinates are small, relative values.
     dxf_origin: tuple[float, float] | None = None
@@ -1384,7 +1501,7 @@ def build(cfg: BuildConfig) -> BuildResult:
     if contours_needed and cfg.contour_interval is not None:
         interval_laz = cfg.contour_interval / z_scale
         contours = generate_contours_from_raster(
-            str(terrain_source_path),
+            str(contour_source_path),
             interval=interval_laz,
             xy_scale=xy_scale,
             z_scale=z_scale,
@@ -1434,9 +1551,28 @@ def build(cfg: BuildConfig) -> BuildResult:
         )
 
     if not cfg.keep_rasters:
-        for path in (dtm_path, dtm_filled_path, dtm_clip_path, dsm_path, ndsm_path):
+        for path in (
+            dtm_path,
+            dtm_filled_path,
+            dtm_clip_path,
+            contour_clip_path,
+            terrain_dtm_path,
+            terrain_dtm_filled_path,
+            terrain_dtm_clip_path,
+            dsm_path,
+            ndsm_path,
+        ):
             if path.exists():
                 path.unlink()
+
+    terrain_raster_cell_size = (
+        cfg.terrain_resolution
+        if (cfg.terrain_resolution is not None and cfg.terrain_resolution > cfg.resolution)
+        else cfg.resolution
+    )
+    effective_mesh_cell_size = terrain_raster_cell_size * max(cfg.terrain_sample, 1)
+    estimated_vertex_ratio = (cfg.resolution / effective_mesh_cell_size) ** 2
+    estimated_vertex_reduction_percent = max(0.0, (1.0 - estimated_vertex_ratio) * 100.0)
 
     height_values = [h.height * z_scale for h in heights]
     report: Dict[str, Any] = {
@@ -1500,6 +1636,17 @@ def build(cfg: BuildConfig) -> BuildResult:
         "dtm_fill_hard": cfg.fill_hard if cfg.fill_dtm else None,
         "dtm_fill_max_dist": cfg.fill_max_dist if cfg.fill_dtm else None,
         "dtm_fill_smoothing": cfg.fill_smoothing if cfg.fill_dtm else None,
+        "terrain_processing": {
+            "base_cell_size": cfg.resolution,
+            "terrain_raster_cell_size": terrain_raster_cell_size,
+            "mesh_sample_step": cfg.terrain_sample,
+            "effective_mesh_cell_size": effective_mesh_cell_size,
+            "upstream_resolution_enabled": (
+                cfg.terrain_resolution is not None and cfg.terrain_resolution > cfg.resolution
+            ),
+            "estimated_vertex_ratio_vs_base": estimated_vertex_ratio,
+            "estimated_vertex_reduction_percent": estimated_vertex_reduction_percent,
+        },
         "height_stats": {
             "min": min(height_values) if height_values else None,
             "max": max(height_values) if height_values else None,

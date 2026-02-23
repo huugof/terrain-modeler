@@ -33,6 +33,7 @@ let clerkDarkThemePromise = null;
 let recentJobsData = [];
 let currentPreviewPath = "";
 let projectNamePromptResolver = null;
+let deleteJobPromptResolver = null;
 
 function setFaviconFromLucide() {
   const icon = document.getElementById("faviconSource");
@@ -70,6 +71,33 @@ function getPreviewJobs() {
   });
 }
 
+function getActivePreviewPath(jobs = recentJobsData) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return "";
+  const previewPaths = jobs
+    .filter(
+      (job) => job && typeof job.preview_url === "string" && job.preview_url,
+    )
+    .map((job) => normalizePreviewPath(job.preview_url))
+    .filter(Boolean);
+  if (!previewPaths.length) return "";
+  const current = normalizePreviewPath(currentPreviewPath);
+  if (current && previewPaths.includes(current)) return current;
+  return previewPaths[0];
+}
+
+function updateRecentJobsMeta(count) {
+  const meta = document.getElementById("recentJobsMeta");
+  if (!meta) return;
+  const limit = Number(
+    window.APP_CONFIG && Number(window.APP_CONFIG.recentJobsLimit),
+  );
+  if (Number.isFinite(limit) && limit > 0) {
+    meta.textContent = `(${count}/${limit} shown)`;
+    return;
+  }
+  meta.textContent = `(${count} shown)`;
+}
+
 function getActiveDownloadJob() {
   if (!Array.isArray(recentJobsData) || recentJobsData.length === 0) {
     return null;
@@ -84,7 +112,8 @@ function getActiveDownloadJob() {
   }
   return (
     recentJobsData.find(
-      (job) => job && typeof job.download_all_url === "string" && job.download_all_url,
+      (job) =>
+        job && typeof job.download_all_url === "string" && job.download_all_url,
     ) || null
   );
 }
@@ -365,8 +394,14 @@ function getCsrfToken() {
   return input ? input.value : "";
 }
 
-async function deleteRecentJob(deleteUrl, jobId) {
+async function deleteRecentJob(deleteUrl, jobId, jobName) {
   if (!deleteUrl) return;
+  const confirmed = await promptForDeleteJob(jobName || jobId || "");
+  if (!confirmed) return;
+  const previewToken = jobId ? `/jobs/${encodeURIComponent(jobId)}` : "";
+  const deletingActivePreview =
+    Boolean(previewToken) &&
+    normalizePreviewPath(currentPreviewPath).includes(previewToken);
   const csrfToken = getCsrfToken();
   try {
     const resp = await fetch(deleteUrl, {
@@ -388,6 +423,34 @@ async function deleteRecentJob(deleteUrl, jobId) {
       updateAlerts();
     }
     await refreshRecentJobs();
+    if (deletingActivePreview) {
+      const nextPreviewPath = getActivePreviewPath(recentJobsData);
+      if (nextPreviewPath) {
+        const nextJob = getPreviewJobs().find(
+          (job) => normalizePreviewPath(job.preview_url) === nextPreviewPath,
+        );
+        if (nextJob && nextJob.preview_url) {
+          setInlinePreview(nextJob.preview_url);
+        } else {
+          setInlinePreview(nextPreviewPath);
+        }
+      } else {
+        const frame = document.getElementById("inlinePreviewFrame");
+        const demo = document.getElementById("inlinePreviewDemo");
+        if (frame) {
+          frame.onload = null;
+          frame.classList.remove("loaded");
+          frame.src = "about:blank";
+        }
+        if (demo) demo.classList.remove("hidden");
+        currentPreviewPath = "";
+        try {
+          localStorage.removeItem(LAST_PREVIEW_KEY);
+        } catch (e) {}
+        syncPreviewToggleButtons();
+        updatePreviewNavButtons();
+      }
+    }
   } catch (err) {
     setAlert("Failed to delete job.", true);
   }
@@ -572,6 +635,7 @@ function initPreviewNavButtons() {
 
 function renderRecentJobs(container, jobs) {
   container.innerHTML = "";
+  updateRecentJobsMeta(Array.isArray(jobs) ? jobs.length : 0);
   if (!jobs || jobs.length === 0) {
     const empty = document.createElement("p");
     empty.className = "footer";
@@ -581,6 +645,7 @@ function renderRecentJobs(container, jobs) {
   }
   const list = document.createElement("ul");
   list.className = "recent-job-list";
+  const activePreviewPath = getActivePreviewPath(jobs);
   jobs.forEach((job) => {
     const item = document.createElement("li");
     item.className = "recent-job-row";
@@ -605,7 +670,18 @@ function renderRecentJobs(container, jobs) {
       title = document.createElement("div");
       title.className = "recent-job-title";
     }
-    title.textContent = displayName;
+    const titleText = document.createElement("span");
+    titleText.textContent = displayName;
+    title.appendChild(titleText);
+    const isActive =
+      Boolean(job.preview_url) &&
+      normalizePreviewPath(job.preview_url) === activePreviewPath;
+    if (isActive) {
+      const activeTag = document.createElement("span");
+      activeTag.className = "recent-job-active-tag";
+      activeTag.textContent = "(active)";
+      title.appendChild(activeTag);
+    }
     meta.appendChild(title);
     if (!canAct && job.stage_label) {
       const stageWrap = document.createElement("div");
@@ -655,6 +731,7 @@ function renderRecentJobs(container, jobs) {
         deleteBtn.appendChild(icon);
         deleteBtn.dataset.jobDeleteUrl = job.delete_url;
         deleteBtn.dataset.jobId = job.job_id;
+        deleteBtn.dataset.jobName = displayName;
         deleteBtn.setAttribute("aria-label", "Delete job");
         deleteBtn.setAttribute("title", "Delete job");
         actions.appendChild(deleteBtn);
@@ -688,6 +765,12 @@ function renderRecentJobs(container, jobs) {
   }
   recentJobsData = jobs || [];
   updatePreviewNavButtons();
+}
+
+function rerenderRecentJobsIfMounted() {
+  const container = document.getElementById("recentJobs");
+  if (!container || !Array.isArray(recentJobsData)) return;
+  renderRecentJobs(container, recentJobsData);
 }
 
 function openPreviewModal(url) {
@@ -730,6 +813,17 @@ function closeProjectNameModal(value = null) {
   if (resolver) resolver(value);
 }
 
+function closeDeleteJobModal(confirmed = false) {
+  const modal = document.getElementById("deleteJobModal");
+  if (!modal) return;
+  const resolver = deleteJobPromptResolver;
+  deleteJobPromptResolver = null;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  _updateModalOpenClass();
+  if (resolver) resolver(Boolean(confirmed));
+}
+
 function promptForProjectName(initialValue = "") {
   return new Promise((resolve) => {
     const modal = document.getElementById("projectNameModal");
@@ -757,6 +851,37 @@ function promptForProjectName(initialValue = "") {
   });
 }
 
+function promptForDeleteJob(jobName = "") {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("deleteJobModal");
+    const message = document.getElementById("deleteJobMessage");
+    const label = String(jobName || "").trim();
+    if (!modal || !message) {
+      const fallback = window.confirm(
+        label
+          ? `Delete "${label}" permanently? This removes job files and history.`
+          : "Delete this job permanently? This removes job files and history.",
+      );
+      resolve(Boolean(fallback));
+      return;
+    }
+    if (deleteJobPromptResolver) {
+      closeDeleteJobModal(false);
+    }
+    deleteJobPromptResolver = resolve;
+    message.textContent = label
+      ? `Delete "${label}" permanently? This removes job files and history.`
+      : "Delete this job permanently? This removes job files and history.";
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    _updateModalOpenClass();
+    setTimeout(() => {
+      const btn = document.getElementById("deleteJobConfirm");
+      if (btn) btn.focus();
+    }, 0);
+  });
+}
+
 function initProjectNameModal() {
   const form = document.getElementById("projectNameForm");
   const input = document.getElementById("projectNameInput");
@@ -776,6 +901,24 @@ function initProjectNameModal() {
   form.dataset.bound = "true";
 }
 
+function initDeleteJobModal() {
+  const form = document.getElementById("deleteJobForm");
+  const cancelBtn = document.getElementById("deleteJobCancel");
+  if (!form) return;
+  if (form.dataset.bound === "true") return;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    closeDeleteJobModal(true);
+  });
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      closeDeleteJobModal(false);
+    });
+  }
+  form.dataset.bound = "true";
+}
+
 function initPreviewModal() {
   document.addEventListener("click", (event) => {
     const deleteButton = event.target.closest("button[data-job-delete-url]");
@@ -784,6 +927,7 @@ function initPreviewModal() {
       deleteRecentJob(
         deleteButton.dataset.jobDeleteUrl,
         deleteButton.dataset.jobId,
+        deleteButton.dataset.jobName,
       );
       return;
     }
@@ -838,12 +982,21 @@ function initPreviewModal() {
     if (projectNameCloseTarget) {
       event.preventDefault();
       closeProjectNameModal(null);
+      return;
+    }
+    const deleteJobCloseTarget = event.target.closest(
+      '[data-delete-job-close="1"]',
+    );
+    if (deleteJobCloseTarget) {
+      event.preventDefault();
+      closeDeleteJobModal(false);
     }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closePreviewModal();
       closeProjectNameModal(null);
+      closeDeleteJobModal(false);
     }
   });
 }
@@ -851,13 +1004,16 @@ function initPreviewModal() {
 function _updateModalOpenClass() {
   const previewModal = document.getElementById("previewModal");
   const projectNameModal = document.getElementById("projectNameModal");
+  const deleteJobModal = document.getElementById("deleteJobModal");
   const previewOpen =
     previewModal && !previewModal.classList.contains("hidden");
   const projectNameOpen =
     projectNameModal && !projectNameModal.classList.contains("hidden");
+  const deleteJobOpen =
+    deleteJobModal && !deleteJobModal.classList.contains("hidden");
   document.body.classList.toggle(
     "modal-open",
-    Boolean(previewOpen || projectNameOpen),
+    Boolean(previewOpen || projectNameOpen || deleteJobOpen),
   );
 }
 
@@ -1596,6 +1752,7 @@ function setInlinePreview(previewUrl) {
     if (demo) demo.classList.add("hidden");
     syncPreviewToggleButtons();
     updatePreviewNavButtons();
+    rerenderRecentJobsIfMounted();
     return;
   }
   _setWireframeToggleState(false, false);
@@ -1613,6 +1770,7 @@ function setInlinePreview(previewUrl) {
     localStorage.setItem(LAST_PREVIEW_KEY, previewUrl);
   } catch (e) {}
   updatePreviewNavButtons();
+  rerenderRecentJobsIfMounted();
 }
 
 function setInlineBuildingOverlay(active) {
@@ -1646,6 +1804,7 @@ function initInlinePreview() {
 document.addEventListener("DOMContentLoaded", () => {
   initPreviewModal();
   initProjectNameModal();
+  initDeleteJobModal();
   initAuthModal();
   const jobsPanel = document.getElementById("recentJobsPanel");
   const jobsButton = document.getElementById("menuButton");
@@ -1675,6 +1834,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.addEventListener("click", (event) => {
       const target = event.target;
+      if (
+        target &&
+        typeof target.closest === "function" &&
+        target.closest("#deleteJobModal, #projectNameModal, #previewModal")
+      ) {
+        return;
+      }
       if (!jobsPanel.contains(target) && !jobsButton.contains(target)) {
         closeJobsPanel();
       }

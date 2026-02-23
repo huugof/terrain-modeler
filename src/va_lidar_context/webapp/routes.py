@@ -189,6 +189,15 @@ def _safe_next_path(value: Any) -> str:
     return path
 
 
+def _terrain_complexity_to_reduction(level: int) -> int:
+    """Map web slider level (0..10) to terrain reduction factor (25..1)."""
+    # Keep higher-detail end behavior familiar while extending low-detail
+    # settings to a true draft mode at 25x reduction.
+    reduction_steps = (25, 20, 15, 11, 8, 6, 5, 4, 3, 2, 1)
+    clamped = max(0, min(10, int(level)))
+    return reduction_steps[clamped]
+
+
 def _job_access_denied_response(message: str) -> Any:
     if _settings.AUTH_ENABLED and current_user() is None:
         return _unauthorized_response()
@@ -471,6 +480,7 @@ def index():
         clerk_frontend_api_url=_settings.CLERK_FRONTEND_API_URL,
         initial_preview_url=initial_preview_url,
         retention_days=_settings.RETENTION_DAYS,
+        recent_jobs_limit=RECENT_JOBS_LIMIT,
     )
 
 
@@ -626,7 +636,12 @@ def run_job():
     if terrain_complexity is None:
         terrain_complexity = 2
     terrain_complexity = max(0, min(10, terrain_complexity))
-    terrain_sample = max(1, 11 - terrain_complexity)
+    terrain_sample_legacy = _terrain_complexity_to_reduction(terrain_complexity)
+    terrain_sample = terrain_sample_legacy
+    terrain_resolution = None
+    if _settings.WEB_UPSTREAM_TERRAIN_RESOLUTION:
+        terrain_sample = 1
+        terrain_resolution = resolution * terrain_sample_legacy
     fill_dtm = True
     fill_hard = True
     fill_max_dist = DEFAULT_FILL_MAX_DIST
@@ -726,6 +741,7 @@ def run_job():
         floor_to_floor=floor_to_floor,
         keep_rasters=keep_rasters,
         terrain_sample=terrain_sample,
+        terrain_resolution=terrain_resolution,
         fill_dtm=fill_dtm,
         fill_hard=fill_hard,
         fill_max_dist=fill_max_dist,
@@ -1004,14 +1020,14 @@ def job_delete(job_id: str):
             get_logger().warning("Failed to delete job path %s: %s", resolved, exc)
             return jsonify({"error": "Failed to delete job files."}), 500
 
-    with JOBS_LOCK:
-        JOBS.pop(job_id, None)
-
     try:
         auth_store.delete_job(_settings.DB_PATH, job_id)
     except Exception as exc:
         get_logger().warning("Failed to delete persisted job %s: %s", job_id, exc)
         return jsonify({"error": "Failed to delete job record."}), 500
+
+    with JOBS_LOCK:
+        JOBS.pop(job_id, None)
 
     _notify_recent_jobs_change()
     return jsonify({"ok": True, "job_id": job_id})
