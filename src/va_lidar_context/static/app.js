@@ -1173,8 +1173,11 @@ async function ensureClerkReady() {
         },
       });
       if (!clerkListenerAttached && typeof clerk.addListener === "function") {
+        // Snapshot the session ID at load time so the listener can distinguish
+        // a newly-created session from one that already existed on page load.
+        const sessionIdAtLoad = clerk.session ? clerk.session.id : null;
         clerk.addListener((state) => {
-          if (state && state.session) {
+          if (state && state.session && state.session.id !== sessionIdAtLoad) {
             const nextPath = `${window.location.pathname || "/"}${window.location.search || ""}`;
             finalizeClerkSession(clerk, nextPath);
           }
@@ -1223,9 +1226,7 @@ function openAuthModal(nextPath = "/") {
         return;
       }
       if (typeof clerk.openSignIn === "function") {
-        clerk.openSignIn({
-          fallbackRedirectUrl: normalizedNext,
-        });
+        clerk.openSignIn();
         return;
       }
       window.location.href = _buildAuthLoginUrl(normalizedNext);
