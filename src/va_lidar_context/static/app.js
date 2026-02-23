@@ -70,23 +70,29 @@ function getPreviewJobs() {
   });
 }
 
-function getActivePreviewJob() {
-  const previewJobs = getPreviewJobs();
-  if (!previewJobs.length) return null;
+function getActiveDownloadJob() {
+  if (!Array.isArray(recentJobsData) || recentJobsData.length === 0) {
+    return null;
+  }
   const current = normalizePreviewPath(currentPreviewPath);
   if (current) {
-    const matched = previewJobs.find(
-      (job) => normalizePreviewPath(job.preview_url) === current,
-    );
+    const matched = recentJobsData.find((job) => {
+      if (!job || !job.preview_url || !job.download_all_url) return false;
+      return normalizePreviewPath(job.preview_url) === current;
+    });
     if (matched) return matched;
   }
-  return previewJobs[0] || null;
+  return (
+    recentJobsData.find(
+      (job) => job && typeof job.download_all_url === "string" && job.download_all_url,
+    ) || null
+  );
 }
 
 function updatePreviewDownloadButton() {
   const downloadBtn = document.getElementById("previewDownloadButton");
   if (!downloadBtn) return;
-  const activeJob = getActivePreviewJob();
+  const activeJob = getActiveDownloadJob();
   const url =
     activeJob && typeof activeJob.download_all_url === "string"
       ? activeJob.download_all_url
@@ -1216,8 +1222,8 @@ function initToggleButtons() {
     btn.addEventListener("click", () => {
       if (btn.disabled) return;
       input.checked = !input.checked;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
       syncToggleButtons();
-      updateAlerts();
     });
     btn.dataset.bound = "true";
   });
