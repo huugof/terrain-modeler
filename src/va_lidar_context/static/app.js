@@ -1218,22 +1218,9 @@ function openAuthModal(nextPath = "/") {
   if (!AUTH_ENABLED) return;
   const normalizedNext =
     typeof nextPath === "string" && nextPath.startsWith("/") ? nextPath : "/";
-  ensureClerkReady()
-    .then(async (clerk) => {
-      if (!clerk) return;
-      if (clerk.session) {
-        await finalizeClerkSession(clerk, normalizedNext);
-        return;
-      }
-      if (typeof clerk.openSignIn === "function") {
-        clerk.openSignIn();
-        return;
-      }
-      window.location.href = _buildAuthLoginUrl(normalizedNext);
-    })
-    .catch(() => {
-      window.location.href = _buildAuthLoginUrl(normalizedNext);
-    });
+  // Route all interactive sign-in flows through /auth/login. The dedicated page
+  // mounts Clerk SignIn and reliably completes /auth/clerk/exchange.
+  window.location.href = _buildAuthLoginUrl(normalizedNext);
 }
 
 function initAuthModal() {
