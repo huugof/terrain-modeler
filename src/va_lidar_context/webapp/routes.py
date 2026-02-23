@@ -92,6 +92,7 @@ from .jobs import (
     _collect_outputs,
     _job_logs_payload,
     _jobs_for_user,
+    _lazy_rehydrate_job,
     _list_job_artifacts,
     _notify_recent_jobs_change,
     _persist_job_snapshot,
@@ -837,6 +838,8 @@ def job_status(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
+        job = _lazy_rehydrate_job(job_id)
+    if job is None:
         return "Job not found", 404
     embed_mode = request.args.get("embed", "").strip().lower() in ("1", "true", "yes")
     return render_template(
@@ -860,6 +863,8 @@ def job_logs(job_id: str):
 
     with JOBS_LOCK:
         job = JOBS.get(job_id)
+    if job is None:
+        job = _lazy_rehydrate_job(job_id)
     if job is None:
         return jsonify({"error": "Job not found"}), 404
 
@@ -896,6 +901,8 @@ def job_artifacts(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
+        job = _lazy_rehydrate_job(job_id)
+    if job is None:
         return jsonify({"error": "Job not found"}), 404
 
     artifacts = _list_job_artifacts(job)
@@ -920,6 +927,8 @@ def job_download(job_id: str, name: str):
         return denied
     with JOBS_LOCK:
         job = JOBS.get(job_id)
+    if job is None:
+        job = _lazy_rehydrate_job(job_id)
     if job is None:
         return ("Job not found", 404)
 

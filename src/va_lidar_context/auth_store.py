@@ -309,6 +309,51 @@ def get_job_owner_id(db_path: Path, job_id: str) -> Optional[int]:
     return int(value) if value is not None else None
 
 
+def get_job_by_id(db_path: Path, job_id: str) -> Optional[Dict[str, Any]]:
+    """Return a single persisted job row plus its artifacts, or None if not found."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT job_id, user_id, created_at, status, started_at, finished_at,
+                   exit_code, error, summary_json
+            FROM jobs WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        artifact_rows = conn.execute(
+            "SELECT name, size, mtime FROM job_artifacts WHERE job_id = ? ORDER BY name ASC",
+            (job_id,),
+        ).fetchall()
+
+    raw_summary = row["summary_json"]
+    summary: Dict[str, Any] = {}
+    if isinstance(raw_summary, str) and raw_summary.strip():
+        try:
+            parsed = json.loads(raw_summary)
+            if isinstance(parsed, dict):
+                summary = parsed
+        except Exception:
+            summary = {}
+    value = row["user_id"]
+    return {
+        "job_id": str(row["job_id"]),
+        "user_id": int(value) if value is not None else None,
+        "created_at": float(row["created_at"]),
+        "status": str(row["status"]),
+        "started_at": float(row["started_at"]) if row["started_at"] is not None else None,
+        "finished_at": float(row["finished_at"]) if row["finished_at"] is not None else None,
+        "exit_code": int(row["exit_code"]) if row["exit_code"] is not None else None,
+        "error": str(row["error"]) if row["error"] is not None else None,
+        "summary": summary,
+        "artifacts": [
+            {"name": str(r["name"]), "size": int(r["size"]), "mtime": float(r["mtime"])}
+            for r in artifact_rows
+        ],
+    }
+
+
 def delete_job(db_path: Path, job_id: str) -> None:
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM job_artifacts WHERE job_id = ?", (job_id,))

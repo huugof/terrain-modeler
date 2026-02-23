@@ -412,6 +412,81 @@ def _rehydrate_jobs_from_store() -> None:
                 JOBS[job.job_id] = job
 
 
+def _lazy_rehydrate_job(job_id: str) -> Optional["Job"]:
+    """Load a single job from the DB into JOBS if it's missing from memory.
+
+    Returns the Job if found (either already in memory or freshly loaded),
+    or None if not found in either place.
+    """
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            return JOBS[job_id]
+
+    if not _settings.JOB_HISTORY_ENABLED:
+        return None
+    try:
+        item = auth_store.get_job_by_id(_settings.DB_PATH, job_id)
+    except Exception:
+        return None
+    if item is None:
+        return None
+
+    summary_raw = item.get("summary")
+    summary = summary_raw if isinstance(summary_raw, dict) else {}
+
+    artifacts_raw = item.get("artifacts")
+    if isinstance(artifacts_raw, list) and artifacts_raw:
+        outputs = summary.get("outputs")
+        if not isinstance(outputs, dict):
+            outputs = {}
+        output_files = outputs.get("files")
+        if not isinstance(output_files, list) or not output_files:
+            outputs["files"] = [
+                str(entry.get("name"))
+                for entry in artifacts_raw
+                if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+            ]
+        raw_dir = outputs.get("dir")
+        if not isinstance(raw_dir, str) or not raw_dir.strip():
+            outputs["dir"] = str(_settings.OUT_DIR / job_id)
+        summary["outputs"] = outputs
+    elif not isinstance(summary.get("outputs"), dict):
+        discovered = _discover_output_dir_for_job(job_id)
+        if discovered is not None:
+            summary["outputs"] = _collect_outputs(discovered)
+
+    status = str(item.get("status") or "error")
+    if status in ("queued", "running"):
+        status = "error"
+    error = sanitize_job_error(item.get("error"))
+    if status == "error":
+        error = error or "Job interrupted (server restarted)."
+
+    raw_user_id = item.get("user_id")
+    job = Job(
+        job_id=job_id,
+        status=status,
+        created_at=float(item.get("created_at") or time.time()),
+        user_id=int(raw_user_id) if isinstance(raw_user_id, int) else None,
+        started_at=(
+            float(item["started_at"]) if isinstance(item.get("started_at"), (int, float)) else None
+        ),
+        finished_at=(
+            float(item["finished_at"])
+            if isinstance(item.get("finished_at"), (int, float))
+            else None
+        ),
+        exit_code=int(item["exit_code"]) if isinstance(item.get("exit_code"), int) else None,
+        error=error,
+        summary=summary,
+    )
+
+    with JOBS_LOCK:
+        if job_id not in JOBS:
+            JOBS[job_id] = job
+        return JOBS[job_id]
+
+
 def _persist_job_snapshot(job: Job) -> None:
     if not _settings.AUTH_ENABLED and not _settings.HMAC_KEYS and not _settings.JOB_HISTORY_ENABLED:
         return
