@@ -686,7 +686,19 @@
                 const mtlLoader = new window.MTLLoader(manager);
                 const mtlPath = `/jobs/${previewState.jobId}/download/`;
                 const materials = mtlLoader.parse(mtlSanitized.text, mtlPath);
+                // Wait for all texture loads to finish before parsing the OBJ so
+                // that material.map.image is populated when we set needsUpdate.
+                // We register onLoad before preload() and add a sentinel item after
+                // so it fires even when no textures are queued (empty MTL).
+                const texturesReady = new Promise((resolve) => {
+                  manager.onLoad = resolve;
+                });
+                // preload() kicks off async texture loads tracked by the manager.
                 materials.preload();
+                // The sentinel ensures onLoad fires even if preload queued nothing.
+                manager.itemStart('__sentinel__');
+                manager.itemEnd('__sentinel__');
+                await texturesReady;
                 for (const key of Object.keys(materials.materials)) {
                   const material = materials.materials[key];
                   if (material && material.map) {
