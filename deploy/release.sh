@@ -17,6 +17,9 @@ else
   docker compose up -d --build --remove-orphans "${SERVICE}" caddy
 fi
 
+# Ensure Caddy applies any changed Caddyfile immediately.
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+
 echo "Waiting for ${SERVICE} health..."
 for i in {1..30}; do
   if docker compose exec -T "${SERVICE}" curl -fsS http://127.0.0.1:8000/healthz >/dev/null; then

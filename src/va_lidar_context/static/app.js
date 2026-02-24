@@ -58,6 +58,35 @@ function normalizePreviewPath(value) {
   }
 }
 
+function previewPathMatchKey(value) {
+  const normalized = normalizePreviewPath(value);
+  if (!normalized) return "";
+  try {
+    const parsed = new URL(normalized, window.location.origin);
+    const params = new URLSearchParams(parsed.search);
+    // Embed is a display concern; it should not affect which job is "active".
+    params.delete("embed");
+    params.sort();
+    const search = params.toString();
+    return `${parsed.pathname}${search ? `?${search}` : ""}`;
+  } catch (err) {
+    return normalized;
+  }
+}
+
+function previewJobId(value) {
+  const normalized = normalizePreviewPath(value);
+  if (!normalized) return "";
+  try {
+    const parsed = new URL(normalized, window.location.origin);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2 || parts[0] !== "jobs") return "";
+    return decodeURIComponent(parts[1]);
+  } catch (err) {
+    return "";
+  }
+}
+
 function getPreviewJobs() {
   if (!Array.isArray(recentJobsData)) return [];
   return recentJobsData.filter((job) => {
@@ -98,20 +127,20 @@ function getActiveDownloadJob() {
   if (!Array.isArray(recentJobsData) || recentJobsData.length === 0) {
     return null;
   }
-  const current = normalizePreviewPath(currentPreviewPath);
-  if (current) {
+  const currentKey = previewPathMatchKey(currentPreviewPath);
+  if (currentKey) {
     const matched = recentJobsData.find((job) => {
-      if (!job || !job.preview_url || !job.download_all_url) return false;
-      return normalizePreviewPath(job.preview_url) === current;
+      if (!job || !job.preview_url) return false;
+      return previewPathMatchKey(job.preview_url) === currentKey;
     });
     if (matched) return matched;
   }
-  return (
-    recentJobsData.find(
-      (job) =>
-        job && typeof job.download_all_url === "string" && job.download_all_url,
-    ) || null
-  );
+  const activeJobId = previewJobId(currentPreviewPath);
+  if (!activeJobId) return null;
+  return {
+    job_id: activeJobId,
+    download_all_url: `/jobs/${encodeURIComponent(activeJobId)}/download-all`,
+  };
 }
 
 function updatePreviewDownloadButton() {
