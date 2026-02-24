@@ -129,9 +129,11 @@ If you use `docker compose logs -f ...`, it will stream continuously until you s
 
 Blue/green deploy:
 ```bash
-./deploy/deploy_green.sh <image-tag>
-./deploy/switch_traffic.sh green
-./deploy/rollback.sh   # if needed
+# One command: deploy to inactive color, health-check, and switch traffic.
+./deploy/release.sh <image-tag>
+
+# If needed, instant rollback to the previous color shown by release.sh:
+./deploy/rollback.sh
 ```
 
 Production hosting checklist:
