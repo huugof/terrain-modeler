@@ -70,7 +70,7 @@ All outputs land in `./out/<job_id>/` where job_id is a hash of the inputs.
 |---|---|---|
 | `APP_DOMAIN` | none | Public domain Caddy should serve (required in compose deployment). |
 | `ACME_EMAIL` | none | Contact email used for ACME/TLS account registration (required). |
-| `APP_IMAGE` | `va-lidar-context:latest` | Image tag for blue/green services. |
+| `APP_IMAGE` | `va-lidar-context:latest` | Image tag for the `terrain-ui` service. |
 
 ### Auth (Clerk)
 

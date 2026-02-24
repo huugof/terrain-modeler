@@ -95,7 +95,7 @@ Web control notes:
 
 ## Docker
 
-**Production (Caddy + TLS + blue/green):**
+**Production (Caddy + TLS):**
 ```bash
 # 1) Point your DNS A record to the droplet public IPv4 first.
 #    Example: meshd.xyz -> 134.209.42.153
@@ -113,7 +113,7 @@ chown -R 10001:10001 /data/out /data/app
 ./deploy/preflight.sh
 
 # 5) Start stack.
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 ```
 App is served through Caddy on `http://<host>/` (and `https://<domain>/` when DNS + ACME are configured).
 
@@ -127,20 +127,19 @@ curl -I https://$APP_DOMAIN
 
 If you use `docker compose logs -f ...`, it will stream continuously until you stop it with `Ctrl+C`.
 
-Blue/green deploy:
+Update deploy (single app container, brief downtime during restart):
 ```bash
-# One command: deploy to inactive color, health-check, and switch traffic.
-./deploy/release.sh <image-tag>
+# Use APP_IMAGE from .env:
+./deploy/release.sh
 
-# If needed, instant rollback to the previous color shown by release.sh:
-./deploy/rollback.sh
+# Or pass an explicit image tag:
+./deploy/release.sh va-lidar-context:latest
 ```
 
 Production hosting checklist:
 - Create persistent volumes: `/data/out` and `/data/app` owned by uid `10001`.
 - Set `.env` with `APP_DOMAIN`, `ACME_EMAIL`, and `SESSION_SECRET` (64-char random hex).
 - Run `./deploy/preflight.sh` before every deploy.
-- Deploy with `docker compose up -d --build` and verify `/healthz` responds through your domain.
-- Keep all traffic on a single stack (`terrain-ui-blue`) unless you intentionally run blue/green cutover scripts.
+- Deploy with `./deploy/release.sh` (or `docker compose up -d --build --remove-orphans`) and verify `/healthz` responds through your domain.
 
 See [DOCUMENTATION.md](docs/DOCUMENTATION.md) for all CLI flags, environment variables, auth configuration, output file reference, and parcel source setup.

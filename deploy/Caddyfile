@@ -4,5 +4,5 @@
 
 {$APP_DOMAIN}, :80 {
     encode gzip
-    reverse_proxy terrain-ui-blue:8000
+    reverse_proxy terrain-ui:8000
 }

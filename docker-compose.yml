@@ -12,42 +12,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - terrain-ui-blue
+      - terrain-ui
     restart: unless-stopped
 
-  terrain-ui-blue:
+  terrain-ui:
     build: .
     image: ${APP_IMAGE:-va-lidar-context:latest}
-    environment:
-      OUT_DIR: /data/out
-      DB_PATH: /data/app/app.db
-      RETENTION_DAYS: "7"
-      CLEANUP_INTERVAL: "3600"
-      AUTH_PROVIDER: ${AUTH_PROVIDER:-}
-      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
-      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
-      CLERK_SIGN_IN_URL: ${CLERK_SIGN_IN_URL:-}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      CLERK_ISSUER: ${CLERK_ISSUER:-}
-      CLERK_API_URL: ${CLERK_API_URL:-https://api.clerk.com/v1}
-      CLERK_ALLOWED_DOMAIN: ${CLERK_ALLOWED_DOMAIN:-}
-      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-      RATE_LIMIT_HOURLY: ${RATE_LIMIT_HOURLY:-3}
-      RATE_LIMIT_DAILY: ${RATE_LIMIT_DAILY:-10}
-      MAX_ACTIVE_JOBS_PER_USER: ${MAX_ACTIVE_JOBS_PER_USER:-1}
-      MAX_CLIP_SIZE: ${MAX_CLIP_SIZE:-5000}
-    volumes:
-      - /data/out:/data/out
-      - /data/app:/data/app
-    restart: unless-stopped
-
-  terrain-ui-green:
-    build: .
-    image: ${APP_IMAGE:-va-lidar-context:latest}
-    profiles: ["green"]
     environment:
       OUT_DIR: /data/out
       DB_PATH: /data/app/app.db
