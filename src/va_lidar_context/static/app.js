@@ -5,6 +5,7 @@ const CONUS_BOUNDS = {
   lonMin: -125.0,
   lonMax: -66.5,
 };
+const LARGE_MAP_SIZE_WARNING_FEET = 5000;
 const PARCEL_SOURCES =
   (window.APP_CONFIG && window.APP_CONFIG.parcelSources) || [];
 const RECENT_JOBS_WAIT_SECONDS = 25;
@@ -19,11 +20,14 @@ const LAST_PREVIEW_KEY = "terrain-last-preview-url";
 let buildErrorMessage = "";
 let coverageStatus = null;
 let coverageKey = null;
+let coverageProvider = null;
+let coverageError = "";
 let coverageTimer = null;
 let coverageRequestId = 0;
 let recentJobsVersion = 0;
 let recentJobsData = [];
 let currentPreviewPath = "";
+let formRecordMode = false;
 let projectNamePromptResolver = null;
 let deleteJobPromptResolver = null;
 
@@ -199,8 +203,12 @@ function getCoords() {
   return parseCoords(coordsInput.value);
 }
 
-function coverageKeyFor(lon, lat) {
-  return `${lon.toFixed(4)},${lat.toFixed(4)}`;
+function coverageKeyFor(lon, lat, size, units) {
+  const sizeNum = Number(size);
+  const sizeKey =
+    Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum.toFixed(2) : "none";
+  const unitsKey = units === "meters" ? "meters" : "feet";
+  return `${lon.toFixed(4)},${lat.toFixed(4)},${sizeKey},${unitsKey}`;
 }
 
 function isInVirginia(lon, lat) {
@@ -242,23 +250,54 @@ function isInConus(lon, lat) {
   );
 }
 
+function mapSizeFeet(sizeValue, unitsValue) {
+  const size = Number(sizeValue);
+  if (!Number.isFinite(size) || size <= 0) return null;
+  return unitsValue === "meters" ? size * 3.28084 : size;
+}
+
 async function checkCoverage() {
-  const coords = getCoords();
-  if (!coords) {
+  if (formRecordMode) {
     coverageStatus = null;
     coverageKey = null;
+    coverageProvider = null;
+    coverageError = "";
     updateAlerts();
     return;
   }
-  const key = coverageKeyFor(coords.lon, coords.lat);
+  const coords = getCoords();
+  const sizeInput = document.querySelector('input[name="size"]');
+  const unitsInput = document.querySelector('select[name="units"]');
+  const sizeRaw = Number(sizeInput ? sizeInput.value : "");
+  const size = Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : null;
+  const units = unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
+  if (!coords) {
+    coverageStatus = null;
+    coverageKey = null;
+    coverageProvider = null;
+    coverageError = "";
+    updateAlerts();
+    return;
+  }
+  const key = coverageKeyFor(coords.lon, coords.lat, size, units);
   const reqId = ++coverageRequestId;
   try {
-    const resp = await fetch(`/coverage?lon=${coords.lon}&lat=${coords.lat}`, {
+    const params = new URLSearchParams({
+      lon: String(coords.lon),
+      lat: String(coords.lat),
+    });
+    if (size !== null) {
+      params.set("size", String(size));
+      params.set("units", units);
+    }
+    const resp = await fetch(`/coverage?${params.toString()}`, {
       cache: "no-store",
     });
     if (!resp.ok) throw new Error("coverage failed");
     const data = await resp.json();
     if (reqId !== coverageRequestId) return;
+    coverageProvider = typeof data.provider === "string" ? data.provider : null;
+    coverageError = typeof data.error === "string" ? data.error : "";
     if (data.supported === true) {
       coverageStatus = true;
     } else if (data.supported === false) {
@@ -271,11 +310,20 @@ async function checkCoverage() {
     if (reqId !== coverageRequestId) return;
     coverageStatus = null;
     coverageKey = null;
+    coverageProvider = null;
+    coverageError = "";
   }
   updateAlerts();
 }
 
 function scheduleCoverageCheck() {
+  if (formRecordMode) {
+    if (coverageTimer) {
+      clearTimeout(coverageTimer);
+      coverageTimer = null;
+    }
+    return;
+  }
   if (coverageTimer) {
     clearTimeout(coverageTimer);
   }
@@ -304,15 +352,39 @@ function updateAlerts() {
   const parcels = document.getElementById("dxf_include_parcels");
   const contours = document.getElementById("output_contours");
   const outBuildings = document.getElementById("output_buildings");
+  const inlinePreviewDemo = document.getElementById("inlinePreviewDemo");
+  const suppressCoverageWarnings = Boolean(
+    inlinePreviewDemo && !inlinePreviewDemo.classList.contains("hidden"),
+  );
+  if (formRecordMode) {
+    setAlert("", false);
+    return;
+  }
   const coordsInput = document.querySelector('input[name="coords"]');
+  const sizeInput = document.querySelector('input[name="size"]');
+  const unitsInput = document.querySelector('select[name="units"]');
+  const sizeFeet = mapSizeFeet(
+    sizeInput ? sizeInput.value : "",
+    unitsInput ? unitsInput.value : "feet",
+  );
+  const coverageSizeRaw = Number(sizeInput ? sizeInput.value : "");
+  const coverageSize =
+    Number.isFinite(coverageSizeRaw) && coverageSizeRaw > 0
+      ? coverageSizeRaw
+      : null;
+  const coverageUnits =
+    unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
   const coords = coordsInput ? parseCoords(coordsInput.value) : null;
+  const currentCoverageKey = coords
+    ? coverageKeyFor(coords.lon, coords.lat, coverageSize, coverageUnits)
+    : null;
   if (coordsInput && coordsInput.value.trim() && !coords) {
     setAlert('Coordinates are invalid. Use "lat, lon".', true);
     return;
   }
   if (coords && !isInConus(coords.lon, coords.lat)) {
     setAlert(
-      "Coordinates are outside the supported area (contiguous US).",
+      "Coordinates are outside the supported area (contiguous U.S. only).",
       true,
     );
     return;
@@ -320,13 +392,33 @@ function updateAlerts() {
   if (
     coverageStatus === false &&
     coords &&
-    coverageKey === coverageKeyFor(coords.lon, coords.lat)
+    coverageKey === currentCoverageKey
   ) {
-    setAlert(
-      "Coordinates are outside the supported area (contiguous US).",
-      true,
-    );
-    return;
+    if (!suppressCoverageWarnings) {
+      if (coverageProvider === "national") {
+        setAlert(
+          "Coverage pre-check could not confirm USGS 3DEP LiDAR for this map area. You can still try a build.",
+          "warning",
+        );
+      } else {
+        setAlert("No LiDAR coverage was found at this location.", true);
+      }
+      return;
+    }
+  }
+  if (
+    coverageStatus === null &&
+    coverageError &&
+    coords &&
+    coverageKey === currentCoverageKey
+  ) {
+    if (!suppressCoverageWarnings) {
+      setAlert(
+        "Could not verify coverage right now. You can still try a build, but it may fail.",
+        "warning",
+      );
+      return;
+    }
   }
   const parcelsRequested = Boolean(
     parcels && contours && contours.checked && parcels.checked,
@@ -341,6 +433,13 @@ function updateAlerts() {
   }
   if (buildErrorMessage) {
     setAlert(buildErrorMessage, true);
+    return;
+  }
+  if (sizeFeet !== null && sizeFeet > LARGE_MAP_SIZE_WARNING_FEET) {
+    setAlert(
+      "Map sizes over 5,000 feet will significantly increase build time.",
+      "warning",
+    );
     return;
   }
   if (outBuildings && outBuildings.checked) {
@@ -598,11 +697,101 @@ function applyJobFormDefaults(formDefaults) {
   scheduleCoverageCheck();
 }
 
+function setFormRecordMode(locked) {
+  formRecordMode = Boolean(locked);
+  const disable = (selector) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      el.disabled = formRecordMode;
+    });
+  };
+  disable(
+    'input[name="coords"], input[name="size"], select[name="units"], input[name="terrain_complexity"], input[name="rotate_z"], input[name="dxf_contour_spacing"], #xyz_mode, #runBtn',
+  );
+  disable(
+    "#output_terrain, #output_buildings, #output_contours, #output_naip, #output_xyz, #dxf_include_parcels, #dxf_include_buildings",
+  );
+  document
+    .querySelectorAll(
+      "button[data-input], .segmented[data-target] button[data-value]",
+    )
+    .forEach((btn) => {
+      btn.disabled = formRecordMode;
+    });
+  const runBtn = document.getElementById("runBtn");
+  if (runBtn) {
+    runBtn.disabled = formRecordMode;
+    runBtn.textContent = formRecordMode ? "Locked" : "Build";
+    runBtn.classList.toggle("locked", formRecordMode);
+  }
+  const form = document.querySelector("form.card");
+  if (form) {
+    form.classList.toggle("record-mode", formRecordMode);
+  }
+  if (formRecordMode) {
+    if (coverageTimer) {
+      clearTimeout(coverageTimer);
+      coverageTimer = null;
+    }
+    coverageStatus = null;
+    coverageKey = null;
+    coverageProvider = null;
+    coverageError = "";
+    setAlert("", false);
+  }
+}
+
+function applyNewBuildDefaults() {
+  setFormRecordMode(false);
+  const coordsInput = document.querySelector('input[name="coords"]');
+  if (coordsInput) coordsInput.value = "";
+  const jobNameInput = document.querySelector('input[name="job_name"]');
+  if (jobNameInput) jobNameInput.value = "";
+
+  const setChecked = (id, value) => {
+    const input = document.getElementById(id);
+    if (input) input.checked = Boolean(value);
+  };
+  setChecked("output_contours", true);
+  setChecked("output_xyz", true);
+  setChecked("output_naip", true);
+  setChecked("output_terrain", true);
+  setChecked("output_buildings", false);
+  setChecked("dxf_include_parcels", true);
+  setChecked("dxf_include_buildings", true);
+
+  const complexityInput = document.querySelector(
+    'input[name="terrain_complexity"]',
+  );
+  if (complexityInput) complexityInput.value = "5";
+  const northInput = document.querySelector('input[name="rotate_z"]');
+  if (northInput) northInput.value = "0";
+  const dxfSmoothingInput = document.querySelector(
+    'input[name="dxf_contour_spacing"]',
+  );
+  if (dxfSmoothingInput) dxfSmoothingInput.value = "2";
+  const contourIntervalInput = document.getElementById("contour_interval");
+  if (contourIntervalInput) contourIntervalInput.value = "2";
+  const xyzModeInput = document.getElementById("xyz_mode");
+  if (xyzModeInput) xyzModeInput.value = "grid";
+  const imageQualityInput = document.getElementById("image_quality");
+  if (imageQualityInput) imageQualityInput.value = "standard";
+
+  buildErrorMessage = "";
+  initSegmentedControls();
+  initToggleButtons();
+  updateUnitLabels();
+  updateUiToggles();
+  updateAlerts();
+  scheduleCoverageCheck();
+}
+
 function applyRecentJobPreview(previewUrl, formDefaults) {
+  setFormRecordMode(true);
   if (previewUrl) {
     setInlinePreview(previewUrl);
   }
   applyJobFormDefaults(formDefaults);
+  setFormRecordMode(true);
 }
 
 function initPreviewNavButtons() {
@@ -1250,6 +1439,7 @@ function updateUiToggles() {
 
 async function runBuild(event) {
   event.preventDefault();
+  if (formRecordMode) return;
   const form = event.target;
   const runBtn = document.getElementById("runBtn");
   if (!form || !runBtn) return;
@@ -1299,7 +1489,7 @@ async function runBuild(event) {
     buildErrorMessage =
       "Build failed to start. Please check your inputs and try again.";
     updateAlerts();
-    runBtn.disabled = false;
+    runBtn.disabled = formRecordMode;
     runBtn.textContent = originalText;
     setInlineBuildStatus("Build failed to start.");
     setInlineBuildingOverlay(false);
@@ -1309,7 +1499,7 @@ async function runBuild(event) {
     if (resp.status === 401 && AUTH_ENABLED) {
       const nextPath = `${window.location.pathname || "/"}${window.location.search || ""}`;
       openAuthModal(nextPath);
-      runBtn.disabled = false;
+      runBtn.disabled = formRecordMode;
       runBtn.textContent = originalText;
       setInlineBuildStatus("Sign in required.");
       setInlineBuildingOverlay(false);
@@ -1325,7 +1515,7 @@ async function runBuild(event) {
         "Build failed to start. Please check your inputs and try again.";
     }
     updateAlerts();
-    runBtn.disabled = false;
+    runBtn.disabled = formRecordMode;
     runBtn.textContent = originalText;
     setInlineBuildStatus("Build failed to start.");
     setInlineBuildingOverlay(false);
@@ -1399,7 +1589,7 @@ async function runBuild(event) {
     setInlinePreview(jobPreviewUrl);
   }
   await refreshRecentJobs();
-  runBtn.disabled = false;
+  runBtn.disabled = formRecordMode;
   runBtn.textContent = originalText;
 }
 
@@ -1585,6 +1775,19 @@ function setInlineBuildStatus(message) {
   statusEl.textContent = String(message || "Building...");
 }
 
+function findRecentJobFormDefaultsByPreviewUrl(previewUrl) {
+  if (!previewUrl) return null;
+  const targetPath = normalizePreviewPath(previewUrl);
+  const links = document.querySelectorAll('a[data-preview-inline="1"]');
+  for (const link of links) {
+    const linkUrl = link.dataset.previewUrl || link.getAttribute("href") || "";
+    if (!linkUrl) continue;
+    if (normalizePreviewPath(linkUrl) !== targetPath) continue;
+    return parseJsonObject(link.dataset.formDefaults);
+  }
+  return null;
+}
+
 function initInlinePreview() {
   const frame = document.getElementById("inlinePreviewFrame");
   if (!frame) return;
@@ -1593,6 +1796,11 @@ function initInlinePreview() {
   const savedUrl = localStorage.getItem(LAST_PREVIEW_KEY);
   const previewUrl = serverUrl || savedUrl;
   if (previewUrl) {
+    const formDefaults = findRecentJobFormDefaultsByPreviewUrl(previewUrl);
+    if (formDefaults) {
+      applyRecentJobPreview(previewUrl, formDefaults);
+      return;
+    }
     setInlinePreview(previewUrl);
   }
 }
@@ -1602,6 +1810,13 @@ document.addEventListener("DOMContentLoaded", () => {
   initProjectNameModal();
   initDeleteJobModal();
   initAuthModal();
+  const newJobButton = document.getElementById("newJobButton");
+  if (newJobButton) {
+    newJobButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      applyNewBuildDefaults();
+    });
+  }
   const jobsPanel = document.getElementById("recentJobsPanel");
   const jobsButton = document.getElementById("menuButton");
   if (jobsPanel && jobsButton) {
@@ -1718,6 +1933,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const xyzMode = document.getElementById("xyz_mode");
   const dxfParcels = document.getElementById("dxf_include_parcels");
   const coords = document.querySelector('input[name="coords"]');
+  const mapSizeInput = document.querySelector('input[name="size"]');
   const units = document.querySelector('select[name="units"]');
   if (contours) contours.addEventListener("change", updateUiToggles);
   if (dxfParcels) dxfParcels.addEventListener("change", updateAlerts);
@@ -1731,9 +1947,16 @@ document.addEventListener("DOMContentLoaded", () => {
       updateAlerts();
       scheduleCoverageCheck();
     });
+  if (mapSizeInput)
+    mapSizeInput.addEventListener("input", () => {
+      updateAlerts();
+      scheduleCoverageCheck();
+    });
   if (units)
     units.addEventListener("change", () => {
       updateUnitLabels();
+      updateAlerts();
+      scheduleCoverageCheck();
     });
   const form = document.querySelector("form.card");
   if (form) {

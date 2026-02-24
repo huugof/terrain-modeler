@@ -1,4 +1,5 @@
 """Regression tests for build pipeline output/contour validation (task 1.7)."""
+
 from __future__ import annotations
 
 import pytest
@@ -69,9 +70,7 @@ def test_contour_interval_with_xyz_contour_mode_is_valid():
     with pytest.raises(Exception) as exc_info:
         build(cfg)
     # Should NOT raise the contour interval mismatch errors
-    assert "contours" not in str(exc_info.value).lower() or (
-        "requires" not in str(exc_info.value)
-    )
+    assert "contours" not in str(exc_info.value).lower() or ("requires" not in str(exc_info.value))
 
 
 # ---------------------------------------------------------------------------
@@ -86,3 +85,15 @@ def test_default_outputs_do_not_require_contour_interval():
         build(cfg)
     assert "Contours output requires" not in str(exc_info.value)
     assert "XYZ contour output requires" not in str(exc_info.value)
+
+
+def test_size_must_be_positive_when_center_is_provided():
+    cfg = _cfg(center=(37.5, -77.5), size=0.0)
+    with pytest.raises(ValueError, match="--size must be a finite number greater than 0"):
+        build(cfg)
+
+
+def test_size_must_be_finite_when_center_is_provided():
+    cfg = _cfg(center=(37.5, -77.5), size=float("nan"))
+    with pytest.raises(ValueError, match="--size must be a finite number greater than 0"):
+        build(cfg)

@@ -201,6 +201,10 @@ body {
     height: 16px;
     transition: transform 0.18s ease;
 }
+#newJobButton .lucide {
+    width: 20px;
+    height: 20px;
+}
 .menu-button[aria-expanded="true"] .lucide {
     transform: rotate(90deg);
 }
@@ -1007,6 +1011,30 @@ body.jobs-panel-open .layout-preview-col::after {
     height: 42px;
     border-radius: var(--radius-action-pill);
     padding: 0 16px;
+}
+.app-card.record-mode #runBtn.locked {
+    background: #5c6168;
+    color: #e6e8ec;
+    opacity: 1;
+    cursor: not-allowed;
+}
+.app-card.record-mode input[type="text"]:disabled,
+.app-card.record-mode input[type="number"]:disabled,
+.app-card.record-mode input[type="range"]:disabled,
+.app-card.record-mode select:disabled,
+.app-card.record-mode .output-toggle-btn:disabled,
+.app-card.record-mode .segmented button:disabled {
+    opacity: 1;
+}
+.app-card.record-mode input[type="text"]:disabled,
+.app-card.record-mode input[type="number"]:disabled,
+.app-card.record-mode input[type="range"]:disabled,
+.app-card.record-mode select:disabled {
+    color: var(--ink);
+    background: var(--pill-bg);
+    border-color: var(--border);
+    -webkit-text-fill-color: var(--ink);
+    cursor: default;
 }
 .footer {
     color: var(--muted);

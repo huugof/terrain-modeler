@@ -43,6 +43,12 @@ class TestParseFloat:
     def test_invalid_with_whitespace_returns_none(self):
         assert parse_float("  not-a-number  ") is None
 
+    def test_nan_returns_none(self):
+        assert parse_float("nan") is None
+
+    def test_inf_returns_none(self):
+        assert parse_float("inf") is None
+
 
 class TestParseInt:
     def test_none_returns_none(self):
@@ -112,6 +118,12 @@ def _base_form(**overrides):
 
 def test_invalid_size_returns_400_not_500(client):
     resp = client.post("/run", data=_base_form(size="not-a-number"))
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_nan_size_returns_400_not_500(client):
+    resp = client.post("/run", data=_base_form(size="nan"))
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 

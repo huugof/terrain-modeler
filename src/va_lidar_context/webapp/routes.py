@@ -37,8 +37,7 @@ from ..config import (
     DEFAULT_NAIP_FLIP_V,
     DEFAULT_PERCENTILE,
     DEFAULT_PREFER_EPT,
-    DEFAULT_UNITS,
-    DEFAULT_XYZ_MODE,
+    DEFAULT_RESOLUTION,
     BuildConfig,
 )
 from ..constants import (
@@ -47,8 +46,9 @@ from ..constants import (
     DEFAULT_PREVIEW_NAME,
     DEFAULT_PREVIEW_SIZE_FEET,
 )
+from ..core.geo import bbox_from_center_wgs84
 from ..pipeline.io import generate_job_id
-from ..providers.usgs_index import query_for_point
+from ..providers.usgs_index import query_for_bbox, query_for_point
 from ..util import ensure_dir, get_logger, is_path_within, request_build_cancel
 from . import jobs as _jobs_module
 from . import rate_limiter as _rl
@@ -68,22 +68,23 @@ from .auth import (
     verify_hmac_request,
 )
 from .forms import (
-    ALLOWED_IMAGE_QUALITY,
     coverage_cache_key,
     data_sources_payload,
     extract_form_defaults,
     is_in_virginia,
     merge_prefill_defaults,
+    normalize_job_name,
     parcel_sources_payload,
-    parse_bool,
     parse_float,
     parse_int,
+    parse_run_form,
     provider_label,
     resolve_image_quality,
     resolve_provider,
     snapshot_defaults,
     status_class,
     status_label,
+    validate_job_name_length,
 )
 from .jobs import (
     JOBS,
@@ -550,8 +551,20 @@ def coverage():
     if lon is None or lat is None:
         return jsonify({"supported": None, "error": "Invalid coordinates"}), 400
 
+    size = parse_float(request.args.get("size"))
+    units_raw = (request.args.get("units") or "").strip().lower()
+    units = units_raw if units_raw in ("feet", "meters") else None
+    if size is not None and size <= 0:
+        size = None
+
     provider = resolve_provider(lat, lon)
-    cache_key = coverage_cache_key(lon, lat)
+    use_bbox_check = provider != "va" and size is not None and units in ("feet", "meters")
+    cache_key = coverage_cache_key(
+        lon,
+        lat,
+        size=size if use_bbox_check else None,
+        units=units if use_bbox_check else None,
+    )
     now = time.time()
     with _coverage_cache_lock:
         cached = _coverage_cache.get(cache_key)
@@ -573,12 +586,20 @@ def coverage():
         supported = is_in_virginia(lon, lat)
     else:
         try:
-            supported = bool(query_for_point(lon, lat))
+            if use_bbox_check:
+                bbox = bbox_from_center_wgs84(lat, lon, size, units)
+                supported = bool(query_for_bbox(bbox))
+            else:
+                supported = bool(query_for_point(lon, lat))
         except Exception as exc:
             error = str(exc)
             supported = None
 
-    result_payload = {"supported": supported, "provider": provider}
+    result_payload = {
+        "supported": supported,
+        "provider": provider,
+        "coverage_check": "bbox" if use_bbox_check else "point",
+    }
     if error:
         result_payload["error"] = error
     if supported is not None:
@@ -605,37 +626,22 @@ def run_job():
             return jsonify({"error": limit_error}), 429
 
     form = request.form
-    custom_name = (form.get("job_name") or "").strip()
-    if len(custom_name) > 120:
-        return jsonify({"error": "Name must be 120 characters or fewer."}), 400
+    parsed_form, form_error = parse_run_form(form, max_clip_size=_settings.MAX_CLIP_SIZE)
+    if form_error:
+        return jsonify({"error": form_error}), 400
+    assert parsed_form is not None
+
+    custom_name = parsed_form.custom_name
     out_dir = _settings.OUT_DIR
     ensure_dir(out_dir)
-    _raw_units = (form.get("units") or DEFAULT_UNITS).strip().lower()
-    units = _raw_units if _raw_units in ("feet", "meters") else DEFAULT_UNITS
-    coords = form.get("coords") or ""
-    parts = [p for p in re.split(r"[ ,]+", coords.strip()) if p]
-    lat = parse_float(parts[0]) if len(parts) > 0 else None
-    lon = parse_float(parts[1]) if len(parts) > 1 else None
-    provider = resolve_provider(lat, lon)
-    clip_size = parse_float(form.get("size"))
-    if lat is None or lon is None:
-        return jsonify({"error": "Provide coordinates as lat, lon."}), 400
-    if clip_size is None:
-        return jsonify({"error": "Provide a clip size."}), 400
-    if clip_size <= 0:
-        return jsonify({"error": "Clip size must be greater than 0."}), 400
-    if clip_size > _settings.MAX_CLIP_SIZE:
-        return jsonify({"error": f"Clip size exceeds max ({_settings.MAX_CLIP_SIZE:g})."}), 400
-
-    center = (lat, lon) if lat is not None and lon is not None else None
-
-    from ..config import DEFAULT_RESOLUTION
-
+    units = parsed_form.units
+    lat = parsed_form.lat
+    lon = parsed_form.lon
+    provider = parsed_form.provider
+    clip_size = parsed_form.clip_size
+    center = parsed_form.center
     resolution = DEFAULT_RESOLUTION
-    terrain_complexity = parse_int(form.get("terrain_complexity"))
-    if terrain_complexity is None:
-        terrain_complexity = 2
-    terrain_complexity = max(0, min(10, terrain_complexity))
+    terrain_complexity = parsed_form.terrain_complexity
     terrain_sample_legacy = _terrain_complexity_to_reduction(terrain_complexity)
     terrain_sample = terrain_sample_legacy
     terrain_resolution = None
@@ -648,76 +654,35 @@ def run_job():
     fill_smoothing = DEFAULT_FILL_SMOOTHING
 
     percentile = DEFAULT_PERCENTILE
-    min_height = parse_float(form.get("min_height"))
-    if min_height is None:
-        from ..config import DEFAULT_MIN_HEIGHT
-
-        min_height = DEFAULT_MIN_HEIGHT
-    max_height = parse_float(form.get("max_height"))
-    if max_height is None:
-        from ..config import DEFAULT_MAX_HEIGHT
-
-        max_height = DEFAULT_MAX_HEIGHT
+    min_height = parsed_form.min_height
+    max_height = parsed_form.max_height
     floor_to_floor = DEFAULT_FLOOR_TO_FLOOR
 
-    random_min = parse_float(form.get("random_min_height"))
-    random_max = parse_float(form.get("random_max_height"))
-    if (random_min is None) != (random_max is None):
-        return jsonify({"error": "Provide both random min/max heights or leave both empty."}), 400
-    if random_min is not None and random_max is not None and random_min >= random_max:
-        return jsonify({"error": "Random min height must be less than random max height."}), 400
+    random_min = parsed_form.random_min_height
+    random_max = parsed_form.random_max_height
     random_seed = None
 
-    naip_pixel_size, naip_max_size, naip_tiled = resolve_image_quality(form.get("image_quality"))
+    naip_pixel_size, naip_max_size, naip_tiled = resolve_image_quality(parsed_form.image_quality)
     naip_flip_u = DEFAULT_NAIP_FLIP_U
     naip_flip_v = DEFAULT_NAIP_FLIP_V
 
-    outputs = []
-    if parse_bool(form.get("output_terrain")):
-        outputs.append("terrain")
-    if parse_bool(form.get("output_buildings")):
-        outputs.append("buildings")
-    if parse_bool(form.get("output_contours")):
-        outputs.append("contours")
-    if parse_bool(form.get("output_naip")):
-        outputs.append("naip")
-    if parse_bool(form.get("output_xyz")):
-        outputs.append("xyz")
-    if not outputs:
-        return jsonify({"error": "Select at least one output."}), 400
-
+    outputs = list(parsed_form.outputs)
     combine_output = False  # not exposed in web form; available via CLI --combine-output
 
-    contours_enabled = "contours" in outputs
-    xyz_enabled = "xyz" in outputs
-    xyz_mode = (form.get("xyz_mode") or DEFAULT_XYZ_MODE).strip().lower()
-    if xyz_mode not in ("contours", "grid"):
-        xyz_mode = DEFAULT_XYZ_MODE
-    contour_interval = (
-        (parse_float(form.get("contour_interval")) or 2.0)
-        if (contours_enabled or (xyz_enabled and xyz_mode == "contours"))
-        else None
-    )
-    xyz_contour_spacing = parse_float(form.get("xyz_contour_spacing"))
-    if xyz_mode != "contours":
-        xyz_contour_spacing = None
-    if xyz_contour_spacing is not None and xyz_contour_spacing <= 0:
-        xyz_contour_spacing = None
-    dxf_contour_spacing = parse_float(form.get("dxf_contour_spacing")) if contours_enabled else None
-    if dxf_contour_spacing is not None and dxf_contour_spacing <= 0:
-        dxf_contour_spacing = None
-    dxf_include_parcels = parse_bool(form.get("dxf_include_parcels")) if contours_enabled else False
-    dxf_include_buildings = (
-        parse_bool(form.get("dxf_include_buildings")) if contours_enabled else False
-    )
+    contours_enabled = parsed_form.contours_enabled
+    xyz_enabled = parsed_form.xyz_enabled
+    xyz_mode = parsed_form.xyz_mode
+    contour_interval = parsed_form.contour_interval
+    xyz_contour_spacing = parsed_form.xyz_contour_spacing
+    dxf_contour_spacing = parsed_form.dxf_contour_spacing
+    dxf_include_parcels = parsed_form.dxf_include_parcels
+    dxf_include_buildings = parsed_form.dxf_include_buildings
     keep_rasters = False
 
     flip_x = False
     flip_y = False
     terrain_flip_y = False
-    rotate_z = parse_float(form.get("rotate_z"))
-    if rotate_z is None:
-        rotate_z = 0.0
+    rotate_z = parsed_form.rotate_z
     allow_multi_tile = True
     force = False
 
@@ -791,10 +756,7 @@ def run_job():
             dxf_include_parcels=dxf_include_parcels,
             dxf_include_buildings=dxf_include_buildings,
             xyz_mode=xyz_mode,
-            image_quality=_raw_iq
-            if (_raw_iq := (form.get("image_quality") or "standard").strip().lower())
-            in ALLOWED_IMAGE_QUALITY
-            else "standard",
+            image_quality=parsed_form.image_quality,
             random_min_height=random_min,
             random_max_height=random_max,
             output_terrain="terrain" in outputs,
@@ -958,6 +920,8 @@ def job_download_all(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
+        job = _lazy_rehydrate_job(job_id)
+    if job is None:
         return ("Job not found", 404)
     output_dir = _resolve_job_output_dir(job)
     if output_dir is None:
@@ -1078,11 +1042,12 @@ def job_rename(job_id: str):
         raw_name = payload.get("name")
     else:
         raw_name = request.form.get("name")
-    name = str(raw_name or "").strip()
+    name = normalize_job_name(raw_name)
     if not name:
         return jsonify({"error": "Name is required."}), 400
-    if len(name) > 120:
-        return jsonify({"error": "Name must be 120 characters or fewer."}), 400
+    name_error = validate_job_name_length(name)
+    if name_error:
+        return jsonify({"error": name_error}), 400
 
     with JOBS_LOCK:
         job = JOBS.get(job_id)

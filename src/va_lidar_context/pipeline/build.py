@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from pathlib import Path
 from statistics import mean, median
@@ -69,7 +70,9 @@ from ..util import download_file, ensure_dir, get_logger, write_json
 OUTPUT_CHOICES = {"buildings", "terrain", "contours", "parcels", "naip", "xyz"}
 
 
-def parse_outputs(value: str | None, default: tuple[str, ...] = ("buildings", "terrain")) -> tuple[str, ...]:
+def parse_outputs(
+    value: str | None, default: tuple[str, ...] = ("buildings", "terrain")
+) -> tuple[str, ...]:
     """Parse and validate a comma-separated outputs string.
 
     Returns a deduplicated tuple of valid output names. Raises ``ValueError``
@@ -1091,6 +1094,8 @@ def build(cfg: BuildConfig) -> BuildResult:
     if cfg.center is not None:
         lat, lon = cfg.center
 
+    if cfg.size is not None and (not math.isfinite(cfg.size) or cfg.size <= 0):
+        raise ValueError("--size must be a finite number greater than 0.")
     if cfg.size is not None and (lat is None or lon is None):
         raise ValueError("Provide --center when using --size.")
     if (lat is not None or lon is not None) and cfg.size is None:

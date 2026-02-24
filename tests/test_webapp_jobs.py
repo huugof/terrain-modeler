@@ -516,6 +516,45 @@ def test_rehydrate_discovers_nested_output_dir_from_report(auth_webapp_env, monk
     assert "terrain.obj" in names
 
 
+def test_download_all_rehydrates_missing_job(auth_webapp_env):
+    job_id = "job-download-all-rehydrate"
+    owner_id = int(auth_webapp_env["user1"]["id"])
+    job_dir = auth_webapp_env["out_dir"] / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "terrain.obj").write_text("dummy terrain\n")
+    (job_dir / "buildings.obj").write_text("dummy buildings\n")
+
+    auth_store.record_job_owner(auth_webapp_env["db_path"], job_id, owner_id)
+    auth_store.upsert_job_snapshot(
+        auth_webapp_env["db_path"],
+        job_id,
+        user_id=owner_id,
+        created_at=time.time(),
+        status="done",
+        summary={"name": "rehydrate-zip"},
+    )
+    auth_store.replace_job_artifacts(
+        auth_webapp_env["db_path"],
+        job_id,
+        [
+            {"name": "terrain.obj", "size": 13, "mtime": time.time()},
+            {"name": "buildings.obj", "size": 15, "mtime": time.time()},
+        ],
+    )
+
+    with webapp.JOBS_LOCK:
+        webapp.JOBS.clear()
+
+    client = _client_for_sid(auth_webapp_env["sid1"])
+    resp = client.get(f"/jobs/{job_id}/download-all")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(resp.data), "r") as archive:
+        names = sorted(archive.namelist())
+    assert names == ["buildings.obj", "terrain.obj"]
+
+
 def test_job_logs_long_poll_returns_when_log_arrives(auth_webapp_env):
     user_id = int(auth_webapp_env["user1"]["id"])
     job = _create_job(
