@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -109,7 +110,6 @@ def _stage_image_only(
     )
     terrain_tex_path = tile_dir / "terrain.png"
     report_path = tile_dir / "report.json"
-    preview_mesh_path = tile_dir / "preview.obj"
 
     logger.info("Stage 1/2: download NAIP image")
     size_m = cfg.size / FEET_PER_METER if cfg.units == "feet" else cfg.size
@@ -118,7 +118,6 @@ def _stage_image_only(
     cx, cy = to_merc.transform(lon, lat)
     bbox_3857 = (cx - half, cy - half, cx + half, cy + half)
     naip_tiled_used = _stage_download_naip(cfg, bbox_3857, terrain_tex_path, warnings)
-    _write_preview_plane_obj(preview_mesh_path, cfg.size or 100.0)
 
     report: Dict[str, Any] = {
         "job_id": job_id,
@@ -147,25 +146,6 @@ def _stage_image_only(
     logger.info("Done (image-only)")
     return BuildResult(exit_code=0, output_dir=tile_dir)
 
-
-def _write_preview_plane_obj(path: Path, size: float) -> None:
-    """Write a simple flat OBJ plane for fallback wireframe preview."""
-    half = max(float(size) / 2.0, 1.0)
-    path.write_text(
-        "\n".join(
-            [
-                "# fallback preview plane",
-                f"v {-half:.6f} {-half:.6f} 0.000000",
-                f"v {half:.6f} {-half:.6f} 0.000000",
-                f"v {half:.6f} {half:.6f} 0.000000",
-                f"v {-half:.6f} {half:.6f} 0.000000",
-                "f 1 2 3",
-                "f 1 3 4",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
 
 
 def _stage_download_naip(
@@ -349,7 +329,6 @@ def build(cfg: BuildConfig) -> BuildResult:
     dtm_filled_path = tile_dir / "dtm_filled.tif"
     footprints_path = tile_dir / "footprints.geojson"
     terrain_tex_path = tile_dir / "terrain.png"
-    preview_mesh_path = tile_dir / "preview.obj"
     report_path = tile_dir / "report.json"
 
     write_job_info(
@@ -364,7 +343,39 @@ def build(cfg: BuildConfig) -> BuildResult:
         bbox_wgs84=None,
     )
 
-    # Stage 1: fetch DTM from USGS 3DEP (only when needed for contours/XYZ)
+    # Compute NAIP bbox now so the fetch can start in parallel with DTM + footprints
+    to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    xmin, ymin, xmax, ymax = clip_bbox_wgs84
+    x1, y1 = to_3857.transform(xmin, ymin)
+    x2, y2 = to_3857.transform(xmax, ymax)
+    bbox_3857 = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+
+    def _fetch_footprints() -> dict:
+        if footprints_path.exists() and not cfg.force:
+            return json.loads(footprints_path.read_text())
+        if cfg.provider == "va":
+            fp = vgin.fetch_footprints_geojson(clip_bbox_wgs84)
+        else:
+            fp = national_footprints.fetch_footprints_geojson(clip_bbox_wgs84)
+        footprints_path.write_text(json.dumps(fp))
+        return fp
+
+    naip_warnings: list[str] = []
+
+    logger.info("Stages 1-3: fetch terrain, footprints, NAIP (parallel)")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        future_dtm = pool.submit(usgs_3dep.fetch_dtm, clip_bbox_wgs84, cache_dir, cfg.resolution) if needs_dtm else None
+        future_fp = pool.submit(_fetch_footprints)
+        future_naip = pool.submit(_stage_download_naip, cfg, bbox_3857, terrain_tex_path, naip_warnings) if export_naip else None
+
+        dtm_result = future_dtm.result() if future_dtm else None
+        footprints: dict = future_fp.result()
+        if future_naip is not None:
+            naip_tiled_used = future_naip.result()
+
+    warnings.extend(naip_warnings)
+
+    # Post-fetch: clip DTM and resolve scales
     data_crs = None
     xy_scale = 1.0
     z_scale = 1.0
@@ -375,8 +386,7 @@ def build(cfg: BuildConfig) -> BuildResult:
     contour_source_path = None
 
     if needs_dtm:
-        logger.info("Stage 1/4: fetch terrain (USGS 3DEP)")
-        dtm_raw_cache, data_crs = usgs_3dep.fetch_dtm(clip_bbox_wgs84, cache_dir, cfg.resolution)
+        dtm_raw_cache, data_crs = dtm_result
 
         to_utm = Transformer.from_crs("EPSG:4326", data_crs, always_xy=True)
         center_x, center_y = to_utm.transform(lon, lat)
@@ -411,7 +421,6 @@ def build(cfg: BuildConfig) -> BuildResult:
         xy_scale = get_unit_scale(data_crs, cfg.units, latitude=lat)
         z_scale = get_unit_scale(data_crs, cfg.units, latitude=None)
     else:
-        # For parcels/naip-only jobs, still need a CRS for DXF projection
         from ..providers.usgs_3dep import _utm_epsg
         data_crs = CRS.from_epsg(_utm_epsg(lat, lon))
         to_utm = Transformer.from_crs("EPSG:4326", data_crs, always_xy=True)
@@ -429,27 +438,6 @@ def build(cfg: BuildConfig) -> BuildResult:
         xy_scale = get_unit_scale(data_crs, cfg.units, latitude=lat)
         z_scale = get_unit_scale(data_crs, cfg.units, latitude=None)
 
-    # Stage 2: fetch footprints
-    logger.info("Stage 2/4: fetch footprints")
-    if footprints_path.exists() and not cfg.force:
-        footprints = json.loads(footprints_path.read_text())
-    else:
-        if cfg.provider == "va":
-            footprints = vgin.fetch_footprints_geojson(clip_bbox_wgs84)
-        else:
-            footprints = national_footprints.fetch_footprints_geojson(clip_bbox_wgs84)
-        footprints_path.write_text(json.dumps(footprints))
-
-    # Stage 3: NAIP imagery
-    if export_naip:
-        logger.info("Stage 3/4: download NAIP")
-        to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-        xmin, ymin, xmax, ymax = clip_bbox_wgs84
-        x1, y1 = to_3857.transform(xmin, ymin)
-        x2, y2 = to_3857.transform(xmax, ymax)
-        bbox_3857 = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-        naip_tiled_used = _stage_download_naip(cfg, bbox_3857, terrain_tex_path, warnings)
-
     # Stage 4: contours, XYZ, DXF
     logger.info("Stage 4/4: export outputs")
     dxf_origin: tuple[float, float] | None = None
@@ -465,7 +453,7 @@ def build(cfg: BuildConfig) -> BuildResult:
             interval=interval_in_crs,
             xy_scale=xy_scale,
             z_scale=z_scale,
-            sample=1,
+            sample=2,
             origin=dxf_origin,
             rotate_deg=cfg.rotate_z,
         )
@@ -508,9 +496,6 @@ def build(cfg: BuildConfig) -> BuildResult:
             include_buildings,
             footprints,
         )
-
-    # Write preview plane (no OBJ terrain mesh)
-    _write_preview_plane_obj(preview_mesh_path, cfg.size or 100.0)
 
     # Clean up intermediate rasters
     if not cfg.keep_rasters:
