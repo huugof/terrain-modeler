@@ -11,14 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     dirmngr \
-    && add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
-    pdal \
-    gdal-bin \
-    libgdal-dev \
-    libgeos-dev \
-    proj-bin \
     python3.11 \
     python3.11-venv \
     python3.11-distutils \
