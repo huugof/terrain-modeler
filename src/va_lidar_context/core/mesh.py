@@ -44,31 +44,30 @@ def export_terrain_xyz(
     rows, cols = data.shape
     mask_valid = (data != nodata) & np.isfinite(data)
 
+    col_idx = np.arange(cols, dtype=np.float64)
+    row_idx = np.arange(rows, dtype=np.float64)
+    col_grid, row_grid = np.meshgrid(col_idx, row_idx)
+
+    x_all = transform.a * (col_grid + 0.5) + transform.b * (row_grid + 0.5) + transform.c
+    y_all = transform.d * (col_grid + 0.5) + transform.e * (row_grid + 0.5) + transform.f
+
+    flat_mask = mask_valid.ravel()
+    x = x_all.ravel()[flat_mask] * xy_scale
+    y = y_all.ravel()[flat_mask] * xy_scale
+    z = data.ravel()[flat_mask].astype(np.float64) * z_scale
+
     ox = origin[0] if origin else 0.0
     oy = origin[1] if origin else 0.0
-    theta = math.radians(rotate_deg)
-    cos_theta = math.cos(theta)
-    sin_theta = math.sin(theta)
+    x -= ox
+    y -= oy
 
-    count = 0
-    with open(output_path, "w") as f:
-        for r in range(rows):
-            for col in range(cols):
-                if not mask_valid[r, col]:
-                    continue
-                x = transform.a * (col + 0.5) + transform.b * (r + 0.5) + transform.c
-                y = transform.d * (col + 0.5) + transform.e * (r + 0.5) + transform.f
-                z = float(data[r, col])
-                px = x * xy_scale - ox
-                py = y * xy_scale - oy
-                if rotate_deg:
-                    rx = px * cos_theta - py * sin_theta
-                    ry = px * sin_theta + py * cos_theta
-                else:
-                    rx, ry = px, py
-                f.write(f"{rx} {ry} {z * z_scale}\n")
-                count += 1
-    return count
+    if rotate_deg:
+        theta = math.radians(rotate_deg)
+        c, s = math.cos(theta), math.sin(theta)
+        x, y = x * c - y * s, x * s + y * c
+
+    np.savetxt(output_path, np.column_stack([x, y, z]), fmt="%.4f")
+    return int(flat_mask.sum())
 
 
 def generate_contours_from_raster(
@@ -232,13 +231,11 @@ def resample_contours(
 
 
 class DxfExporter:
-    """Unified DXF exporter that combines multiple layers into a single file."""
+    """Unified DXF exporter — writes raw DXF R12 (AC1009) for maximum speed."""
 
     def __init__(self):
-        import ezdxf
-
-        self.doc = ezdxf.new("R2010")
-        self.msp = self.doc.modelspace()
+        self._layers: dict[str, int] = {}
+        self._chunks: list[str] = []
         self._layer_colors = {
             "CONTOURS": 8,
             "PARCELS": 3,
@@ -248,9 +245,28 @@ class DxfExporter:
         }
 
     def _ensure_layer(self, name: str, color: int = None) -> None:
-        if name not in self.doc.layers:
-            layer_color = color or self._layer_colors.get(name, 7)
-            self.doc.layers.new(name=name, dxfattribs={"color": layer_color})
+        if name not in self._layers:
+            self._layers[name] = color or self._layer_colors.get(name, 7)
+
+    def _add_polyline3d(self, layer: str, points: list, close: bool = False) -> None:
+        flag = 9 if close else 8  # bit 0=closed, bit 3=3D polyline
+        parts = [f"  0\nPOLYLINE\n  8\n{layer}\n 66\n     1\n 70\n     {flag}\n"]
+        for x, y, z in points:
+            parts.append(
+                f"  0\nVERTEX\n  8\n{layer}\n"
+                f" 10\n{x:.4f}\n 20\n{y:.4f}\n 30\n{z:.4f}\n 70\n    32\n"
+            )
+        parts.append(f"  0\nSEQEND\n  8\n{layer}\n")
+        self._chunks.append("".join(parts))
+
+    def _add_line(self, layer: str, p1: tuple, p2: tuple) -> None:
+        x1, y1, z1 = p1
+        x2, y2, z2 = p2
+        self._chunks.append(
+            f"  0\nLINE\n  8\n{layer}\n"
+            f" 10\n{x1:.4f}\n 20\n{y1:.4f}\n 30\n{z1:.4f}\n"
+            f" 11\n{x2:.4f}\n 21\n{y2:.4f}\n 31\n{z2:.4f}\n"
+        )
 
     def add_contours(
         self,
@@ -267,14 +283,10 @@ class DxfExporter:
             else:
                 layer_name = f"{layer_prefix}_MINOR"
                 color = 8
-
             self._ensure_layer(layer_name, color)
-
             for polyline in polylines:
-                points = [(p[0], p[1], p[2]) for p in polyline]
-                self.msp.add_polyline3d(points, dxfattribs={"layer": layer_name})
+                self._add_polyline3d(layer_name, [(p[0], p[1], p[2]) for p in polyline])
                 count += 1
-
         return count
 
     def add_polygons_from_geojson(
@@ -355,9 +367,7 @@ class DxfExporter:
                             rx, ry = px, py
                         points.append((rx, ry, z_value))
                     if len(points) >= 3:
-                        self.msp.add_polyline3d(
-                            points, close=True, dxfattribs={"layer": layer_name}
-                        )
+                        self._add_polyline3d(layer_name, points, close=True)
                         count += 1
 
         return count
@@ -373,12 +383,8 @@ class DxfExporter:
         self._ensure_layer(layer_name, color)
         x, y, z = center
         half = size / 2.0
-        self.msp.add_line(
-            (x - half, y, z), (x + half, y, z), dxfattribs={"layer": layer_name}
-        )
-        self.msp.add_line(
-            (x, y - half, z), (x, y + half, z), dxfattribs={"layer": layer_name}
-        )
+        self._add_line(layer_name, (x - half, y, z), (x + half, y, z))
+        self._add_line(layer_name, (x, y - half, z), (x, y + half, z))
 
     def add_north_arrow(
         self,
@@ -393,16 +399,30 @@ class DxfExporter:
         self._ensure_layer(layer_name, color)
         x, y, z = base
         tip = (x, y + length, z)
-        self.msp.add_line((x, y, z), tip, dxfattribs={"layer": layer_name})
-
+        self._add_line(layer_name, (x, y, z), tip)
         angle = math.radians(head_angle_deg)
         dx = head_length * math.sin(angle)
         dy = head_length * math.cos(angle)
         left = (tip[0] - dx, tip[1] - dy, z)
         right = (tip[0] + dx, tip[1] - dy, z)
-        self.msp.add_line(tip, left, dxfattribs={"layer": layer_name})
-        self.msp.add_line(tip, right, dxfattribs={"layer": layer_name})
+        self._add_line(layer_name, tip, left)
+        self._add_line(layer_name, tip, right)
 
     def save(self, output_path: str) -> None:
-        """Save the DXF file."""
-        self.doc.saveas(output_path)
+        """Write DXF R12 file directly as text — no ezdxf object model overhead."""
+        with open(output_path, "w", buffering=8 * 1024 * 1024) as f:
+            f.write(
+                "  0\nSECTION\n  2\nHEADER\n"
+                "  9\n$ACADVER\n  1\nAC1009\n"
+                "  0\nENDSEC\n"
+                f"  0\nSECTION\n  2\nTABLES\n"
+                f"  0\nTABLE\n  2\nLAYER\n 70\n{len(self._layers)}\n"
+            )
+            for name, color in self._layers.items():
+                f.write(
+                    f"  0\nLAYER\n  2\n{name}\n 70\n0\n 62\n{color}\n  6\nContinuous\n"
+                )
+            f.write("  0\nENDTAB\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n")
+            for chunk in self._chunks:
+                f.write(chunk)
+            f.write("  0\nENDSEC\n  0\nEOF\n")
