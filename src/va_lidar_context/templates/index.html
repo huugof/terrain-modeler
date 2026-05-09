@@ -109,22 +109,8 @@
             <div class="layout-preview-col" id="inlinePreviewCol">
                 <div class="inline-preview-panel" id="inlinePreviewPanel">
                     <div class="inline-preview-demo" id="inlinePreviewDemo" aria-hidden="true">
-                        <svg class="inline-preview-demo-graphic" viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <defs>
-                                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stop-color="currentColor" stop-opacity="0.06"/>
-                                    <stop offset="100%" stop-color="currentColor" stop-opacity="0.01"/>
-                                </linearGradient>
-                            </defs>
-                            <rect width="400" height="260" fill="url(#sky)"/>
-                            <polyline points="20,220 60,210 100,200 140,195 180,200 220,205 260,200 300,190 340,195 380,205" fill="none" stroke="currentColor" stroke-opacity="0.18" stroke-width="1.5"/>
-                            <polyline points="20,200 60,185 100,170 140,160 180,165 220,175 260,165 300,150 340,158 380,175" fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5"/>
-                            <polyline points="30,180 70,160 110,140 150,125 190,130 230,145 270,130 310,112 350,122 385,140" fill="none" stroke="currentColor" stroke-opacity="0.26" stroke-width="1.5"/>
-                            <polyline points="50,162 90,138 130,115 170,96 210,100 250,118 290,100 325,82 360,95 390,112" fill="none" stroke="currentColor" stroke-opacity="0.30" stroke-width="1.5"/>
-                            <polyline points="80,148 120,120 160,92 200,72 240,78 275,96 308,78 340,62 372,76 395,92" fill="none" stroke="currentColor" stroke-opacity="0.34" stroke-width="1.5"/>
-                            <polyline points="120,138 158,106 196,76 230,55 265,62 295,80 325,62 355,46 382,60" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
-                        </svg>
-                        <p class="inline-preview-demo-label">Save to preview model</p>
+                        <canvas id="terrainPreviewCanvas" style="width:100%;height:100%;display:block;"></canvas>
+                        <p class="inline-preview-demo-label" id="terrainPreviewLabel">Enter coordinates to preview terrain</p>
                     </div>
                     <iframe
                         id="inlinePreviewFrame"
@@ -571,5 +557,11 @@
           };
         </script>
         <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+        <script type="module">
+          import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
+          import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm';
+          window.__THREE__ = THREE;
+          window.__OrbitControls__ = OrbitControls;
+        </script>
     </body>
 </html>

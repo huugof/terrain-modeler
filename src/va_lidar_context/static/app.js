@@ -1817,6 +1817,161 @@ function findRecentJobFormDefaultsByPreviewUrl(previewUrl) {
   return null;
 }
 
+// --- Live COG terrain preview ---
+const _terrainPreview = (() => {
+  let renderer = null;
+  let scene = null;
+  let camera = null;
+  let controls = null;
+  let mesh = null;
+  let abortController = null;
+  let debounceTimer = null;
+  let initialized = false;
+
+  function _initThree(canvas) {
+    const THREE = window.__THREE__;
+    const OrbitControls = window.__OrbitControls__;
+    if (!THREE || !OrbitControls) return false;
+
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a);
+
+    camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
+    camera.position.set(0, 60, 80);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(1, 2, 1);
+    scene.add(sun);
+
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.autoRotate = false;
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+
+    window.addEventListener("resize", () => {
+      if (!canvas.clientWidth) return;
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+      camera.aspect = canvas.clientWidth / canvas.clientHeight;
+      camera.updateProjectionMatrix();
+    });
+
+    initialized = true;
+    return true;
+  }
+
+  function _buildMesh(data) {
+    const THREE = window.__THREE__;
+    const { grid, cols, rows, min_elev, max_elev } = data;
+    const spread = max_elev - min_elev || 1;
+
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      mesh = null;
+    }
+
+    const geo = new THREE.PlaneGeometry(100, 100, cols - 1, rows - 1);
+    geo.rotateX(-Math.PI / 2);
+
+    const positions = geo.attributes.position;
+    const colors = [];
+    const color = new THREE.Color();
+
+    for (let i = 0; i < positions.count; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const elev = (grid[row] && grid[row][col] != null) ? grid[row][col] : min_elev;
+      positions.setY(i, ((elev - min_elev) / spread) * 30);
+
+      const t = (elev - min_elev) / spread;
+      color.setHSL(0.33 - t * 0.25, 0.4 - t * 0.2, 0.25 + t * 0.4);
+      colors.push(color.r, color.g, color.b);
+    }
+
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    camera.position.set(center.x, center.y + maxDim, center.z + maxDim * 1.2);
+    controls.target.copy(center);
+    controls.update();
+  }
+
+  function setLabel(text) {
+    const label = document.getElementById("terrainPreviewLabel");
+    if (label) {
+      label.textContent = text;
+      label.style.display = text ? "" : "none";
+    }
+  }
+
+  function schedule() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(fetch, 600);
+  }
+
+  async function fetch() {
+    const canvas = document.getElementById("terrainPreviewCanvas");
+    if (!canvas) return;
+
+    if (!initialized) {
+      if (!_initThree(canvas)) return; // Three.js not loaded yet
+    }
+
+    const coordsInput = document.querySelector('input[name="coords"]');
+    const sizeInput = document.querySelector('input[name="size"]');
+    const unitsInput = document.querySelector('select[name="units"]');
+    const coords = coordsInput ? parseCoords(coordsInput.value) : null;
+    const size = sizeInput ? parseFloat(sizeInput.value) : NaN;
+    const units = (unitsInput && unitsInput.value) || "feet";
+
+    if (!coords || !Number.isFinite(size) || size <= 0) {
+      setLabel("Enter coordinates to preview terrain");
+      return;
+    }
+
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+
+    setLabel("Loading terrain…");
+
+    try {
+      const url = `/terrain-preview?lat=${coords.lat}&lon=${coords.lon}&size=${size}&units=${units}`;
+      const resp = await window.fetch(url, { signal: abortController.signal });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      _buildMesh(data);
+      setLabel("");
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setLabel("Preview unavailable");
+    }
+  }
+
+  return { schedule, fetch };
+})();
+
 function initInlinePreview() {
   const frame = document.getElementById("inlinePreviewFrame");
   if (!frame) return;
@@ -1975,17 +2130,20 @@ document.addEventListener("DOMContentLoaded", () => {
     coords.addEventListener("input", () => {
       updateAlerts();
       scheduleCoverageCheck();
+      _terrainPreview.schedule();
     });
   if (mapSizeInput)
     mapSizeInput.addEventListener("input", () => {
       updateAlerts();
       scheduleCoverageCheck();
+      _terrainPreview.schedule();
     });
   if (units)
     units.addEventListener("change", () => {
       updateUnitLabels();
       updateAlerts();
       scheduleCoverageCheck();
+      _terrainPreview.schedule();
     });
   const form = document.querySelector("form.card");
   if (form) {
