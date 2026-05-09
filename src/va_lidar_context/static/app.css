@@ -499,10 +499,12 @@ body.jobs-panel-open .layout-preview-col::after {
     display: block;
     background: transparent;
     opacity: 0;
+    pointer-events: none;
     transition: opacity 0.4s ease;
 }
 .inline-preview-frame.loaded {
     opacity: 1;
+    pointer-events: auto;
 }
 /* Demo terrain placeholder — visually centered in the preview area right of the form */
 .inline-preview-demo {
