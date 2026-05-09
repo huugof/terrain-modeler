@@ -1911,12 +1911,19 @@ const _terrainPreview = (() => {
 
     geo.computeVertexNormals();
 
-    const texture = satUrl ? new THREE.TextureLoader().load(satUrl) : null;
     const mat = new THREE.MeshLambertMaterial({
-      map: texture,
-      color: texture ? 0xffffff : 0x88aa77,
+      color: 0x88aa77,
+      emissive: 0x000000,
       side: THREE.DoubleSide,
     });
+    if (satUrl) {
+      new THREE.TextureLoader().load(
+        satUrl,
+        (tex) => { mat.map = tex; mat.color.setHex(0xffffff); mat.needsUpdate = true; },
+        undefined,
+        (err) => { console.warn("Satellite texture failed:", satUrl, err); },
+      );
+    }
     mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
