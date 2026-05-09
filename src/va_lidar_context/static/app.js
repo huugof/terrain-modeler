@@ -1838,7 +1838,8 @@ const _terrainPreview = (() => {
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    const bgCss = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#f5f5f3";
+    scene.background = new THREE.Color(bgCss);
 
     camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
     camera.position.set(0, 60, 80);
