@@ -1824,6 +1824,7 @@ const _terrainPreview = (() => {
   let camera = null;
   let controls = null;
   let mesh = null;
+  let outlineBox = null;
   let abortController = null;
   let debounceTimer = null;
   let initialized = false;
@@ -1875,8 +1876,9 @@ const _terrainPreview = (() => {
   function _buildMesh(data, satUrl) {
     const THREE = window.__THREE__;
     const { grid, cols, rows, min_elev, max_elev, size } = data;
-    const spread = max_elev - min_elev || 1;
-    const horizUnitsPerRealUnit = 100 / (size || 100);
+    const cf = data.context_factor || 1;
+    // 100 Three.js units covers size*cf real units, so 1 real unit = 100/(size*cf) units
+    const horizUnitsPerRealUnit = 100 / ((size * cf) || 100);
     const VERT_EXAG = 2.0;
 
     if (mesh) {
@@ -1884,6 +1886,12 @@ const _terrainPreview = (() => {
       mesh.geometry.dispose();
       mesh.material.dispose();
       mesh = null;
+    }
+    if (outlineBox) {
+      scene.remove(outlineBox);
+      outlineBox.geometry.dispose();
+      outlineBox.material.dispose();
+      outlineBox = null;
     }
 
     const geo = new THREE.PlaneGeometry(100, 100, cols - 1, rows - 1);
@@ -1909,12 +1917,41 @@ const _terrainPreview = (() => {
     mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
-    const box = new THREE.Box3().setFromObject(mesh);
-    const center = box.getCenter(new THREE.Vector3());
-    const boxSize = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z);
-    camera.position.set(center.x, center.y + maxDim, center.z + maxDim * 1.2);
-    controls.target.copy(center);
+    // Build area outline — the center 1/cf of the terrain
+    const buildHalfW = 50 / cf;
+    const rStart = Math.floor(rows * (1 - 1 / cf) / 2);
+    const rEnd = Math.ceil(rows * (1 + 1 / cf) / 2);
+    const cStart = Math.floor(cols * (1 - 1 / cf) / 2);
+    const cEnd = Math.ceil(cols * (1 + 1 / cf) / 2);
+    let maxCenterY = 0, sumCenterY = 0, countCenterY = 0;
+    for (let r = rStart; r < rEnd; r++) {
+      for (let c = cStart; c < cEnd; c++) {
+        if (grid[r] && grid[r][c] != null) {
+          const y = (grid[r][c] - min_elev) * horizUnitsPerRealUnit * VERT_EXAG;
+          sumCenterY += y;
+          countCenterY++;
+          if (y > maxCenterY) maxCenterY = y;
+        }
+      }
+    }
+    const buildCenterY = countCenterY > 0 ? sumCenterY / countCenterY : 0;
+    const outlineY = maxCenterY + 1.5;
+    const outlineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-buildHalfW, outlineY, -buildHalfW),
+      new THREE.Vector3( buildHalfW, outlineY, -buildHalfW),
+      new THREE.Vector3( buildHalfW, outlineY,  buildHalfW),
+      new THREE.Vector3(-buildHalfW, outlineY,  buildHalfW),
+      new THREE.Vector3(-buildHalfW, outlineY, -buildHalfW),
+    ]);
+    outlineBox = new THREE.Line(outlineGeo, new THREE.LineBasicMaterial({ color: 0xff7700 }));
+    scene.add(outlineBox);
+
+    // Orbit around the build area center; camera back far enough to see full context
+    controls.target.set(0, buildCenterY, 0);
+    const fullBox = new THREE.Box3().setFromObject(mesh);
+    const fullSize = fullBox.getSize(new THREE.Vector3());
+    const dist = Math.max(fullSize.x, fullSize.z) * 0.85;
+    camera.position.set(0, buildCenterY + dist * 0.65, buildCenterY + dist);
     controls.update();
   }
 

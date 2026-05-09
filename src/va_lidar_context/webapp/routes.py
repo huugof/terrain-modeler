@@ -627,7 +627,8 @@ def terrain_preview():
 
         from ..providers.usgs_3dep import fetch_dtm
 
-        bbox = bbox_from_center_wgs84(lat, lon, size, units)
+        CONTEXT_FACTOR = 3
+        bbox = bbox_from_center_wgs84(lat, lon, size * CONTEXT_FACTOR, units)
         cache_dir = _settings.OUT_DIR
         dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=5.0)
 
@@ -660,6 +661,7 @@ def terrain_preview():
             "max_elev": round(max_elev * scale, 2),
             "size": size,
             "units": units,
+            "context_factor": CONTEXT_FACTOR,
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -680,7 +682,8 @@ def satellite_preview():
     try:
         from ..providers.usgs_3dep import fetch_satellite
 
-        bbox = bbox_from_center_wgs84(lat, lon, size, units)
+        CONTEXT_FACTOR = 3
+        bbox = bbox_from_center_wgs84(lat, lon, size * CONTEXT_FACTOR, units)
         cache_dir = _settings.OUT_DIR
         png_path = fetch_satellite(bbox, cache_dir, px=256)
         return send_file(png_path, mimetype="image/png")
