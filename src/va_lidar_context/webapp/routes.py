@@ -672,7 +672,7 @@ def satellite_preview():
     try:
         from ..providers.usgs_3dep import fetch_satellite
 
-        CONTEXT_FT = 10000
+        CONTEXT_FT = 20000
         bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         png_path = fetch_satellite(bbox, cache_dir, px=1024)
