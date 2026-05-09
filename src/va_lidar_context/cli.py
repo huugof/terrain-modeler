@@ -19,6 +19,7 @@ from .config import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_RESOLUTION,
     DEFAULT_ROTATE_Z,
+    DEFAULT_CONTOUR_SAMPLE,
     DEFAULT_TERRAIN_SAMPLE,
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
@@ -78,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_cmd.add_argument("--floor-to-floor", type=float, default=10.0)
     build_cmd.add_argument("--keep-rasters", action="store_true")
     build_cmd.add_argument("--terrain-sample", type=int, default=DEFAULT_TERRAIN_SAMPLE)
+    build_cmd.add_argument("--contour-sample", type=int, default=DEFAULT_CONTOUR_SAMPLE)
     build_cmd.add_argument("--fill-dtm", action="store_true")
     build_cmd.add_argument("--fill-hard", action="store_true")
     build_cmd.add_argument("--fill-max-dist", type=float, default=DEFAULT_FILL_MAX_DIST)
@@ -214,6 +216,7 @@ def main() -> int:
             floor_to_floor=args.floor_to_floor,
             keep_rasters=args.keep_rasters,
             terrain_sample=args.terrain_sample,
+            contour_sample=args.contour_sample,
             fill_dtm=args.fill_dtm,
             fill_hard=args.fill_hard,
             fill_max_dist=args.fill_max_dist,

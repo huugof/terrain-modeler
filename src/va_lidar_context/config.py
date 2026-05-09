@@ -14,6 +14,7 @@ DEFAULT_MAX_HEIGHT = 300.0
 DEFAULT_FLOOR_TO_FLOOR = 10.0
 DEFAULT_KEEP_RASTERS = False
 DEFAULT_TERRAIN_SAMPLE = 1
+DEFAULT_CONTOUR_SAMPLE = 1
 DEFAULT_FILL_DTM = False
 DEFAULT_FILL_MAX_DIST = 10.0
 DEFAULT_FILL_SMOOTHING = 0
@@ -66,6 +67,7 @@ class BuildConfig:
     floor_to_floor: float = DEFAULT_FLOOR_TO_FLOOR
     keep_rasters: bool = DEFAULT_KEEP_RASTERS
     terrain_sample: int = DEFAULT_TERRAIN_SAMPLE
+    contour_sample: int = DEFAULT_CONTOUR_SAMPLE
     terrain_resolution: float | None = None
     fill_dtm: bool = DEFAULT_FILL_DTM
     fill_hard: bool = DEFAULT_FILL_HARD

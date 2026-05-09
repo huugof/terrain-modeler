@@ -453,7 +453,7 @@ def build(cfg: BuildConfig) -> BuildResult:
             interval=interval_in_crs,
             xy_scale=xy_scale,
             z_scale=z_scale,
-            sample=2,
+            sample=cfg.contour_sample,
             origin=dxf_origin,
             rotate_deg=cfg.rotate_z,
         )
