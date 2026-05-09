@@ -556,7 +556,7 @@
             recentJobsLimit: {{ recent_jobs_limit | tojson }},
           };
         </script>
-        <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='app.js') }}?v={{ build_hash }}" defer></script>
         <script type="module">
           import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
           import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm';

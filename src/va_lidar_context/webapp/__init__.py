@@ -130,8 +130,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 'python -c "import secrets; print(secrets.token_hex(32))"'
             )
 
+    import subprocess as _sp
+    try:
+        _build_hash = _sp.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], stderr=_sp.DEVNULL
+        ).decode().strip()
+    except Exception:
+        _build_hash = "0"
+
     _app = Flask(__name__, template_folder="../templates", static_folder="../static")
     _app.secret_key = _session_secret
+    _app.jinja_env.globals["build_hash"] = _build_hash
     _app.config["SESSION_COOKIE_HTTPONLY"] = True
     _app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     _app.config["SESSION_COOKIE_SECURE"] = (
