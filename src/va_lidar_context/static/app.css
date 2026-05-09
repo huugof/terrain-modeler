@@ -507,16 +507,13 @@ body.jobs-panel-open .layout-preview-col::after {
 /* Demo terrain placeholder — visually centered in the preview area right of the form */
 .inline-preview-demo {
     position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: var(--form-card-width);
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 20px;
-    pointer-events: none;
+    pointer-events: all;
     transition: opacity 0.4s ease;
 }
 .inline-preview-demo.hidden {

@@ -109,8 +109,8 @@
             <div class="layout-preview-col" id="inlinePreviewCol">
                 <div class="inline-preview-panel" id="inlinePreviewPanel">
                     <div class="inline-preview-demo" id="inlinePreviewDemo" aria-hidden="true">
-                        <canvas id="terrainPreviewCanvas" style="width:100%;height:100%;display:block;"></canvas>
-                        <p class="inline-preview-demo-label" id="terrainPreviewLabel">Enter coordinates to preview terrain</p>
+                        <canvas id="terrainPreviewCanvas" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+                        <p class="inline-preview-demo-label" id="terrainPreviewLabel" style="position:relative;z-index:1;margin-left:calc(var(--form-card-width) + 5vh);">Enter coordinates to preview terrain</p>
                     </div>
                     <iframe
                         id="inlinePreviewFrame"
