@@ -614,21 +614,17 @@ def terrain_preview():
         return _unauthorized_response()
     lat = parse_float(request.args.get("lat"))
     lon = parse_float(request.args.get("lon"))
-    size = parse_float(request.args.get("size"))
-    units_raw = (request.args.get("units") or "").strip().lower()
-    units = units_raw if units_raw in ("feet", "meters") else "feet"
-    if lat is None or lon is None or size is None or size <= 0:
-        return jsonify({"error": "lat, lon, and size are required"}), 400
+    if lat is None or lon is None:
+        return jsonify({"error": "lat and lon are required"}), 400
 
     try:
-        import numpy as np
         import rasterio
         from rasterio.enums import Resampling
 
         from ..providers.usgs_3dep import fetch_dtm
 
-        CONTEXT_FACTOR = 3
-        bbox = bbox_from_center_wgs84(lat, lon, size * CONTEXT_FACTOR, units)
+        CONTEXT_FT = 10000
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=5.0)
 
@@ -646,7 +642,7 @@ def terrain_preview():
         valid = [v for v in flat if nodata is None or v != nodata]
         min_elev = float(min(valid)) if valid else 0.0
         max_elev = float(max(valid)) if valid else 0.0
-        scale = 1.0 / 0.3048 if units == "feet" else 1.0
+        scale = 1.0 / 0.3048  # always return elevations in feet
         for row in data:
             grid.append([
                 round(v * scale, 2) if (nodata is None or v != nodata) else None
@@ -659,9 +655,7 @@ def terrain_preview():
             "rows": PREVIEW_SIZE,
             "min_elev": round(min_elev * scale, 2),
             "max_elev": round(max_elev * scale, 2),
-            "size": size,
-            "units": units,
-            "context_factor": CONTEXT_FACTOR,
+            "context_size_ft": CONTEXT_FT,
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -673,17 +667,14 @@ def satellite_preview():
         return _unauthorized_response()
     lat = parse_float(request.args.get("lat"))
     lon = parse_float(request.args.get("lon"))
-    size = parse_float(request.args.get("size"))
-    units_raw = (request.args.get("units") or "").strip().lower()
-    units = units_raw if units_raw in ("feet", "meters") else "feet"
-    if lat is None or lon is None or size is None or size <= 0:
-        return jsonify({"error": "lat, lon, and size are required"}), 400
+    if lat is None or lon is None:
+        return jsonify({"error": "lat and lon are required"}), 400
 
     try:
         from ..providers.usgs_3dep import fetch_satellite
 
-        CONTEXT_FACTOR = 3
-        bbox = bbox_from_center_wgs84(lat, lon, size * CONTEXT_FACTOR, units)
+        CONTEXT_FT = 10000
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         png_path = fetch_satellite(bbox, cache_dir, px=1024)
         return send_file(png_path, mimetype="image/png")

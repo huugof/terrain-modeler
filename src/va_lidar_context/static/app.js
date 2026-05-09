@@ -1819,12 +1819,16 @@ function findRecentJobFormDefaultsByPreviewUrl(previewUrl) {
 
 // --- Live COG terrain preview ---
 const _terrainPreview = (() => {
+  const CONTEXT_FT = 10000;
   let renderer = null;
   let scene = null;
   let camera = null;
   let controls = null;
   let mesh = null;
   let outlineBox = null;
+  let meshPositions = null;
+  let meshCols = 0;
+  let meshRows = 0;
   let abortController = null;
   let debounceTimer = null;
   let initialized = false;
@@ -1875,10 +1879,9 @@ const _terrainPreview = (() => {
 
   function _buildMesh(data, satUrl) {
     const THREE = window.__THREE__;
-    const { grid, cols, rows, min_elev, max_elev, size } = data;
-    const cf = data.context_factor || 1;
-    // 100 Three.js units covers size*cf real units, so 1 real unit = 100/(size*cf) units
-    const horizUnitsPerRealUnit = 100 / ((size * cf) || 100);
+    const { grid, cols, rows, min_elev, max_elev } = data;
+    // Context is always CONTEXT_FT wide; elevations are always in feet
+    const horizUnitsPerRealUnit = 100 / CONTEXT_FT;
     const VERT_EXAG = 2.0;
 
     if (mesh) {
@@ -1917,44 +1920,66 @@ const _terrainPreview = (() => {
     mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
-    // Build area outline — traces the 4 boundary edges along the terrain surface
-    const rStart = Math.floor(rows * (1 - 1 / cf) / 2);
-    const rEnd = Math.ceil(rows * (1 + 1 / cf) / 2) - 1;
-    const cStart = Math.floor(cols * (1 - 1 / cf) / 2);
-    const cEnd = Math.ceil(cols * (1 + 1 / cf) / 2) - 1;
-    const SURFACE_LIFT = 1.0;
+    // Store positions buffer for outline redraws without re-fetching
+    meshPositions = positions;
+    meshCols = cols;
+    meshRows = rows;
 
+    // Camera: back far enough to see the full 10k ft context
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const boxSize = box.getSize(new THREE.Vector3());
+    const dist = Math.max(boxSize.x, boxSize.z) * 0.85;
+    controls.target.copy(center);
+    camera.position.set(center.x, center.y + dist * 0.65, center.z + dist);
+    controls.update();
+
+    _drawOutline();
+  }
+
+  function _drawOutline() {
+    const THREE = window.__THREE__;
+    if (!meshPositions || !scene) return;
+
+    if (outlineBox) {
+      scene.remove(outlineBox);
+      outlineBox.geometry.dispose();
+      outlineBox.material.dispose();
+      outlineBox = null;
+    }
+
+    const sizeInput = document.querySelector('input[name="size"]');
+    const unitsInput = document.querySelector('select[name="units"]');
+    const rawSize = sizeInput ? parseFloat(sizeInput.value) : NaN;
+    const units = (unitsInput && unitsInput.value) || "feet";
+    if (!Number.isFinite(rawSize) || rawSize <= 0) return;
+
+    const sizeFt = units === "meters" ? rawSize * 3.28084 : rawSize;
+    const frac = Math.min(sizeFt / CONTEXT_FT, 1.0);
+
+    const rows = meshRows, cols = meshCols;
+    const rStart = Math.max(0, Math.floor(rows * (1 - frac) / 2));
+    const rEnd = Math.min(rows - 1, Math.ceil(rows * (1 + frac) / 2) - 1);
+    const cStart = Math.max(0, Math.floor(cols * (1 - frac) / 2));
+    const cEnd = Math.min(cols - 1, Math.ceil(cols * (1 + frac) / 2) - 1);
+    if (rEnd <= rStart || cEnd <= cStart) return;
+
+    const LIFT = 1.0;
     function _vtx(r, c) {
       const idx = r * cols + c;
-      return new THREE.Vector3(positions.getX(idx), positions.getY(idx) + SURFACE_LIFT, positions.getZ(idx));
+      return new THREE.Vector3(meshPositions.getX(idx), meshPositions.getY(idx) + LIFT, meshPositions.getZ(idx));
     }
 
-    const edgePts = [];
-    for (let c = cStart; c <= cEnd; c++) edgePts.push(_vtx(rStart, c));
-    for (let r = rStart + 1; r <= rEnd; r++) edgePts.push(_vtx(r, cEnd));
-    for (let c = cEnd - 1; c >= cStart; c--) edgePts.push(_vtx(rEnd, c));
-    for (let r = rEnd - 1; r >= rStart + 1; r--) edgePts.push(_vtx(r, cStart));
-    edgePts.push(_vtx(rStart, cStart));
+    const pts = [];
+    for (let c = cStart; c <= cEnd; c++) pts.push(_vtx(rStart, c));
+    for (let r = rStart + 1; r <= rEnd; r++) pts.push(_vtx(r, cEnd));
+    for (let c = cEnd - 1; c >= cStart; c--) pts.push(_vtx(rEnd, c));
+    for (let r = rEnd - 1; r >= rStart + 1; r--) pts.push(_vtx(r, cStart));
+    pts.push(_vtx(rStart, cStart));
 
-    const outlineGeo = new THREE.BufferGeometry().setFromPoints(edgePts);
+    const outlineGeo = new THREE.BufferGeometry().setFromPoints(pts);
     outlineBox = new THREE.Line(outlineGeo, new THREE.LineBasicMaterial({ color: 0xff7700 }));
     scene.add(outlineBox);
-
-    // Orbit target = average elevation of build area center
-    let sumCenterY = 0, countCenterY = 0;
-    for (let r = rStart; r <= rEnd; r++) {
-      for (let c = cStart; c <= cEnd; c++) {
-        sumCenterY += positions.getY(r * cols + c);
-        countCenterY++;
-      }
-    }
-    const buildCenterY = countCenterY > 0 ? sumCenterY / countCenterY : 0;
-    controls.target.set(0, buildCenterY, 0);
-    const fullBox = new THREE.Box3().setFromObject(mesh);
-    const fullSize = fullBox.getSize(new THREE.Vector3());
-    const dist = Math.max(fullSize.x, fullSize.z) * 0.85;
-    camera.position.set(0, buildCenterY + dist * 0.65, buildCenterY + dist);
-    controls.update();
   }
 
   function setLabel(text) {
@@ -1979,13 +2004,9 @@ const _terrainPreview = (() => {
     }
 
     const coordsInput = document.querySelector('input[name="coords"]');
-    const sizeInput = document.querySelector('input[name="size"]');
-    const unitsInput = document.querySelector('select[name="units"]');
     const coords = coordsInput ? parseCoords(coordsInput.value) : null;
-    const size = sizeInput ? parseFloat(sizeInput.value) : NaN;
-    const units = (unitsInput && unitsInput.value) || "feet";
 
-    if (!coords || !Number.isFinite(size) || size <= 0) {
+    if (!coords) {
       setLabel("Enter coordinates to preview terrain");
       return;
     }
@@ -1996,7 +2017,7 @@ const _terrainPreview = (() => {
     setLabel("Loading terrain…");
 
     try {
-      const qs = `lat=${coords.lat}&lon=${coords.lon}&size=${size}&units=${units}`;
+      const qs = `lat=${coords.lat}&lon=${coords.lon}`;
       const [resp, satUrl] = await Promise.all([
         window.fetch(`/terrain-preview?${qs}`, { signal: abortController.signal }),
         Promise.resolve(`/satellite-preview?${qs}`),
@@ -2012,7 +2033,7 @@ const _terrainPreview = (() => {
     }
   }
 
-  return { schedule, fetch };
+  return { schedule, fetch, updateOutline: _drawOutline };
 })();
 
 function initInlinePreview() {
@@ -2183,14 +2204,14 @@ document.addEventListener("DOMContentLoaded", () => {
     mapSizeInput.addEventListener("input", () => {
       updateAlerts();
       scheduleCoverageCheck();
-      _terrainPreview.schedule();
+      _terrainPreview.updateOutline();
     });
   if (units)
     units.addEventListener("change", () => {
       updateUnitLabels();
       updateAlerts();
       scheduleCoverageCheck();
-      _terrainPreview.schedule();
+      _terrainPreview.updateOutline();
     });
   const form = document.querySelector("form.card");
   if (form) {
