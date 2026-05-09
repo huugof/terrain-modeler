@@ -1917,36 +1917,38 @@ const _terrainPreview = (() => {
     mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
-    // Build area outline — the center 1/cf of the terrain
-    const buildHalfW = 50 / cf;
+    // Build area outline — traces the 4 boundary edges along the terrain surface
     const rStart = Math.floor(rows * (1 - 1 / cf) / 2);
-    const rEnd = Math.ceil(rows * (1 + 1 / cf) / 2);
+    const rEnd = Math.ceil(rows * (1 + 1 / cf) / 2) - 1;
     const cStart = Math.floor(cols * (1 - 1 / cf) / 2);
-    const cEnd = Math.ceil(cols * (1 + 1 / cf) / 2);
-    let maxCenterY = 0, sumCenterY = 0, countCenterY = 0;
-    for (let r = rStart; r < rEnd; r++) {
-      for (let c = cStart; c < cEnd; c++) {
-        if (grid[r] && grid[r][c] != null) {
-          const y = (grid[r][c] - min_elev) * horizUnitsPerRealUnit * VERT_EXAG;
-          sumCenterY += y;
-          countCenterY++;
-          if (y > maxCenterY) maxCenterY = y;
-        }
-      }
+    const cEnd = Math.ceil(cols * (1 + 1 / cf) / 2) - 1;
+    const SURFACE_LIFT = 1.0;
+
+    function _vtx(r, c) {
+      const idx = r * cols + c;
+      return new THREE.Vector3(positions.getX(idx), positions.getY(idx) + SURFACE_LIFT, positions.getZ(idx));
     }
-    const buildCenterY = countCenterY > 0 ? sumCenterY / countCenterY : 0;
-    const outlineY = maxCenterY + 1.5;
-    const outlineGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-buildHalfW, outlineY, -buildHalfW),
-      new THREE.Vector3( buildHalfW, outlineY, -buildHalfW),
-      new THREE.Vector3( buildHalfW, outlineY,  buildHalfW),
-      new THREE.Vector3(-buildHalfW, outlineY,  buildHalfW),
-      new THREE.Vector3(-buildHalfW, outlineY, -buildHalfW),
-    ]);
+
+    const edgePts = [];
+    for (let c = cStart; c <= cEnd; c++) edgePts.push(_vtx(rStart, c));
+    for (let r = rStart + 1; r <= rEnd; r++) edgePts.push(_vtx(r, cEnd));
+    for (let c = cEnd - 1; c >= cStart; c--) edgePts.push(_vtx(rEnd, c));
+    for (let r = rEnd - 1; r >= rStart + 1; r--) edgePts.push(_vtx(r, cStart));
+    edgePts.push(_vtx(rStart, cStart));
+
+    const outlineGeo = new THREE.BufferGeometry().setFromPoints(edgePts);
     outlineBox = new THREE.Line(outlineGeo, new THREE.LineBasicMaterial({ color: 0xff7700 }));
     scene.add(outlineBox);
 
-    // Orbit around the build area center; camera back far enough to see full context
+    // Orbit target = average elevation of build area center
+    let sumCenterY = 0, countCenterY = 0;
+    for (let r = rStart; r <= rEnd; r++) {
+      for (let c = cStart; c <= cEnd; c++) {
+        sumCenterY += positions.getY(r * cols + c);
+        countCenterY++;
+      }
+    }
+    const buildCenterY = countCenterY > 0 ? sumCenterY / countCenterY : 0;
     controls.target.set(0, buildCenterY, 0);
     const fullBox = new THREE.Box3().setFromObject(mesh);
     const fullSize = fullBox.getSize(new THREE.Vector3());
