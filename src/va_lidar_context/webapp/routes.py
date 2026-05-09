@@ -685,7 +685,7 @@ def satellite_preview():
         CONTEXT_FACTOR = 3
         bbox = bbox_from_center_wgs84(lat, lon, size * CONTEXT_FACTOR, units)
         cache_dir = _settings.OUT_DIR
-        png_path = fetch_satellite(bbox, cache_dir, px=256)
+        png_path = fetch_satellite(bbox, cache_dir, px=1024)
         return send_file(png_path, mimetype="image/png")
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
