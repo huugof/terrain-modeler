@@ -658,6 +658,7 @@ def terrain_preview():
             "rows": PREVIEW_SIZE,
             "min_elev": round(min_elev * scale, 2),
             "max_elev": round(max_elev * scale, 2),
+            "size": size,
             "units": units,
         })
     except Exception as exc:

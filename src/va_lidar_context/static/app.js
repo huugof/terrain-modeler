@@ -1873,8 +1873,14 @@ const _terrainPreview = (() => {
 
   function _buildMesh(data) {
     const THREE = window.__THREE__;
-    const { grid, cols, rows, min_elev, max_elev } = data;
+    const { grid, cols, rows, min_elev, max_elev, size } = data;
     const spread = max_elev - min_elev || 1;
+    // Scale elevation proportionally to real-world size so the aspect ratio
+    // matches reality. PlaneGeometry is 100 units wide = `size` real-world units,
+    // so 1 real unit = 100/size visual units. Apply 2x vertical exaggeration
+    // to make terrain readable at typical site scales.
+    const horizUnitsPerRealUnit = 100 / (size || 100);
+    const VERT_EXAG = 2.0;
 
     if (mesh) {
       scene.remove(mesh);
@@ -1894,7 +1900,7 @@ const _terrainPreview = (() => {
       const row = Math.floor(i / cols);
       const col = i % cols;
       const elev = (grid[row] && grid[row][col] != null) ? grid[row][col] : min_elev;
-      positions.setY(i, ((elev - min_elev) / spread) * 30);
+      positions.setY(i, (elev - min_elev) * horizUnitsPerRealUnit * VERT_EXAG);
 
       const t = (elev - min_elev) / spread;
       color.setHSL(0.33 - t * 0.25, 0.4 - t * 0.2, 0.25 + t * 0.4);
@@ -1910,8 +1916,8 @@ const _terrainPreview = (() => {
 
     const box = new THREE.Box3().setFromObject(mesh);
     const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
+    const boxSize = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z);
     camera.position.set(center.x, center.y + maxDim, center.z + maxDim * 1.2);
     controls.target.copy(center);
     controls.update();
