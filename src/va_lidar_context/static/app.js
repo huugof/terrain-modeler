@@ -1912,7 +1912,7 @@ const _terrainPreview = (() => {
     geo.computeVertexNormals();
 
     const texture = satUrl ? new THREE.TextureLoader().load(satUrl) : null;
-    const mat = new THREE.MeshPhongMaterial({
+    const mat = new THREE.MeshLambertMaterial({
       map: texture,
       color: texture ? 0xffffff : 0x88aa77,
       side: THREE.DoubleSide,
