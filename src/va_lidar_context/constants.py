@@ -34,6 +34,10 @@ MSBFP2_LAYER = (
 
 MSBFP2_QUERY = f"{MSBFP2_LAYER}/query"
 
+MS_GLOBAL_BUILDINGS_INDEX_URL = (
+    "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
+)
+
 MAX_RECORD_COUNT = 2000
 
 # Default preview job used to seed the UI for new users

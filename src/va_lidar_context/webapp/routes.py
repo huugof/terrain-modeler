@@ -623,18 +623,16 @@ def terrain_preview():
 
         from ..providers.usgs_3dep import fetch_dtm
 
-        CONTEXT_FT = 10000
+        CONTEXT_FT = 20000
+        PREVIEW_SIZE = 256
+        context_m = CONTEXT_FT * 0.3048
+        preview_resolution = context_m / PREVIEW_SIZE
         bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
-        dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=5.0)
+        dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=preview_resolution)
 
-        PREVIEW_SIZE = 32
         with rasterio.open(dtm_path) as src:
-            data = src.read(
-                1,
-                out_shape=(PREVIEW_SIZE, PREVIEW_SIZE),
-                resampling=Resampling.bilinear,
-            ).tolist()
+            data = src.read(1).tolist()
             nodata = src.nodata
 
         grid = []
@@ -656,6 +654,7 @@ def terrain_preview():
             "min_elev": round(min_elev * scale, 2),
             "max_elev": round(max_elev * scale, 2),
             "context_size_ft": CONTEXT_FT,
+            "bbox_wgs84": list(bbox),
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -678,6 +677,28 @@ def satellite_preview():
         cache_dir = _settings.OUT_DIR
         png_path = fetch_satellite(bbox, cache_dir, px=1024)
         return send_file(png_path, mimetype="image/png")
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.route("/buildings-preview")
+def buildings_preview():
+    if _settings.AUTH_ENABLED and current_user() is None:
+        return _unauthorized_response()
+    lat = parse_float(request.args.get("lat"))
+    lon = parse_float(request.args.get("lon"))
+    if lat is None or lon is None:
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    try:
+        from ..providers.ms_buildings import fetch_buildings_with_heights
+
+        CONTEXT_FT = 20000
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
+        cache_dir = _settings.OUT_DIR
+        geojson = fetch_buildings_with_heights(bbox, cache_dir)
+        geojson["bbox"] = list(bbox)
+        return jsonify(geojson)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

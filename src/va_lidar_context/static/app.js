@@ -1819,16 +1819,23 @@ function findRecentJobFormDefaultsByPreviewUrl(previewUrl) {
 
 // --- Live COG terrain preview ---
 const _terrainPreview = (() => {
-  const CONTEXT_FT = 10000;
+  const VERT_EXAG = 2.0;
   let renderer = null;
   let scene = null;
   let camera = null;
   let controls = null;
   let mesh = null;
   let outlineBox = null;
+  let buildingMeshes = [];
   let meshPositions = null;
   let meshCols = 0;
   let meshRows = 0;
+  let meshContextFt = 20000;
+  let meshBbox = null;
+  let meshMinElev = 0;
+  let meshGrid = null;
+  let meshGridCols = 0;
+  let meshGridRows = 0;
   let abortController = null;
   let debounceTimer = null;
   let initialized = false;
@@ -1879,10 +1886,14 @@ const _terrainPreview = (() => {
 
   function _buildMesh(data, satUrl) {
     const THREE = window.__THREE__;
-    const { grid, cols, rows, min_elev, max_elev } = data;
-    // Context is always CONTEXT_FT wide; elevations are always in feet
-    const horizUnitsPerRealUnit = 100 / CONTEXT_FT;
-    const VERT_EXAG = 2.0;
+    const { grid, cols, rows, min_elev, max_elev, context_size_ft, bbox_wgs84 } = data;
+    meshContextFt = context_size_ft || meshContextFt;
+    meshBbox = bbox_wgs84 || null;
+    meshMinElev = min_elev;
+    meshGrid = grid;
+    meshGridCols = cols;
+    meshGridRows = rows;
+    const horizUnitsPerRealUnit = 100 / meshContextFt;
 
     if (mesh) {
       scene.remove(mesh);
@@ -1890,6 +1901,11 @@ const _terrainPreview = (() => {
       mesh.material.dispose();
       mesh = null;
     }
+    for (const m of buildingMeshes) {
+      scene.remove(m);
+      m.geometry.dispose();
+    }
+    buildingMeshes = [];
     if (outlineBox) {
       scene.remove(outlineBox);
       outlineBox.geometry.dispose();
@@ -1962,7 +1978,7 @@ const _terrainPreview = (() => {
     if (!Number.isFinite(rawSize) || rawSize <= 0) return;
 
     const sizeFt = units === "meters" ? rawSize * 3.28084 : rawSize;
-    const frac = Math.min(sizeFt / CONTEXT_FT, 1.0);
+    const frac = Math.min(sizeFt / meshContextFt, 1.0);
 
     const rows = meshRows, cols = meshCols;
     const rStart = Math.max(0, Math.floor(rows * (1 - frac) / 2));
@@ -1971,10 +1987,9 @@ const _terrainPreview = (() => {
     const cEnd = Math.min(cols - 1, Math.ceil(cols * (1 + frac) / 2) - 1);
     if (rEnd <= rStart || cEnd <= cStart) return;
 
-    const LIFT = 1.0;
     function _vtx(r, c) {
       const idx = r * cols + c;
-      return new THREE.Vector3(meshPositions.getX(idx), meshPositions.getY(idx) + LIFT, meshPositions.getZ(idx));
+      return new THREE.Vector3(meshPositions.getX(idx), meshPositions.getY(idx), meshPositions.getZ(idx));
     }
 
     const pts = [];
@@ -1984,9 +1999,122 @@ const _terrainPreview = (() => {
     for (let r = rEnd - 1; r >= rStart + 1; r--) pts.push(_vtx(r, cStart));
     pts.push(_vtx(rStart, cStart));
 
-    const outlineGeo = new THREE.BufferGeometry().setFromPoints(pts);
-    outlineBox = new THREE.Line(outlineGeo, new THREE.LineBasicMaterial({ color: 0xff7700 }));
+    const Line2 = window.__Line2__;
+    const LineGeometry = window.__LineGeometry__;
+    const LineMaterial = window.__LineMaterial__;
+
+    if (!Line2 || !LineGeometry || !LineMaterial) {
+      console.error("Line2 addons not loaded — hard-refresh the page (Cmd+Shift+R)");
+      return;
+    }
+
+    const outlineGeo = new LineGeometry();
+    outlineGeo.setPositions(pts.flatMap(v => [v.x, v.y, v.z]));
+
+    // Use CSS logical pixels, not physical pixels, for LineMaterial resolution
+    const cw = renderer.domElement.clientWidth || renderer.domElement.width;
+    const ch = renderer.domElement.clientHeight || renderer.domElement.height;
+    const outlineMat = new LineMaterial({
+      color: 0xff7700,
+      linewidth: 6,
+      dashed: true,
+      dashSize: 10,
+      gapSize: 5,
+      resolution: new THREE.Vector2(cw, ch),
+    });
+
+    outlineBox = new Line2(outlineGeo, outlineMat);
+    outlineBox.computeLineDistances();
+    outlineBox.renderOrder = 1;
     scene.add(outlineBox);
+  }
+
+  function _wgs84ToScene(lon, lat, bbox) {
+    const [xmin, ymin, xmax, ymax] = bbox;
+    const sx = ((lon - xmin) / (xmax - xmin) - 0.5) * 100;
+    const sz = ((ymax - lat) / (ymax - ymin) - 0.5) * 100;
+    return [sx, sz];
+  }
+
+  function _sampleTerrainY(lon, lat) {
+    if (!meshBbox || !meshGrid) return 0;
+    const [xmin, ymin, xmax, ymax] = meshBbox;
+    const col = Math.round(((lon - xmin) / (xmax - xmin)) * (meshGridCols - 1));
+    const row = Math.round(((ymax - lat) / (ymax - ymin)) * (meshGridRows - 1));
+    const r = Math.max(0, Math.min(meshGridRows - 1, row));
+    const c = Math.max(0, Math.min(meshGridCols - 1, col));
+    const elev = meshGrid[r] && meshGrid[r][c] != null ? meshGrid[r][c] : meshMinElev;
+    return (elev - meshMinElev) * (100 / meshContextFt) * VERT_EXAG;
+  }
+
+  function _polygonArea(ring) {
+    let area = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      area += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
+    }
+    return Math.abs(area / 2);
+  }
+
+  function _buildBuildings(data) {
+    const THREE = window.__THREE__;
+    if (!scene || !meshBbox) return;
+
+    for (const m of buildingMeshes) {
+      scene.remove(m);
+      m.geometry.dispose();
+    }
+    buildingMeshes = [];
+
+    const { features, bbox } = data;
+    if (!features || !bbox) return;
+
+    const horizUnitsPerRealUnit = 100 / meshContextFt;
+    const FT_PER_M = 3.28084;
+    const MAX_BUILDINGS = 2000;
+
+    const matNormal = new THREE.MeshLambertMaterial({ color: 0xd4c5a9, side: THREE.DoubleSide });
+    const matMissing = new THREE.MeshLambertMaterial({ color: 0xff3333, side: THREE.DoubleSide });
+
+    // Sort largest footprint first, cap count
+    const sorted = [...features]
+      .filter(f => f.geometry && f.geometry.coordinates && f.geometry.coordinates[0])
+      .sort((a, b) => _polygonArea(b.geometry.coordinates[0]) - _polygonArea(a.geometry.coordinates[0]))
+      .slice(0, MAX_BUILDINGS);
+
+    for (const feature of sorted) {
+      const ring = feature.geometry.coordinates[0];
+      if (ring.length < 4) continue;
+
+      const heightM = feature.properties.height_m;
+      const hasHeight = heightM != null && heightM > 0;
+      const effectiveHeightM = hasHeight ? heightM : 5.0;
+      const sceneHeight = effectiveHeightM * FT_PER_M * horizUnitsPerRealUnit * VERT_EXAG;
+
+      // Build THREE.Shape in shape-space where shape_x=scene_x, shape_y=-scene_z
+      // so that rotateX(-π/2) maps it back to world XZ correctly
+      const [sx0, sz0] = _wgs84ToScene(ring[0][0], ring[0][1], bbox);
+      const shape = new THREE.Shape();
+      shape.moveTo(sx0, -sz0);
+      for (let i = 1; i < ring.length - 1; i++) {
+        const [sx, sz] = _wgs84ToScene(ring[i][0], ring[i][1], bbox);
+        shape.lineTo(sx, -sz);
+      }
+      shape.closePath();
+
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: sceneHeight, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+
+      // Sample terrain height at footprint centroid for base Y
+      const centLon = ring.reduce((s, v) => s + v[0], 0) / ring.length;
+      const centLat = ring.reduce((s, v) => s + v[1], 0) / ring.length;
+      const baseY = _sampleTerrainY(centLon, centLat);
+
+      const buildMesh = new THREE.Mesh(geo, hasHeight ? matNormal : matMissing);
+      buildMesh.position.y = baseY;
+      buildMesh.renderOrder = 0;
+      scene.add(buildMesh);
+      buildingMeshes.push(buildMesh);
+    }
   }
 
   function setLabel(text) {
@@ -2025,15 +2153,24 @@ const _terrainPreview = (() => {
 
     try {
       const qs = `lat=${coords.lat}&lon=${coords.lon}`;
-      const [resp, satUrl] = await Promise.all([
-        window.fetch(`/terrain-preview?${qs}`, { signal: abortController.signal }),
-        Promise.resolve(`/satellite-preview?${qs}`),
-      ]);
+      const signal = abortController.signal;
+
+      // Fire terrain and buildings fetches simultaneously
+      const terrainPromise = window.fetch(`/terrain-preview?${qs}`, { signal });
+      const buildingsPromise = window.fetch(`/buildings-preview?${qs}`, { signal });
+
+      const resp = await terrainPromise;
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
-      _buildMesh(data, satUrl);
+      _buildMesh(data, `/satellite-preview?${qs}`);
       setLabel("");
+
+      // Buildings pop in non-blocking after terrain renders
+      buildingsPromise
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d && !d.error) _buildBuildings(d); })
+        .catch(() => {});
     } catch (err) {
       if (err.name === "AbortError") return;
       setLabel("Preview unavailable");
