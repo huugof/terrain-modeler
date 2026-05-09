@@ -77,3 +77,49 @@ def fetch_dtm(
                         f.write(chunk)
 
     return cache_path, utm_crs
+
+
+ESRI_IMAGERY_URL = (
+    "https://server.arcgisonline.com/arcgis/rest/services/"
+    "World_Imagery/MapServer/export"
+)
+
+
+def fetch_satellite(
+    bbox_wgs84: Tuple[float, float, float, float],
+    cache_dir: Path,
+    px: int = 256,
+) -> Path:
+    """Fetch a satellite PNG from ESRI World Imagery for the given WGS84 bbox.
+
+    Results are cached by bbox + px size. Returns path to cached PNG.
+    """
+    xmin, ymin, xmax, ymax = bbox_wgs84
+    key = hashlib.md5(
+        f"{xmin:.6f}_{ymin:.6f}_{xmax:.6f}_{ymax:.6f}_{px}".encode()
+    ).hexdigest()
+    cache_path = cache_dir / "_cache" / "satellite" / f"{key}.png"
+
+    if not cache_path.exists():
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        params = {
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "bboxSR": "4326",
+            "size": f"{px},{px}",
+            "format": "png",
+            "f": "image",
+        }
+        with requests.get(ESRI_IMAGERY_URL, params=params, timeout=60, stream=True) as resp:
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if "image" not in content_type and "png" not in content_type:
+                text = resp.text[:400]
+                raise RuntimeError(
+                    f"ESRI imagery returned non-image response: {content_type!r} {text}"
+                )
+            with cache_path.open("wb") as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+
+    return cache_path

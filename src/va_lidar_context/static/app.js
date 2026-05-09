@@ -1871,14 +1871,10 @@ const _terrainPreview = (() => {
     return true;
   }
 
-  function _buildMesh(data) {
+  function _buildMesh(data, satUrl) {
     const THREE = window.__THREE__;
     const { grid, cols, rows, min_elev, max_elev, size } = data;
     const spread = max_elev - min_elev || 1;
-    // Scale elevation proportionally to real-world size so the aspect ratio
-    // matches reality. PlaneGeometry is 100 units wide = `size` real-world units,
-    // so 1 real unit = 100/size visual units. Apply 2x vertical exaggeration
-    // to make terrain readable at typical site scales.
     const horizUnitsPerRealUnit = 100 / (size || 100);
     const VERT_EXAG = 2.0;
 
@@ -1893,24 +1889,22 @@ const _terrainPreview = (() => {
     geo.rotateX(-Math.PI / 2);
 
     const positions = geo.attributes.position;
-    const colors = [];
-    const color = new THREE.Color();
 
     for (let i = 0; i < positions.count; i++) {
       const row = Math.floor(i / cols);
       const col = i % cols;
       const elev = (grid[row] && grid[row][col] != null) ? grid[row][col] : min_elev;
       positions.setY(i, (elev - min_elev) * horizUnitsPerRealUnit * VERT_EXAG);
-
-      const t = (elev - min_elev) / spread;
-      color.setHSL(0.33 - t * 0.25, 0.4 - t * 0.2, 0.25 + t * 0.4);
-      colors.push(color.r, color.g, color.b);
     }
 
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals();
 
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const texture = satUrl ? new THREE.TextureLoader().load(satUrl) : null;
+    const mat = new THREE.MeshPhongMaterial({
+      map: texture,
+      color: texture ? 0xffffff : 0x88aa77,
+      side: THREE.DoubleSide,
+    });
     mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
@@ -1962,12 +1956,15 @@ const _terrainPreview = (() => {
     setLabel("Loading terrain…");
 
     try {
-      const url = `/terrain-preview?lat=${coords.lat}&lon=${coords.lon}&size=${size}&units=${units}`;
-      const resp = await window.fetch(url, { signal: abortController.signal });
+      const qs = `lat=${coords.lat}&lon=${coords.lon}&size=${size}&units=${units}`;
+      const [resp, satUrl] = await Promise.all([
+        window.fetch(`/terrain-preview?${qs}`, { signal: abortController.signal }),
+        Promise.resolve(`/satellite-preview?${qs}`),
+      ]);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
-      _buildMesh(data);
+      _buildMesh(data, satUrl);
       setLabel("");
     } catch (err) {
       if (err.name === "AbortError") return;

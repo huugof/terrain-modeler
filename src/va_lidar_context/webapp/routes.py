@@ -665,6 +665,29 @@ def terrain_preview():
         return jsonify({"error": str(exc)}), 500
 
 
+@bp.route("/satellite-preview")
+def satellite_preview():
+    if _settings.AUTH_ENABLED and current_user() is None:
+        return _unauthorized_response()
+    lat = parse_float(request.args.get("lat"))
+    lon = parse_float(request.args.get("lon"))
+    size = parse_float(request.args.get("size"))
+    units_raw = (request.args.get("units") or "").strip().lower()
+    units = units_raw if units_raw in ("feet", "meters") else "feet"
+    if lat is None or lon is None or size is None or size <= 0:
+        return jsonify({"error": "lat, lon, and size are required"}), 400
+
+    try:
+        from ..providers.usgs_3dep import fetch_satellite
+
+        bbox = bbox_from_center_wgs84(lat, lon, size, units)
+        cache_dir = _settings.OUT_DIR
+        png_path = fetch_satellite(bbox, cache_dir, px=256)
+        return send_file(png_path, mimetype="image/png")
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @bp.route("/run", methods=["POST"])
 def run_job():
     if _settings.AUTH_ENABLED and current_user() is None:
