@@ -1973,6 +1973,10 @@ const _terrainPreview = (() => {
 })();
 
 function initInlinePreview() {
+  // COG terrain canvas is now the default right-panel view — don't auto-load
+  // the last job into the iframe on startup. Jobs still load when the user
+  // clicks one in the recent jobs list.
+  return;
   const frame = document.getElementById("inlinePreviewFrame");
   if (!frame) return;
   // Prefer server-injected URL (most recent job from this session), then localStorage
