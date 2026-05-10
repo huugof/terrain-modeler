@@ -1825,7 +1825,7 @@ const _terrainPreview = (() => {
   let camera = null;
   let controls = null;
   let mesh = null;
-  let outlineBox = null;
+  let outlineLines = [];
   let buildingMeshes = [];
   let meshPositions = null;
   let meshCols = 0;
@@ -1906,12 +1906,8 @@ const _terrainPreview = (() => {
       m.geometry.dispose();
     }
     buildingMeshes = [];
-    if (outlineBox) {
-      scene.remove(outlineBox);
-      outlineBox.geometry.dispose();
-      outlineBox.material.dispose();
-      outlineBox = null;
-    }
+    for (const ln of outlineLines) { scene.remove(ln); ln.geometry.dispose(); ln.material.dispose(); }
+    outlineLines = [];
 
     const geo = new THREE.PlaneGeometry(100, 100, cols - 1, rows - 1);
     geo.rotateX(-Math.PI / 2);
@@ -1964,12 +1960,8 @@ const _terrainPreview = (() => {
     const THREE = window.__THREE__;
     if (!meshPositions || !scene) return;
 
-    if (outlineBox) {
-      scene.remove(outlineBox);
-      outlineBox.geometry.dispose();
-      outlineBox.material.dispose();
-      outlineBox = null;
-    }
+    for (const ln of outlineLines) { scene.remove(ln); ln.geometry.dispose(); ln.material.dispose(); }
+    outlineLines = [];
 
     const sizeInput = document.querySelector('input[name="size"]');
     const unitsInput = document.querySelector('select[name="units"]');
@@ -1992,13 +1984,6 @@ const _terrainPreview = (() => {
       return new THREE.Vector3(meshPositions.getX(idx), meshPositions.getY(idx), meshPositions.getZ(idx));
     }
 
-    const pts = [];
-    for (let c = cStart; c <= cEnd; c++) pts.push(_vtx(rStart, c));
-    for (let r = rStart + 1; r <= rEnd; r++) pts.push(_vtx(r, cEnd));
-    for (let c = cEnd - 1; c >= cStart; c--) pts.push(_vtx(rEnd, c));
-    for (let r = rEnd - 1; r >= rStart + 1; r--) pts.push(_vtx(r, cStart));
-    pts.push(_vtx(rStart, cStart));
-
     const Line2 = window.__Line2__;
     const LineGeometry = window.__LineGeometry__;
     const LineMaterial = window.__LineMaterial__;
@@ -2008,27 +1993,41 @@ const _terrainPreview = (() => {
       return;
     }
 
-    const outlineGeo = new LineGeometry();
-    outlineGeo.setPositions(pts.flatMap(v => [v.x, v.y, v.z]));
-
     // Use CSS logical pixels, not physical pixels, for LineMaterial resolution
     const cw = renderer.domElement.clientWidth || renderer.domElement.width;
     const ch = renderer.domElement.clientHeight || renderer.domElement.height;
-    const sideLenScene = frac * 100;
-    const cycle = sideLenScene / 10;
-    const outlineMat = new LineMaterial({
-      color: 0xff7700,
-      linewidth: 6,
-      dashed: true,
-      dashSize: cycle * (2 / 3),
-      gapSize: cycle * (1 / 3),
-      resolution: new THREE.Vector2(cw, ch),
-    });
 
-    outlineBox = new Line2(outlineGeo, outlineMat);
-    outlineBox.computeLineDistances();
-    outlineBox.renderOrder = 1;
-    scene.add(outlineBox);
+    // Four sides as separate lines so each resets dash distance at its corner.
+    // 10 dashes per side (9 gaps), 2:1 dash:gap ratio → d=2L/29, g=L/29.
+    // This guarantees both ends of every side land on a solid dash segment.
+    const sides = [
+      (() => { const p = []; for (let c = cStart; c <= cEnd; c++) p.push(_vtx(rStart, c)); return p; })(),
+      (() => { const p = []; for (let r = rStart; r <= rEnd; r++) p.push(_vtx(r, cEnd));   return p; })(),
+      (() => { const p = []; for (let c = cEnd; c >= cStart; c--) p.push(_vtx(rEnd, c));   return p; })(),
+      (() => { const p = []; for (let r = rEnd; r >= rStart; r--) p.push(_vtx(r, cStart)); return p; })(),
+    ];
+
+    for (const sidePts of sides) {
+      if (sidePts.length < 2) continue;
+      let L = 0;
+      for (let i = 1; i < sidePts.length; i++) L += sidePts[i].distanceTo(sidePts[i - 1]);
+      const g = L / 29;
+      const geo = new LineGeometry();
+      geo.setPositions(sidePts.flatMap(v => [v.x, v.y, v.z]));
+      const mat = new LineMaterial({
+        color: 0x9933ff,
+        linewidth: 6,
+        dashed: true,
+        dashSize: g * 2,
+        gapSize: g,
+        resolution: new THREE.Vector2(cw, ch),
+      });
+      const ln = new Line2(geo, mat);
+      ln.computeLineDistances();
+      ln.renderOrder = 1;
+      scene.add(ln);
+      outlineLines.push(ln);
+    }
   }
 
   function _wgs84ToScene(lon, lat, bbox) {
