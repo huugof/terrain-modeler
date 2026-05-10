@@ -614,8 +614,6 @@ def coverage():
 
 @bp.route("/terrain-preview")
 def terrain_preview():
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
     lat = parse_float(request.args.get("lat"))
     lon = parse_float(request.args.get("lon"))
     if lat is None or lon is None:
@@ -676,8 +674,6 @@ def terrain_preview():
 
 @bp.route("/satellite-preview")
 def satellite_preview():
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
     lat = parse_float(request.args.get("lat"))
     lon = parse_float(request.args.get("lon"))
     if lat is None or lon is None:
@@ -697,8 +693,6 @@ def satellite_preview():
 
 @bp.route("/buildings-preview")
 def buildings_preview():
-    if _settings.AUTH_ENABLED and current_user() is None:
-        return _unauthorized_response()
     lat = parse_float(request.args.get("lat"))
     lon = parse_float(request.args.get("lon"))
     if lat is None or lon is None:

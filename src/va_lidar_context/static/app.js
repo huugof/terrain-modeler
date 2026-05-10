@@ -2237,16 +2237,28 @@ document.addEventListener("DOMContentLoaded", () => {
   if (newJobButton) {
     newJobButton.addEventListener("click", (event) => {
       event.preventDefault();
+      if (!CAN_BUILD) {
+        openAuthModal(window.location.pathname + window.location.search);
+        return;
+      }
       applyNewBuildDefaults();
     });
   }
   const unlockBtn = document.getElementById("unlockBtn");
   if (unlockBtn) {
     unlockBtn.addEventListener("click", () => {
+      if (!CAN_BUILD) {
+        openAuthModal(window.location.pathname + window.location.search);
+        return;
+      }
       setFormRecordMode(false);
       scheduleCoverageCheck();
       updateAlerts();
     });
+  }
+  if (!CAN_BUILD) {
+    setFormRecordMode(true);
+    if (unlockBtn) unlockBtn.textContent = "Sign in to build";
   }
   const jobsPanel = document.getElementById("recentJobsPanel");
   const jobsButton = document.getElementById("menuButton");
