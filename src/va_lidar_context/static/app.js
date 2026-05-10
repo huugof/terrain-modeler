@@ -1863,6 +1863,20 @@ const _terrainPreview = (() => {
   let debounceTimer = null;
   let initialized = false;
 
+  function _updateCameraLayout(canvas) {
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    if (!W || !H) return;
+    const formCol = document.querySelector(".layout-form-col");
+    const formRight = formCol ? formCol.getBoundingClientRect().right : 0;
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H;
+    // Shift the projection frustum so (0,0,0) appears centered in the
+    // visible area to the right of the form panel, not in the full canvas.
+    camera.setViewOffset(W, H, -formRight / 2, 0, W, H);
+    camera.updateProjectionMatrix();
+  }
+
   function _initThree(canvas) {
     const THREE = window.__THREE__;
     const OrbitControls = window.__OrbitControls__;
@@ -1870,7 +1884,6 @@ const _terrainPreview = (() => {
 
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
     scene = new THREE.Scene();
     const bgCss = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#f5f5f3";
@@ -1889,6 +1902,9 @@ const _terrainPreview = (() => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
     controls.autoRotate = false;
+    controls.enablePan = false;
+
+    _updateCameraLayout(canvas);
 
     (function animate() {
       requestAnimationFrame(animate);
@@ -1898,9 +1914,7 @@ const _terrainPreview = (() => {
 
     window.addEventListener("resize", () => {
       if (!canvas.clientWidth) return;
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-      camera.aspect = canvas.clientWidth / canvas.clientHeight;
-      camera.updateProjectionMatrix();
+      _updateCameraLayout(canvas);
     });
 
     initialized = true;
