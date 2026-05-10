@@ -2381,4 +2381,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initPreviewNavButtons();
   initInlinePreview();
   scheduleCoverageCheck();
+  _terrainPreview.schedule();
 });
