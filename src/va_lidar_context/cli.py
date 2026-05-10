@@ -172,7 +172,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         type=float,
         default=None,
-        help="Clip size (square) in output units. Required with --center.",
+        help="Square clip size in output units (sets both --width and --height).",
+    )
+    build_cmd.add_argument(
+        "--width",
+        type=float,
+        default=None,
+        help="East-west clip size in output units. Required with --center (or use --size).",
+    )
+    build_cmd.add_argument(
+        "--height",
+        type=float,
+        default=None,
+        help="North-south clip size in output units. Required with --center (or use --size).",
     )
     build_cmd.add_argument(
         "--allow-multi-tile",
@@ -204,7 +216,8 @@ def main() -> int:
         cfg = BuildConfig(
             tile_name=args.tile_name,
             center=tuple(args.center) if args.center else None,
-            size=args.size,
+            width=args.width or args.size,
+            height=args.height or args.size,
             out_dir=args.out,
             force=args.force,
             fmt=args.fmt,

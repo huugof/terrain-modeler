@@ -67,15 +67,15 @@ def _validate_outputs(outputs: Iterable[str]) -> set[str]:
     return set(parse_outputs(",".join(str(o) for o in outputs if o is not None)))
 
 
-def _national_job_name(lat: float, lon: float, size: float | None, units: str) -> str:
-    if size is None:
+def _national_job_name(lat: float, lon: float, width: float | None, height: float | None, units: str) -> str:
+    if width is None or height is None:
         return f"national_{lat:.5f}_{lon:.5f}"
-    suffix = f"{size:g}{units[0]}"
+    suffix = f"{width:g}x{height:g}{units[0]}"
     return f"national_{lat:.5f}_{lon:.5f}_{suffix}"
 
 
-def _image_job_name(lat: float, lon: float, size: float, units: str) -> str:
-    suffix = f"{size:g}{units[0]}"
+def _image_job_name(lat: float, lon: float, width: float, height: float, units: str) -> str:
+    suffix = f"{width:g}x{height:g}{units[0]}"
     return f"image_{lat:.5f}_{lon:.5f}_{suffix}"
 
 
@@ -94,8 +94,8 @@ def _stage_image_only(
 ) -> BuildResult:
     """Fast-path for image-only (naip) jobs. Returns a completed BuildResult."""
     logger = get_logger()
-    tile_name = cfg.tile_name or _image_job_name(lat, lon, cfg.size, cfg.units)
-    job_id = cfg.job_id or generate_job_id((lat, lon), cfg.size, cfg.units)
+    tile_name = cfg.tile_name or _image_job_name(lat, lon, cfg.width, cfg.height, cfg.units)
+    job_id = cfg.job_id or generate_job_id((lat, lon), cfg.width, cfg.height, cfg.units)
     tile_dir, job_id = allocate_output_dir(cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None)
     write_job_info(
         tile_dir / "README.txt",
@@ -104,7 +104,8 @@ def _stage_image_only(
         provider=cfg.provider,
         lat=lat,
         lon=lon,
-        clip_size=cfg.size,
+        clip_width=cfg.width,
+        clip_height=cfg.height,
         units=cfg.units,
         bbox_wgs84=None,
     )
@@ -112,11 +113,12 @@ def _stage_image_only(
     report_path = tile_dir / "report.json"
 
     logger.info("Stage 1/2: download NAIP image")
-    size_m = cfg.size / FEET_PER_METER if cfg.units == "feet" else cfg.size
-    half = size_m / 2.0
+    scale = 1.0 / FEET_PER_METER if cfg.units == "feet" else 1.0
+    half_x = cfg.width * scale / 2.0
+    half_y = cfg.height * scale / 2.0
     to_merc = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
     cx, cy = to_merc.transform(lon, lat)
-    bbox_3857 = (cx - half, cy - half, cx + half, cy + half)
+    bbox_3857 = (cx - half_x, cy - half_y, cx + half_x, cy + half_y)
     naip_tiled_used = _stage_download_naip(cfg, bbox_3857, terrain_tex_path, warnings)
 
     report: Dict[str, Any] = {
@@ -130,7 +132,8 @@ def _stage_image_only(
         "clip": {
             "enabled": True,
             "center_latlon": (lat, lon),
-            "size": cfg.size,
+            "width": cfg.width,
+            "height": cfg.height,
         },
         "naip": {
             "enabled": True,
@@ -304,25 +307,27 @@ def build(cfg: BuildConfig) -> BuildResult:
     if cfg.center is not None:
         lat, lon = cfg.center
 
-    if cfg.size is not None and (not math.isfinite(cfg.size) or cfg.size <= 0):
-        raise ValueError("--size must be a finite number greater than 0.")
-    if cfg.size is not None and (lat is None or lon is None):
-        raise ValueError("Provide --center when using --size.")
-    if (lat is not None or lon is not None) and cfg.size is None:
-        raise ValueError("Provide --size when using --center.")
+    for dim, val in (("--width", cfg.width), ("--height", cfg.height)):
+        if val is not None and (not math.isfinite(val) or val <= 0):
+            raise ValueError(f"{dim} must be a finite number greater than 0.")
+    has_size = cfg.width is not None and cfg.height is not None
+    if has_size and (lat is None or lon is None):
+        raise ValueError("Provide --center when using --width/--height.")
+    if (lat is not None or lon is not None) and not has_size:
+        raise ValueError("Provide --width and --height when using --center.")
 
-    if lat is None or lon is None or cfg.size is None:
-        raise ValueError("--center and --size are required.")
+    if lat is None or lon is None or not has_size:
+        raise ValueError("--center and --width/--height are required.")
 
-    clip_bbox_wgs84 = bbox_from_center_wgs84(lat, lon, cfg.size, cfg.units)
+    clip_bbox_wgs84 = bbox_from_center_wgs84(lat, lon, cfg.width, cfg.height, cfg.units)
     image_only = outputs == {"naip"}
 
     if image_only:
         return _stage_image_only(cfg, lat, lon, outputs, warnings, naip_tiled_used)
 
     cache_dir = cfg.out_dir / "_cache"
-    tile_name = cfg.tile_name or _national_job_name(lat, lon, cfg.size, cfg.units)
-    job_id = cfg.job_id or generate_job_id((lat, lon), cfg.size, cfg.units)
+    tile_name = cfg.tile_name or _national_job_name(lat, lon, cfg.width, cfg.height, cfg.units)
+    job_id = cfg.job_id or generate_job_id((lat, lon), cfg.width, cfg.height, cfg.units)
     tile_dir, job_id = allocate_output_dir(cfg.out_dir, job_id, fixed_job_id=cfg.job_id is not None)
 
     dtm_path = tile_dir / "dtm.tif"
@@ -338,7 +343,8 @@ def build(cfg: BuildConfig) -> BuildResult:
         provider=cfg.provider,
         lat=lat,
         lon=lon,
-        clip_size=cfg.size,
+        clip_width=cfg.width,
+        clip_height=cfg.height,
         units=cfg.units,
         bbox_wgs84=None,
     )
@@ -517,7 +523,8 @@ def build(cfg: BuildConfig) -> BuildResult:
         "clip": {
             "enabled": True,
             "center_latlon": (lat, lon),
-            "size": cfg.size,
+            "width": cfg.width,
+            "height": cfg.height,
         },
         "transform": {
             "flip_x": cfg.flip_x,

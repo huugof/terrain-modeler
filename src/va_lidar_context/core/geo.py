@@ -38,15 +38,14 @@ def bbox_contains(
 def bbox_from_center_wgs84(
     lat: float,
     lon: float,
-    size: float,
+    width: float,
+    height: float,
     units: str,
 ) -> BBoxWGS84:
-    """Compute a WGS84 bbox centered at (lat, lon) with a square size."""
-    if units == "feet":
-        size_m = size / FEET_PER_METER
-    else:
-        size_m = size
-    half = size_m / 2.0
+    """Compute a WGS84 bbox centered at (lat, lon) with separate east-west width and north-south height."""
+    scale = 1.0 / FEET_PER_METER if units == "feet" else 1.0
+    half_x = width * scale / 2.0
+    half_y = height * scale / 2.0
     # Use a local azimuthal equidistant projection so that meter offsets
     # represent true ground distances regardless of latitude (unlike Web
     # Mercator which distorts ~27% at lat 38°).
@@ -55,10 +54,10 @@ def bbox_from_center_wgs84(
     to_wgs = Transformer.from_crs(aeqd, "EPSG:4326", always_xy=True)
     cx, cy = to_aeqd.transform(lon, lat)
     corners = [
-        to_wgs.transform(cx - half, cy - half),
-        to_wgs.transform(cx - half, cy + half),
-        to_wgs.transform(cx + half, cy - half),
-        to_wgs.transform(cx + half, cy + half),
+        to_wgs.transform(cx - half_x, cy - half_y),
+        to_wgs.transform(cx - half_x, cy + half_y),
+        to_wgs.transform(cx + half_x, cy - half_y),
+        to_wgs.transform(cx + half_x, cy + half_y),
     ]
     xs = [c[0] for c in corners]
     ys = [c[1] for c in corners]

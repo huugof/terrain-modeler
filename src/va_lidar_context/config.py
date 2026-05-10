@@ -55,7 +55,8 @@ class BuildConfig:
     tile_name: str | None = None
     job_id: str | None = None
     center: tuple[float, float] | None = None  # (lat, lon)
-    size: float | None = DEFAULT_CLIP_SIZE
+    width: float | None = DEFAULT_CLIP_SIZE
+    height: float | None = DEFAULT_CLIP_SIZE
     out_dir: Path = DEFAULT_OUT_DIR
     force: bool = False
     fmt: str = DEFAULT_FORMAT

@@ -232,10 +232,10 @@ function getCoords() {
   return parseCoords(coordsInput.value);
 }
 
-function coverageKeyFor(lon, lat, size, units) {
-  const sizeNum = Number(size);
-  const sizeKey =
-    Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum.toFixed(2) : "none";
+function coverageKeyFor(lon, lat, width, height, units) {
+  const w = Number(width), h = Number(height);
+  const sizeKey = (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0)
+    ? `${w.toFixed(2)}x${h.toFixed(2)}` : "none";
   const unitsKey = units === "meters" ? "meters" : "feet";
   return `${lon.toFixed(4)},${lat.toFixed(4)},${sizeKey},${unitsKey}`;
 }
@@ -295,10 +295,13 @@ async function checkCoverage() {
     return;
   }
   const coords = getCoords();
-  const sizeInput = document.querySelector('input[name="size"]');
+  const widthInput = document.querySelector('input[name="width"]');
+  const heightInput = document.querySelector('input[name="height"]');
   const unitsInput = document.querySelector('select[name="units"]');
-  const sizeRaw = Number(sizeInput ? sizeInput.value : "");
-  const size = Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : null;
+  const widthRaw = Number(widthInput ? widthInput.value : "");
+  const heightRaw = Number(heightInput ? heightInput.value : "");
+  const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : null;
+  const height = Number.isFinite(heightRaw) && heightRaw > 0 ? heightRaw : null;
   const units = unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
   if (!coords) {
     coverageStatus = null;
@@ -308,15 +311,16 @@ async function checkCoverage() {
     updateAlerts();
     return;
   }
-  const key = coverageKeyFor(coords.lon, coords.lat, size, units);
+  const key = coverageKeyFor(coords.lon, coords.lat, width, height, units);
   const reqId = ++coverageRequestId;
   try {
     const params = new URLSearchParams({
       lon: String(coords.lon),
       lat: String(coords.lat),
     });
-    if (size !== null) {
-      params.set("size", String(size));
+    if (width !== null && height !== null) {
+      params.set("width", String(width));
+      params.set("height", String(height));
       params.set("units", units);
     }
     const resp = await fetch(`/coverage?${params.toString()}`, {
@@ -390,22 +394,19 @@ function updateAlerts() {
     return;
   }
   const coordsInput = document.querySelector('input[name="coords"]');
-  const sizeInput = document.querySelector('input[name="size"]');
+  const widthInput = document.querySelector('input[name="width"]');
+  const heightInput = document.querySelector('input[name="height"]');
   const unitsInput = document.querySelector('select[name="units"]');
-  const sizeFeet = mapSizeFeet(
-    sizeInput ? sizeInput.value : "",
-    unitsInput ? unitsInput.value : "feet",
-  );
-  const coverageSizeRaw = Number(sizeInput ? sizeInput.value : "");
-  const coverageSize =
-    Number.isFinite(coverageSizeRaw) && coverageSizeRaw > 0
-      ? coverageSizeRaw
-      : null;
-  const coverageUnits =
-    unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
+  const unitsVal = unitsInput ? unitsInput.value : "feet";
+  const widthFeet = mapSizeFeet(widthInput ? widthInput.value : "", unitsVal);
+  const heightFeet = mapSizeFeet(heightInput ? heightInput.value : "", unitsVal);
+  const sizeFeet = widthFeet !== null && heightFeet !== null ? Math.max(widthFeet, heightFeet) : null;
+  const coverageWidth = widthFeet !== null ? (unitsVal === "meters" ? widthFeet / 3.28084 : widthFeet) : null;
+  const coverageHeight = heightFeet !== null ? (unitsVal === "meters" ? heightFeet / 3.28084 : heightFeet) : null;
+  const coverageUnits = unitsVal === "meters" ? "meters" : "feet";
   const coords = coordsInput ? parseCoords(coordsInput.value) : null;
   const currentCoverageKey = coords
-    ? coverageKeyFor(coords.lon, coords.lat, coverageSize, coverageUnits)
+    ? coverageKeyFor(coords.lon, coords.lat, coverageWidth, coverageHeight, coverageUnits)
     : null;
   if (coordsInput && coordsInput.value.trim() && !coords) {
     setAlert('Coordinates are invalid. Use "lat, lon".', true);
@@ -698,7 +699,8 @@ function applyJobFormDefaults(formDefaults) {
   }
 
   setValue('input[name="job_name"]', formDefaults.job_name);
-  setValue('input[name="size"]', formDefaults.clip_size);
+  setValue('input[name="width"]', formDefaults.clip_width);
+  setValue('input[name="height"]', formDefaults.clip_height);
   setSelect('select[name="units"]', formDefaults.units);
   setValue('input[name="terrain_complexity"]', formDefaults.terrain_complexity);
   setValue('input[name="rotate_z"]', formDefaults.rotate_z);
@@ -734,7 +736,7 @@ function setFormRecordMode(locked) {
     });
   };
   disable(
-    'input[name="coords"], input[name="size"], select[name="units"], input[name="terrain_complexity"], input[name="rotate_z"], input[name="dxf_contour_spacing"], #xyz_mode, #runBtn',
+    'input[name="coords"], input[name="width"], input[name="height"], select[name="units"], input[name="terrain_complexity"], input[name="rotate_z"], input[name="dxf_contour_spacing"], #xyz_mode, #runBtn',
   );
   disable(
     "#output_terrain, #output_buildings, #output_contours, #output_naip, #output_xyz, #dxf_include_parcels, #dxf_include_buildings",
@@ -1963,20 +1965,23 @@ const _terrainPreview = (() => {
     for (const ln of outlineLines) { scene.remove(ln); ln.geometry.dispose(); ln.material.dispose(); }
     outlineLines = [];
 
-    const sizeInput = document.querySelector('input[name="size"]');
+    const widthInput = document.querySelector('input[name="width"]');
+    const heightInput = document.querySelector('input[name="height"]');
     const unitsInput = document.querySelector('select[name="units"]');
-    const rawSize = sizeInput ? parseFloat(sizeInput.value) : NaN;
+    const rawWidth = widthInput ? parseFloat(widthInput.value) : NaN;
+    const rawHeight = heightInput ? parseFloat(heightInput.value) : NaN;
     const units = (unitsInput && unitsInput.value) || "feet";
-    if (!Number.isFinite(rawSize) || rawSize <= 0) return;
+    if (!Number.isFinite(rawWidth) || rawWidth <= 0 || !Number.isFinite(rawHeight) || rawHeight <= 0) return;
 
-    const sizeFt = units === "meters" ? rawSize * 3.28084 : rawSize;
-    const frac = Math.min(sizeFt / meshContextFt, 1.0);
+    const toFt = units === "meters" ? 3.28084 : 1;
+    const fracX = Math.min((rawWidth * toFt) / meshContextFt, 1.0);
+    const fracY = Math.min((rawHeight * toFt) / meshContextFt, 1.0);
 
     const rows = meshRows, cols = meshCols;
-    const rStart = Math.max(0, Math.floor(rows * (1 - frac) / 2));
-    const rEnd = Math.min(rows - 1, Math.ceil(rows * (1 + frac) / 2) - 1);
-    const cStart = Math.max(0, Math.floor(cols * (1 - frac) / 2));
-    const cEnd = Math.min(cols - 1, Math.ceil(cols * (1 + frac) / 2) - 1);
+    const rStart = Math.max(0, Math.floor(rows * (1 - fracY) / 2));
+    const rEnd = Math.min(rows - 1, Math.ceil(rows * (1 + fracY) / 2) - 1);
+    const cStart = Math.max(0, Math.floor(cols * (1 - fracX) / 2));
+    const cEnd = Math.min(cols - 1, Math.ceil(cols * (1 + fracX) / 2) - 1);
     if (rEnd <= rStart || cEnd <= cStart) return;
 
     function _vtx(r, c) {
@@ -2330,7 +2335,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const xyzMode = document.getElementById("xyz_mode");
   const dxfParcels = document.getElementById("dxf_include_parcels");
   const coords = document.querySelector('input[name="coords"]');
-  const mapSizeInput = document.querySelector('input[name="size"]');
+  const mapWidthInput = document.querySelector('input[name="width"]');
+  const mapHeightInput = document.querySelector('input[name="height"]');
   const units = document.querySelector('select[name="units"]');
   if (contours) contours.addEventListener("change", updateUiToggles);
   if (dxfParcels) dxfParcels.addEventListener("change", updateAlerts);
@@ -2345,12 +2351,9 @@ document.addEventListener("DOMContentLoaded", () => {
       scheduleCoverageCheck();
       _terrainPreview.schedule();
     });
-  if (mapSizeInput)
-    mapSizeInput.addEventListener("input", () => {
-      updateAlerts();
-      scheduleCoverageCheck();
-      _terrainPreview.updateOutline();
-    });
+  const onSizeInput = () => { updateAlerts(); scheduleCoverageCheck(); _terrainPreview.updateOutline(); };
+  if (mapWidthInput) mapWidthInput.addEventListener("input", onSizeInput);
+  if (mapHeightInput) mapHeightInput.addEventListener("input", onSizeInput);
   if (units)
     units.addEventListener("change", () => {
       updateUnitLabels();

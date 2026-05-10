@@ -161,22 +161,32 @@
                     <input type="hidden" name="job_name" value="{{ defaults.job_name }}" />
                     <div class="grid two-col">
                         <div>
-                            <label>Map Size</label>
+                            <label>Width (E–W)</label>
                             <input
-                                id="mapSizeInput"
+                                id="mapWidthInput"
                                 type="number"
                                 step="any"
-                                name="size"
-                                value="{{ defaults.clip_size }}"
+                                name="width"
+                                value="{{ defaults.clip_width }}"
                             />
                         </div>
                         <div>
-                            <label>Units</label>
-                            <select name="units">
-                                <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
-                                <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
-                            </select>
+                            <label>Height (N–S)</label>
+                            <input
+                                id="mapHeightInput"
+                                type="number"
+                                step="any"
+                                name="height"
+                                value="{{ defaults.clip_height }}"
+                            />
                         </div>
+                    </div>
+                    <div>
+                        <label>Units</label>
+                        <select name="units">
+                            <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
+                            <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
+                        </select>
                     </div>
 
                     <div class="outputs-block">

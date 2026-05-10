@@ -551,18 +551,22 @@ def coverage():
     if lon is None or lat is None:
         return jsonify({"supported": None, "error": "Invalid coordinates"}), 400
 
-    size = parse_float(request.args.get("size"))
+    width = parse_float(request.args.get("width"))
+    height = parse_float(request.args.get("height"))
     units_raw = (request.args.get("units") or "").strip().lower()
     units = units_raw if units_raw in ("feet", "meters") else None
-    if size is not None and size <= 0:
-        size = None
+    if width is not None and width <= 0:
+        width = None
+    if height is not None and height <= 0:
+        height = None
 
     provider = resolve_provider(lat, lon)
-    use_bbox_check = provider != "va" and size is not None and units in ("feet", "meters")
+    use_bbox_check = provider != "va" and width is not None and height is not None and units in ("feet", "meters")
     cache_key = coverage_cache_key(
         lon,
         lat,
-        size=size if use_bbox_check else None,
+        width=width if use_bbox_check else None,
+        height=height if use_bbox_check else None,
         units=units if use_bbox_check else None,
     )
     now = time.time()
@@ -587,7 +591,7 @@ def coverage():
     else:
         try:
             if use_bbox_check:
-                bbox = bbox_from_center_wgs84(lat, lon, size, units)
+                bbox = bbox_from_center_wgs84(lat, lon, width, height, units)
                 supported = bool(query_for_bbox(bbox))
             else:
                 supported = bool(query_for_point(lon, lat))
@@ -626,7 +630,7 @@ def terrain_preview():
         PREVIEW_SIZE = 256
         context_m = CONTEXT_FT * 0.3048
         preview_resolution = context_m / PREVIEW_SIZE
-        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=preview_resolution)
 
@@ -683,7 +687,7 @@ def satellite_preview():
         from ..providers.usgs_3dep import fetch_satellite
 
         CONTEXT_FT = 20000
-        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         png_path = fetch_satellite(bbox, cache_dir, px=512)
         return send_file(png_path, mimetype="image/png")
@@ -704,7 +708,7 @@ def buildings_preview():
         from ..providers.ms_buildings import fetch_buildings_with_heights
 
         CONTEXT_FT = 20000
-        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, "feet")
+        bbox = bbox_from_center_wgs84(lat, lon, CONTEXT_FT, CONTEXT_FT, "feet")
         cache_dir = _settings.OUT_DIR
         geojson = fetch_buildings_with_heights(bbox, cache_dir)
         geojson["bbox"] = list(bbox)
@@ -743,7 +747,8 @@ def run_job():
     lat = parsed_form.lat
     lon = parsed_form.lon
     provider = parsed_form.provider
-    clip_size = parsed_form.clip_size
+    clip_width = parsed_form.clip_width
+    clip_height = parsed_form.clip_height
     center = parsed_form.center
     resolution = DEFAULT_RESOLUTION
     terrain_complexity = parsed_form.terrain_complexity
@@ -791,7 +796,7 @@ def run_job():
     allow_multi_tile = True
     force = False
 
-    job_id = generate_job_id(center, clip_size, units)
+    job_id = generate_job_id(center, clip_width, clip_height, units)
     cfg = BuildConfig(
         job_id=job_id,
         center=center,
@@ -821,7 +826,8 @@ def run_job():
         naip_flip_v=naip_flip_v,
         combine_output=combine_output,
         contour_interval=contour_interval,
-        size=clip_size,
+        width=clip_width,
+        height=clip_height,
         allow_multi_tile=allow_multi_tile,
         prefer_ept=DEFAULT_PREFER_EPT,
         flip_y=flip_y,
@@ -841,7 +847,7 @@ def run_job():
 
     target_summary = None
     if lat is not None and lon is not None:
-        target_summary = f"latlon:{lat},{lon} size={clip_size}"
+        target_summary = f"latlon:{lat},{lon} size={clip_width}x{clip_height}"
 
     summary = {
         "out": str(out_dir),
@@ -852,7 +858,8 @@ def run_job():
         "custom_name": custom_name,
         "form_defaults": extract_form_defaults(
             coords=f"{lat},{lon}",
-            clip_size=clip_size,
+            clip_width=clip_width,
+            clip_height=clip_height,
             units=units,
             terrain_complexity=terrain_complexity,
             rotate_z=rotate_z,
