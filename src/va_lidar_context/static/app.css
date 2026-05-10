@@ -726,6 +726,11 @@ body.jobs-panel-open .layout-preview-col::after {
         grid-template-columns: 1fr;
     }
 }
+#mapWidthInput::-webkit-outer-spin-button,
+#mapWidthInput::-webkit-inner-spin-button,
+#mapHeightInput::-webkit-outer-spin-button,
+#mapHeightInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#mapWidthInput, #mapHeightInput { -moz-appearance: textfield; }
 .app-card label {
     display: block;
     font-size: 12px;

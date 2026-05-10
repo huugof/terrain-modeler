@@ -159,9 +159,9 @@
                         />
                     </div>
                     <input type="hidden" name="job_name" value="{{ defaults.job_name }}" />
-                    <div class="grid two-col">
+                    <div class="grid" style="grid-template-columns: 1fr 1fr auto;">
                         <div>
-                            <label>Width (E–W)</label>
+                            <label>Width (E/W)</label>
                             <input
                                 id="mapWidthInput"
                                 type="number"
@@ -171,7 +171,7 @@
                             />
                         </div>
                         <div>
-                            <label>Height (N–S)</label>
+                            <label>Height (N/S)</label>
                             <input
                                 id="mapHeightInput"
                                 type="number"
@@ -180,13 +180,13 @@
                                 value="{{ defaults.clip_height }}"
                             />
                         </div>
-                    </div>
-                    <div>
-                        <label>Units</label>
-                        <select name="units">
-                            <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
-                            <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
-                        </select>
+                        <div>
+                            <label>Units</label>
+                            <select name="units">
+                                <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
+                                <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div class="outputs-block">
