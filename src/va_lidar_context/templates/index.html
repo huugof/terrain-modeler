@@ -196,14 +196,12 @@
                             <button type="button" class="output-toggle-btn {% if defaults.output_contours %}active{% endif %}" data-input="output_contours" title="contours.dxf">Contours</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_xyz %}active{% endif %}" data-input="output_xyz" title="terrain.xyz">Point Cloud</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_naip %}active{% endif %}" data-input="output_naip" title="terrain.png">Satellite Image</button>
-                            <button type="button" class="output-toggle-btn {% if defaults.output_terrain %}active{% endif %}" data-input="output_terrain" title="terrain.obj">Mesh</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_buildings %}active{% endif %}" data-input="output_buildings" title="buildings.obj">Buildings</button>
-                            <button type="button" class="output-toggle-btn output-toggle-btn-placeholder" disabled aria-hidden="true" tabindex="-1"></button>
                         </div>
                         <input type="checkbox" id="output_contours" name="output_contours" class="visually-hidden" {% if defaults.output_contours %}checked{% endif %} />
                         <input type="checkbox" id="output_xyz" name="output_xyz" class="visually-hidden" {% if defaults.output_xyz %}checked{% endif %} />
                         <input type="checkbox" id="output_naip" name="output_naip" class="visually-hidden" {% if defaults.output_naip %}checked{% endif %} />
-                        <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" {% if defaults.output_terrain %}checked{% endif %} />
+                        <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" checked />
                         <input type="checkbox" id="output_buildings" name="output_buildings" class="visually-hidden" {% if defaults.output_buildings %}checked{% endif %} />
                     </div>
 
