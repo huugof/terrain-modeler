@@ -146,6 +146,11 @@ function getActiveDownloadJob() {
 function updatePreviewDownloadButton() {
   const downloadBtn = document.getElementById("previewDownloadButton");
   if (!downloadBtn) return;
+  if (!formRecordMode) {
+    downloadBtn.disabled = true;
+    delete downloadBtn.dataset.downloadUrl;
+    return;
+  }
   const activeJob = getActiveDownloadJob();
   const url =
     activeJob && typeof activeJob.download_all_url === "string"
@@ -773,6 +778,7 @@ function setFormRecordMode(locked) {
     coverageError = "";
     setAlert("", false);
   }
+  updatePreviewDownloadButton();
 }
 
 function applyNewBuildDefaults() {
@@ -1629,12 +1635,14 @@ async function runBuild(event) {
     const jobPreviewUrl = `/jobs/${encodeURIComponent(data.job_id)}?tab=preview`;
     currentPreviewPath = normalizePreviewPath(jobPreviewUrl);
     try { localStorage.setItem(LAST_PREVIEW_KEY, jobPreviewUrl); } catch (e) {}
-    updatePreviewNavButtons();
-    rerenderRecentJobsIfMounted();
   }
   await refreshRecentJobs();
-  runBtn.disabled = formRecordMode;
-  runBtn.textContent = originalText;
+  if (buildSucceeded) {
+    setFormRecordMode(true);
+  } else {
+    runBtn.disabled = false;
+    runBtn.textContent = originalText;
+  }
 }
 
 // ---- Inline preview panel ----
