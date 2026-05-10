@@ -749,10 +749,14 @@ function setFormRecordMode(locked) {
       btn.disabled = formRecordMode;
     });
   const runBtn = document.getElementById("runBtn");
+  const unlockBtn = document.getElementById("unlockBtn");
   if (runBtn) {
     runBtn.disabled = formRecordMode;
-    runBtn.textContent = formRecordMode ? "Locked" : "Build";
+    runBtn.style.display = formRecordMode ? "none" : "";
     runBtn.classList.toggle("locked", formRecordMode);
+  }
+  if (unlockBtn) {
+    unlockBtn.style.display = formRecordMode ? "" : "none";
   }
   const form = document.querySelector("form.card");
   if (form) {
@@ -2226,6 +2230,14 @@ document.addEventListener("DOMContentLoaded", () => {
     newJobButton.addEventListener("click", (event) => {
       event.preventDefault();
       applyNewBuildDefaults();
+    });
+  }
+  const unlockBtn = document.getElementById("unlockBtn");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", () => {
+      setFormRecordMode(false);
+      scheduleCoverageCheck();
+      updateAlerts();
     });
   }
   const jobsPanel = document.getElementById("recentJobsPanel");
