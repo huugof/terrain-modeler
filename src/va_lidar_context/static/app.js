@@ -819,10 +819,16 @@ function applyNewBuildDefaults() {
 function applyRecentJobPreview(previewUrl, formDefaults) {
   setFormRecordMode(true);
   if (previewUrl) {
-    setInlinePreview(previewUrl);
+    currentPreviewPath = normalizePreviewPath(previewUrl);
+    try { localStorage.setItem(LAST_PREVIEW_KEY, previewUrl); } catch (e) {}
+    updatePreviewNavButtons();
+    rerenderRecentJobsIfMounted();
   }
+  const demo = document.getElementById("inlinePreviewDemo");
+  if (demo) demo.classList.remove("hidden");
   applyJobFormDefaults(formDefaults);
   setFormRecordMode(true);
+  _terrainPreview.schedule();
 }
 
 function initPreviewNavButtons() {
@@ -1617,7 +1623,10 @@ async function runBuild(event) {
   setInlineBuildingOverlay(false);
   if (buildSucceeded && data && data.job_id) {
     const jobPreviewUrl = `/jobs/${encodeURIComponent(data.job_id)}?tab=preview`;
-    setInlinePreview(jobPreviewUrl);
+    currentPreviewPath = normalizePreviewPath(jobPreviewUrl);
+    try { localStorage.setItem(LAST_PREVIEW_KEY, jobPreviewUrl); } catch (e) {}
+    updatePreviewNavButtons();
+    rerenderRecentJobsIfMounted();
   }
   await refreshRecentJobs();
   runBtn.disabled = formRecordMode;
