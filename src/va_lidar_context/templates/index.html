@@ -217,19 +217,6 @@
                             </div>
                         </div>
 
-                        <div id="rotationSection">
-                            <label
-                                title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point. terrain.png stays north-up on disk, while texture mapping remains aligned to the rotated terrain mesh."
-                                >North (degrees)</label
-                            >
-                            <input
-                                id="northInput"
-                                type="number"
-                                step="any"
-                                name="rotate_z"
-                                value="{{ defaults.rotate_z }}"
-                            />
-                        </div>
 
                         <div id="contourSmoothingSection">
                             <label title="Lower values preserve sharper contour detail. Higher values produce cleaner, simpler lines.">Contour Smoothing</label>
@@ -339,13 +326,17 @@
                             </div>
                         </div>
 
+                        <input type="hidden" name="xyz_mode" value="{{ defaults.xyz_mode or 'grid' }}" />
                         <div class="grid two-col">
-                            <div id="xyzSamplingSection">
-                                <label>Point Cloud</label>
-                                <select id="xyz_mode" name="xyz_mode">
-                                    <option value="contours" {% if defaults.xyz_mode is equalto 'contours' %}selected{% endif %}>Contours</option>
-                                    <option value="grid" {% if defaults.xyz_mode is equalto 'grid' %}selected{% endif %}>Uniform Grid</option>
-                                </select>
+                            <div id="rotationSection">
+                                <label title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point.">North (degrees)</label>
+                                <input
+                                    id="northInput"
+                                    type="number"
+                                    step="any"
+                                    name="rotate_z"
+                                    value="{{ defaults.rotate_z }}"
+                                />
                             </div>
                             <div id="imageQualitySection">
                                 <label>Image Quality</label>
