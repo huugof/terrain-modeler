@@ -2014,12 +2014,14 @@ const _terrainPreview = (() => {
     // Use CSS logical pixels, not physical pixels, for LineMaterial resolution
     const cw = renderer.domElement.clientWidth || renderer.domElement.width;
     const ch = renderer.domElement.clientHeight || renderer.domElement.height;
+    const sideLenScene = frac * 100;
+    const cycle = sideLenScene / 10;
     const outlineMat = new LineMaterial({
       color: 0xff7700,
       linewidth: 6,
       dashed: true,
-      dashSize: 10,
-      gapSize: 5,
+      dashSize: cycle * (2 / 3),
+      gapSize: cycle * (1 / 3),
       resolution: new THREE.Vector2(cw, ch),
     });
 

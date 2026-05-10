@@ -619,7 +619,6 @@ def terrain_preview():
 
     try:
         import rasterio
-        from rasterio.enums import Resampling
 
         from ..providers.usgs_3dep import fetch_dtm
 
@@ -631,26 +630,37 @@ def terrain_preview():
         cache_dir = _settings.OUT_DIR
         dtm_path, _ = fetch_dtm(bbox, cache_dir, resolution=preview_resolution)
 
+        import numpy as np
+        from rasterio.fill import fillnodata
+
         with rasterio.open(dtm_path) as src:
-            data = src.read(1).tolist()
+            arr = src.read(1)
             nodata = src.nodata
+
+        nodata_val = nodata if nodata is not None else -9999
+        nodata_mask = (arr != nodata_val).astype(np.uint8)
+        if nodata_mask.any() and not nodata_mask.all():
+            arr = fillnodata(arr, mask=nodata_mask, max_search_distance=256, smoothing_iterations=0)
+        data = arr.tolist()
 
         grid = []
         flat = [v for row in data for v in row]
-        valid = [v for v in flat if nodata is None or v != nodata]
+        valid = [v for v in flat if nodata is None or v != nodata_val]
         min_elev = float(min(valid)) if valid else 0.0
         max_elev = float(max(valid)) if valid else 0.0
-        scale = 1.0 / 0.3048  # always return elevations in feet
+        scale = 1.0 / 0.3048
         for row in data:
             grid.append([
-                round(v * scale, 2) if (nodata is None or v != nodata) else None
+                round(v * scale, 2) if (nodata is None or v != nodata_val) else None
                 for v in row
             ])
 
+        actual_rows = arr.shape[0]
+        actual_cols = arr.shape[1]
         return jsonify({
             "grid": grid,
-            "cols": PREVIEW_SIZE,
-            "rows": PREVIEW_SIZE,
+            "cols": actual_cols,
+            "rows": actual_rows,
             "min_elev": round(min_elev * scale, 2),
             "max_elev": round(max_elev * scale, 2),
             "context_size_ft": CONTEXT_FT,
