@@ -49,17 +49,6 @@
             >
                 <i data-lucide="download"></i>
             </button>
-            <button
-                type="button"
-                id="buildingsToggle"
-                class="theme-toggle buildings-toggle"
-                aria-label="Toggle buildings in preview"
-                title="Toggle buildings in preview"
-                aria-pressed="false"
-                disabled
-            >
-                <i data-lucide="house"></i>
-            </button>
             {% if auth_enabled and current_user %}
             {% set top_profile_display = current_user.get('name') or current_user.email %}
             <div id="topProfileShell" class="profile-shell">
