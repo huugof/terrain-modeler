@@ -38,7 +38,8 @@ def allocate_output_dir(
 
 def generate_job_id(
     center: tuple[float, float] | None,
-    clip_size: float | None,
+    clip_width: float | None,
+    clip_height: float | None,
     units: str | None,
     *,
     time_ns: int | None = None,
@@ -51,7 +52,10 @@ def generate_job_id(
         center_text = "n/a"
     else:
         center_text = f"{center[0]:.6f},{center[1]:.6f}"
-    size_text = "n/a" if clip_size is None else f"{clip_size:g}"
+    if clip_width is None or clip_height is None:
+        size_text = "n/a"
+    else:
+        size_text = f"{clip_width:g}x{clip_height:g}"
     units_text = units or "n/a"
     payload = f"{center_text}|{size_text}|{units_text}|{time_ns}"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -66,7 +70,8 @@ def write_job_info(
     provider: str,
     lat: float | None,
     lon: float | None,
-    clip_size: float | None,
+    clip_width: float | None,
+    clip_height: float | None,
     units: str,
     bbox_wgs84: Dict[str, float] | None,
 ) -> None:
@@ -86,8 +91,8 @@ def write_job_info(
     else:
         center_text = "n/a"
 
-    if clip_size is not None:
-        size_text = f"{clip_size:g} {units}"
+    if clip_width is not None and clip_height is not None:
+        size_text = f"{clip_width:g} x {clip_height:g} {units}"
     else:
         size_text = "n/a"
 

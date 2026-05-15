@@ -19,6 +19,7 @@ from .config import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_RESOLUTION,
     DEFAULT_ROTATE_Z,
+    DEFAULT_CONTOUR_SAMPLE,
     DEFAULT_TERRAIN_SAMPLE,
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,
@@ -78,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_cmd.add_argument("--floor-to-floor", type=float, default=10.0)
     build_cmd.add_argument("--keep-rasters", action="store_true")
     build_cmd.add_argument("--terrain-sample", type=int, default=DEFAULT_TERRAIN_SAMPLE)
+    build_cmd.add_argument("--contour-sample", type=int, default=DEFAULT_CONTOUR_SAMPLE)
     build_cmd.add_argument("--fill-dtm", action="store_true")
     build_cmd.add_argument("--fill-hard", action="store_true")
     build_cmd.add_argument("--fill-max-dist", type=float, default=DEFAULT_FILL_MAX_DIST)
@@ -170,7 +172,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         type=float,
         default=None,
-        help="Clip size (square) in output units. Required with --center.",
+        help="Square clip size in output units (sets both --width and --height).",
+    )
+    build_cmd.add_argument(
+        "--width",
+        type=float,
+        default=None,
+        help="East-west clip size in output units. Required with --center (or use --size).",
+    )
+    build_cmd.add_argument(
+        "--height",
+        type=float,
+        default=None,
+        help="North-south clip size in output units. Required with --center (or use --size).",
     )
     build_cmd.add_argument(
         "--allow-multi-tile",
@@ -202,7 +216,8 @@ def main() -> int:
         cfg = BuildConfig(
             tile_name=args.tile_name,
             center=tuple(args.center) if args.center else None,
-            size=args.size,
+            width=args.width or args.size,
+            height=args.height or args.size,
             out_dir=args.out,
             force=args.force,
             fmt=args.fmt,
@@ -214,6 +229,7 @@ def main() -> int:
             floor_to_floor=args.floor_to_floor,
             keep_rasters=args.keep_rasters,
             terrain_sample=args.terrain_sample,
+            contour_sample=args.contour_sample,
             fill_dtm=args.fill_dtm,
             fill_hard=args.fill_hard,
             fill_max_dist=args.fill_max_dist,

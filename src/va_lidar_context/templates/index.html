@@ -49,28 +49,6 @@
             >
                 <i data-lucide="download"></i>
             </button>
-            <button
-                type="button"
-                id="wireframeToggle"
-                class="theme-toggle wireframe-toggle"
-                aria-label="Toggle wireframe preview"
-                title="Toggle wireframe preview"
-                aria-pressed="false"
-                disabled
-            >
-                <i data-lucide="box"></i>
-            </button>
-            <button
-                type="button"
-                id="buildingsToggle"
-                class="theme-toggle buildings-toggle"
-                aria-label="Toggle buildings in preview"
-                title="Toggle buildings in preview"
-                aria-pressed="false"
-                disabled
-            >
-                <i data-lucide="house"></i>
-            </button>
             {% if auth_enabled and current_user %}
             {% set top_profile_display = current_user.get('name') or current_user.email %}
             <div id="topProfileShell" class="profile-shell">
@@ -109,22 +87,8 @@
             <div class="layout-preview-col" id="inlinePreviewCol">
                 <div class="inline-preview-panel" id="inlinePreviewPanel">
                     <div class="inline-preview-demo" id="inlinePreviewDemo" aria-hidden="true">
-                        <svg class="inline-preview-demo-graphic" viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <defs>
-                                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stop-color="currentColor" stop-opacity="0.06"/>
-                                    <stop offset="100%" stop-color="currentColor" stop-opacity="0.01"/>
-                                </linearGradient>
-                            </defs>
-                            <rect width="400" height="260" fill="url(#sky)"/>
-                            <polyline points="20,220 60,210 100,200 140,195 180,200 220,205 260,200 300,190 340,195 380,205" fill="none" stroke="currentColor" stroke-opacity="0.18" stroke-width="1.5"/>
-                            <polyline points="20,200 60,185 100,170 140,160 180,165 220,175 260,165 300,150 340,158 380,175" fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5"/>
-                            <polyline points="30,180 70,160 110,140 150,125 190,130 230,145 270,130 310,112 350,122 385,140" fill="none" stroke="currentColor" stroke-opacity="0.26" stroke-width="1.5"/>
-                            <polyline points="50,162 90,138 130,115 170,96 210,100 250,118 290,100 325,82 360,95 390,112" fill="none" stroke="currentColor" stroke-opacity="0.30" stroke-width="1.5"/>
-                            <polyline points="80,148 120,120 160,92 200,72 240,78 275,96 308,78 340,62 372,76 395,92" fill="none" stroke="currentColor" stroke-opacity="0.34" stroke-width="1.5"/>
-                            <polyline points="120,138 158,106 196,76 230,55 265,62 295,80 325,62 355,46 382,60" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
-                        </svg>
-                        <p class="inline-preview-demo-label">Save to preview model</p>
+                        <canvas id="terrainPreviewCanvas" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+                        <p class="inline-preview-demo-label" id="terrainPreviewLabel" style="position:relative;z-index:1;margin-left:calc(var(--form-card-width) + 5vh);">Enter coordinates to preview terrain</p>
                     </div>
                     <iframe
                         id="inlinePreviewFrame"
@@ -195,23 +159,33 @@
                         />
                     </div>
                     <input type="hidden" name="job_name" value="{{ defaults.job_name }}" />
-                    <div class="grid two-col">
+                    <input type="hidden" name="units" value="feet" />
+                    <div class="grid" style="grid-template-columns: 1fr 1fr;">
                         <div>
-                            <label>Map Size</label>
-                            <input
-                                id="mapSizeInput"
-                                type="number"
-                                step="any"
-                                name="size"
-                                value="{{ defaults.clip_size }}"
-                            />
+                            <label>Width (E/W)</label>
+                            <div class="size-input-row">
+                                <input
+                                    id="mapWidthInput"
+                                    type="number"
+                                    step="any"
+                                    name="width"
+                                    value="{{ defaults.clip_width }}"
+                                />
+                                <span class="size-unit-suffix">ft</span>
+                            </div>
                         </div>
                         <div>
-                            <label>Units</label>
-                            <select name="units">
-                                <option value="feet" {% if defaults.units is equalto 'feet' %}selected{% endif %}>feet</option>
-                                <option value="meters" {% if defaults.units is equalto 'meters' %}selected{% endif %}>meters</option>
-                            </select>
+                            <label>Height (N/S)</label>
+                            <div class="size-input-row">
+                                <input
+                                    id="mapHeightInput"
+                                    type="number"
+                                    step="any"
+                                    name="height"
+                                    value="{{ defaults.clip_height }}"
+                                />
+                                <span class="size-unit-suffix">ft</span>
+                            </div>
                         </div>
                     </div>
 
@@ -221,14 +195,12 @@
                             <button type="button" class="output-toggle-btn {% if defaults.output_contours %}active{% endif %}" data-input="output_contours" title="contours.dxf">Contours</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_xyz %}active{% endif %}" data-input="output_xyz" title="terrain.xyz">Point Cloud</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_naip %}active{% endif %}" data-input="output_naip" title="terrain.png">Satellite Image</button>
-                            <button type="button" class="output-toggle-btn {% if defaults.output_terrain %}active{% endif %}" data-input="output_terrain" title="terrain.obj">Mesh</button>
                             <button type="button" class="output-toggle-btn {% if defaults.output_buildings %}active{% endif %}" data-input="output_buildings" title="buildings.obj">Buildings</button>
-                            <button type="button" class="output-toggle-btn output-toggle-btn-placeholder" disabled aria-hidden="true" tabindex="-1"></button>
                         </div>
                         <input type="checkbox" id="output_contours" name="output_contours" class="visually-hidden" {% if defaults.output_contours %}checked{% endif %} />
                         <input type="checkbox" id="output_xyz" name="output_xyz" class="visually-hidden" {% if defaults.output_xyz %}checked{% endif %} />
                         <input type="checkbox" id="output_naip" name="output_naip" class="visually-hidden" {% if defaults.output_naip %}checked{% endif %} />
-                        <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" {% if defaults.output_terrain %}checked{% endif %} />
+                        <input type="checkbox" id="output_terrain" name="output_terrain" class="visually-hidden" checked />
                         <input type="checkbox" id="output_buildings" name="output_buildings" class="visually-hidden" {% if defaults.output_buildings %}checked{% endif %} />
                     </div>
 
@@ -255,19 +227,6 @@
                             </div>
                         </div>
 
-                        <div id="rotationSection">
-                            <label
-                                title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point. terrain.png stays north-up on disk, while texture mapping remains aligned to the rotated terrain mesh."
-                                >North (degrees)</label
-                            >
-                            <input
-                                id="northInput"
-                                type="number"
-                                step="any"
-                                name="rotate_z"
-                                value="{{ defaults.rotate_z }}"
-                            />
-                        </div>
 
                         <div id="contourSmoothingSection">
                             <label title="Lower values preserve sharper contour detail. Higher values produce cleaner, simpler lines.">Contour Smoothing</label>
@@ -377,13 +336,17 @@
                             </div>
                         </div>
 
+                        <input type="hidden" name="xyz_mode" value="{{ defaults.xyz_mode or 'grid' }}" />
                         <div class="grid two-col">
-                            <div id="xyzSamplingSection">
-                                <label>Point Cloud</label>
-                                <select id="xyz_mode" name="xyz_mode">
-                                    <option value="contours" {% if defaults.xyz_mode is equalto 'contours' %}selected{% endif %}>Contours</option>
-                                    <option value="grid" {% if defaults.xyz_mode is equalto 'grid' %}selected{% endif %}>Uniform Grid</option>
-                                </select>
+                            <div id="rotationSection">
+                                <label title="Degrees from true north (+Y). Positive is counter-clockwise, negative is clockwise. Rotates meshes and DXF/XYZ around the --center point.">North (degrees)</label>
+                                <input
+                                    id="northInput"
+                                    type="number"
+                                    step="any"
+                                    name="rotate_z"
+                                    value="{{ defaults.rotate_z }}"
+                                />
                             </div>
                             <div id="imageQualitySection">
                                 <label>Image Quality</label>
@@ -415,6 +378,7 @@
                 <div class="form-footer">
                     <div id="parcelAlert" class="status hidden"></div>
                     <div class="footer-divider"></div>
+                    <button type="button" class="btn btn-full secondary" id="unlockBtn" style="display:none;">Unlock</button>
                     <button class="btn btn-full" id="runBtn" type="submit">
                         Build
                     </button>
@@ -570,6 +534,18 @@
             recentJobsLimit: {{ recent_jobs_limit | tojson }},
           };
         </script>
-        <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='app.js') }}?v={{ build_hash }}" defer></script>
+        <script type="module">
+          import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
+          import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm';
+          import { Line2 } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/lines/Line2.js/+esm';
+          import { LineGeometry } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/lines/LineGeometry.js/+esm';
+          import { LineMaterial } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/lines/LineMaterial.js/+esm';
+          window.__THREE__ = THREE;
+          window.__OrbitControls__ = OrbitControls;
+          window.__Line2__ = Line2;
+          window.__LineGeometry__ = LineGeometry;
+          window.__LineMaterial__ = LineMaterial;
+        </script>
     </body>
 </html>

@@ -49,7 +49,8 @@ class ParsedRunForm:
     custom_name: str
     lat: float
     lon: float
-    clip_size: float
+    clip_width: float
+    clip_height: float
     units: str
     provider: str
     terrain_complexity: int
@@ -164,13 +165,14 @@ def parse_run_form(
     if lat is None or lon is None:
         return None, "Provide coordinates as lat, lon."
 
-    clip_size = parse_float(form.get("size"))
-    if clip_size is None:
-        return None, "Provide a clip size."
-    if clip_size <= 0:
-        return None, "Clip size must be greater than 0."
-    if clip_size > max_clip_size:
-        return None, f"Clip size exceeds max ({max_clip_size:g})."
+    clip_width = parse_float(form.get("width"))
+    clip_height = parse_float(form.get("height"))
+    if clip_width is None or clip_height is None:
+        return None, "Provide both width and height."
+    if clip_width <= 0 or clip_height <= 0:
+        return None, "Width and height must be greater than 0."
+    if clip_width > max_clip_size or clip_height > max_clip_size:
+        return None, f"Size exceeds max ({max_clip_size:g})."
 
     terrain_complexity = parse_int(form.get("terrain_complexity"))
     if terrain_complexity is None:
@@ -226,7 +228,8 @@ def parse_run_form(
             custom_name=custom_name,
             lat=lat,
             lon=lon,
-            clip_size=clip_size,
+            clip_width=clip_width,
+            clip_height=clip_height,
             units=units,
             provider=resolve_provider(lat, lon),
             terrain_complexity=terrain_complexity,
@@ -327,12 +330,13 @@ def coverage_cache_key(
     lon: float,
     lat: float,
     *,
-    size: float | None = None,
+    width: float | None = None,
+    height: float | None = None,
     units: str | None = None,
 ) -> str:
-    if size is None or units not in ("feet", "meters"):
+    if width is None or height is None or units not in ("feet", "meters"):
         return f"{round(lon, 4)},{round(lat, 4)}"
-    return f"{round(lon, 4)},{round(lat, 4)},{round(size, 2)},{units}"
+    return f"{round(lon, 4)},{round(lat, 4)},{round(width, 2)}x{round(height, 2)},{units}"
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +355,8 @@ def snapshot_defaults() -> Dict[str, Any]:
         "center1": DEFAULT_PREVIEW_CENTER[0],
         "center2": DEFAULT_PREVIEW_CENTER[1],
         "job_name": "",
-        "clip_size": 3000.0,
+        "clip_width": 3000.0,
+        "clip_height": 3000.0,
         "resolution": DEFAULT_RESOLUTION,
         "terrain_complexity": 5,
         "rotate_z": 0.0,
@@ -377,7 +382,8 @@ def snapshot_defaults() -> Dict[str, Any]:
 def extract_form_defaults(
     *,
     coords: str,
-    clip_size: float,
+    clip_width: float,
+    clip_height: float,
     units: str,
     terrain_complexity: int,
     rotate_z: float,
@@ -400,7 +406,8 @@ def extract_form_defaults(
         "center1": coords.split(",")[0].strip() if "," in coords else coords,
         "center2": coords.split(",")[1].strip() if "," in coords else "",
         "job_name": custom_name,
-        "clip_size": clip_size,
+        "clip_width": clip_width,
+        "clip_height": clip_height,
         "units": units,
         "terrain_complexity": terrain_complexity,
         "rotate_z": rotate_z,
@@ -431,7 +438,8 @@ def merge_prefill_defaults(
         "center1",
         "center2",
         "job_name",
-        "clip_size",
+        "clip_width",
+        "clip_height",
         "units",
         "terrain_complexity",
         "rotate_z",

@@ -499,24 +499,23 @@ body.jobs-panel-open .layout-preview-col::after {
     display: block;
     background: transparent;
     opacity: 0;
+    pointer-events: none;
     transition: opacity 0.4s ease;
 }
 .inline-preview-frame.loaded {
     opacity: 1;
+    pointer-events: auto;
 }
 /* Demo terrain placeholder — visually centered in the preview area right of the form */
 .inline-preview-demo {
     position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: var(--form-card-width);
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 20px;
-    pointer-events: none;
+    pointer-events: all;
     transition: opacity 0.4s ease;
 }
 .inline-preview-demo.hidden {
@@ -727,6 +726,35 @@ body.jobs-panel-open .layout-preview-col::after {
         grid-template-columns: 1fr;
     }
 }
+#mapWidthInput::-webkit-outer-spin-button,
+#mapWidthInput::-webkit-inner-spin-button,
+#mapHeightInput::-webkit-outer-spin-button,
+#mapHeightInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#mapWidthInput, #mapHeightInput { -moz-appearance: textfield; }
+.size-input-row {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--pill-bg);
+    padding: 0 12px 0 0;
+    overflow: hidden;
+}
+.size-input-row:focus-within {
+    border-color: var(--focus-border-subtle);
+    box-shadow: 0 0 0 2px var(--focus-ring-subtle);
+}
+.size-input-row input {
+    flex: 1;
+    min-width: 0;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    width: 100%;
+}
+.size-unit-suffix { font-size: 12px; color: var(--text-muted, #888); white-space: nowrap; flex-shrink: 0; }
 .app-card label {
     display: block;
     font-size: 12px;

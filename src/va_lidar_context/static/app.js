@@ -146,6 +146,11 @@ function getActiveDownloadJob() {
 function updatePreviewDownloadButton() {
   const downloadBtn = document.getElementById("previewDownloadButton");
   if (!downloadBtn) return;
+  if (!formRecordMode) {
+    downloadBtn.disabled = true;
+    delete downloadBtn.dataset.downloadUrl;
+    return;
+  }
   const activeJob = getActiveDownloadJob();
   const url =
     activeJob && typeof activeJob.download_all_url === "string"
@@ -232,10 +237,10 @@ function getCoords() {
   return parseCoords(coordsInput.value);
 }
 
-function coverageKeyFor(lon, lat, size, units) {
-  const sizeNum = Number(size);
-  const sizeKey =
-    Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum.toFixed(2) : "none";
+function coverageKeyFor(lon, lat, width, height, units) {
+  const w = Number(width), h = Number(height);
+  const sizeKey = (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0)
+    ? `${w.toFixed(2)}x${h.toFixed(2)}` : "none";
   const unitsKey = units === "meters" ? "meters" : "feet";
   return `${lon.toFixed(4)},${lat.toFixed(4)},${sizeKey},${unitsKey}`;
 }
@@ -295,10 +300,13 @@ async function checkCoverage() {
     return;
   }
   const coords = getCoords();
-  const sizeInput = document.querySelector('input[name="size"]');
+  const widthInput = document.querySelector('input[name="width"]');
+  const heightInput = document.querySelector('input[name="height"]');
   const unitsInput = document.querySelector('select[name="units"]');
-  const sizeRaw = Number(sizeInput ? sizeInput.value : "");
-  const size = Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : null;
+  const widthRaw = Number(widthInput ? widthInput.value : "");
+  const heightRaw = Number(heightInput ? heightInput.value : "");
+  const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : null;
+  const height = Number.isFinite(heightRaw) && heightRaw > 0 ? heightRaw : null;
   const units = unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
   if (!coords) {
     coverageStatus = null;
@@ -308,15 +316,16 @@ async function checkCoverage() {
     updateAlerts();
     return;
   }
-  const key = coverageKeyFor(coords.lon, coords.lat, size, units);
+  const key = coverageKeyFor(coords.lon, coords.lat, width, height, units);
   const reqId = ++coverageRequestId;
   try {
     const params = new URLSearchParams({
       lon: String(coords.lon),
       lat: String(coords.lat),
     });
-    if (size !== null) {
-      params.set("size", String(size));
+    if (width !== null && height !== null) {
+      params.set("width", String(width));
+      params.set("height", String(height));
       params.set("units", units);
     }
     const resp = await fetch(`/coverage?${params.toString()}`, {
@@ -390,22 +399,19 @@ function updateAlerts() {
     return;
   }
   const coordsInput = document.querySelector('input[name="coords"]');
-  const sizeInput = document.querySelector('input[name="size"]');
+  const widthInput = document.querySelector('input[name="width"]');
+  const heightInput = document.querySelector('input[name="height"]');
   const unitsInput = document.querySelector('select[name="units"]');
-  const sizeFeet = mapSizeFeet(
-    sizeInput ? sizeInput.value : "",
-    unitsInput ? unitsInput.value : "feet",
-  );
-  const coverageSizeRaw = Number(sizeInput ? sizeInput.value : "");
-  const coverageSize =
-    Number.isFinite(coverageSizeRaw) && coverageSizeRaw > 0
-      ? coverageSizeRaw
-      : null;
-  const coverageUnits =
-    unitsInput && unitsInput.value === "meters" ? "meters" : "feet";
+  const unitsVal = unitsInput ? unitsInput.value : "feet";
+  const widthFeet = mapSizeFeet(widthInput ? widthInput.value : "", unitsVal);
+  const heightFeet = mapSizeFeet(heightInput ? heightInput.value : "", unitsVal);
+  const sizeFeet = widthFeet !== null && heightFeet !== null ? Math.max(widthFeet, heightFeet) : null;
+  const coverageWidth = widthFeet !== null ? (unitsVal === "meters" ? widthFeet / 3.28084 : widthFeet) : null;
+  const coverageHeight = heightFeet !== null ? (unitsVal === "meters" ? heightFeet / 3.28084 : heightFeet) : null;
+  const coverageUnits = unitsVal === "meters" ? "meters" : "feet";
   const coords = coordsInput ? parseCoords(coordsInput.value) : null;
   const currentCoverageKey = coords
-    ? coverageKeyFor(coords.lon, coords.lat, coverageSize, coverageUnits)
+    ? coverageKeyFor(coords.lon, coords.lat, coverageWidth, coverageHeight, coverageUnits)
     : null;
   if (coordsInput && coordsInput.value.trim() && !coords) {
     setAlert('Coordinates are invalid. Use "lat, lon".', true);
@@ -698,7 +704,8 @@ function applyJobFormDefaults(formDefaults) {
   }
 
   setValue('input[name="job_name"]', formDefaults.job_name);
-  setValue('input[name="size"]', formDefaults.clip_size);
+  setValue('input[name="width"]', formDefaults.clip_width);
+  setValue('input[name="height"]', formDefaults.clip_height);
   setSelect('select[name="units"]', formDefaults.units);
   setValue('input[name="terrain_complexity"]', formDefaults.terrain_complexity);
   setValue('input[name="rotate_z"]', formDefaults.rotate_z);
@@ -734,7 +741,7 @@ function setFormRecordMode(locked) {
     });
   };
   disable(
-    'input[name="coords"], input[name="size"], select[name="units"], input[name="terrain_complexity"], input[name="rotate_z"], input[name="dxf_contour_spacing"], #xyz_mode, #runBtn',
+    'input[name="coords"], input[name="width"], input[name="height"], select[name="units"], input[name="terrain_complexity"], input[name="rotate_z"], input[name="dxf_contour_spacing"], #xyz_mode, #runBtn',
   );
   disable(
     "#output_terrain, #output_buildings, #output_contours, #output_naip, #output_xyz, #dxf_include_parcels, #dxf_include_buildings",
@@ -747,10 +754,14 @@ function setFormRecordMode(locked) {
       btn.disabled = formRecordMode;
     });
   const runBtn = document.getElementById("runBtn");
+  const unlockBtn = document.getElementById("unlockBtn");
   if (runBtn) {
     runBtn.disabled = formRecordMode;
-    runBtn.textContent = formRecordMode ? "Locked" : "Build";
+    runBtn.style.display = formRecordMode ? "none" : "";
     runBtn.classList.toggle("locked", formRecordMode);
+  }
+  if (unlockBtn) {
+    unlockBtn.style.display = formRecordMode ? "" : "none";
   }
   const form = document.querySelector("form.card");
   if (form) {
@@ -767,6 +778,7 @@ function setFormRecordMode(locked) {
     coverageError = "";
     setAlert("", false);
   }
+  updatePreviewDownloadButton();
 }
 
 function applyNewBuildDefaults() {
@@ -817,10 +829,16 @@ function applyNewBuildDefaults() {
 function applyRecentJobPreview(previewUrl, formDefaults) {
   setFormRecordMode(true);
   if (previewUrl) {
-    setInlinePreview(previewUrl);
+    currentPreviewPath = normalizePreviewPath(previewUrl);
+    try { localStorage.setItem(LAST_PREVIEW_KEY, previewUrl); } catch (e) {}
+    updatePreviewNavButtons();
+    rerenderRecentJobsIfMounted();
   }
+  const demo = document.getElementById("inlinePreviewDemo");
+  if (demo) demo.classList.remove("hidden");
   applyJobFormDefaults(formDefaults);
   setFormRecordMode(true);
+  _terrainPreview.schedule();
 }
 
 function initPreviewNavButtons() {
@@ -1615,11 +1633,16 @@ async function runBuild(event) {
   setInlineBuildingOverlay(false);
   if (buildSucceeded && data && data.job_id) {
     const jobPreviewUrl = `/jobs/${encodeURIComponent(data.job_id)}?tab=preview`;
-    setInlinePreview(jobPreviewUrl);
+    currentPreviewPath = normalizePreviewPath(jobPreviewUrl);
+    try { localStorage.setItem(LAST_PREVIEW_KEY, jobPreviewUrl); } catch (e) {}
   }
   await refreshRecentJobs();
-  runBtn.disabled = formRecordMode;
-  runBtn.textContent = originalText;
+  if (buildSucceeded) {
+    setFormRecordMode(true);
+  } else {
+    runBtn.disabled = false;
+    runBtn.textContent = originalText;
+  }
 }
 
 // ---- Inline preview panel ----
@@ -1817,7 +1840,392 @@ function findRecentJobFormDefaultsByPreviewUrl(previewUrl) {
   return null;
 }
 
+// --- Live COG terrain preview ---
+const _terrainPreview = (() => {
+  const VERT_EXAG = 2.0;
+  let renderer = null;
+  let scene = null;
+  let camera = null;
+  let controls = null;
+  let mesh = null;
+  let outlineLines = [];
+  let buildingMeshes = [];
+  let meshPositions = null;
+  let meshCols = 0;
+  let meshRows = 0;
+  let meshContextFt = 20000;
+  let meshBbox = null;
+  let meshMinElev = 0;
+  let meshGrid = null;
+  let meshGridCols = 0;
+  let meshGridRows = 0;
+  let abortController = null;
+  let debounceTimer = null;
+  let initialized = false;
+
+  function _updateCameraLayout(canvas) {
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    if (!W || !H) return;
+    const formCol = document.querySelector(".layout-form-col");
+    const formRight = formCol ? formCol.getBoundingClientRect().right : 0;
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H;
+    // Shift the projection frustum so (0,0,0) appears centered in the
+    // visible area to the right of the form panel, not in the full canvas.
+    camera.setViewOffset(W, H, -formRight / 2, 0, W, H);
+    camera.updateProjectionMatrix();
+  }
+
+  function _initThree(canvas) {
+    const THREE = window.__THREE__;
+    const OrbitControls = window.__OrbitControls__;
+    if (!THREE || !OrbitControls) return false;
+
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    scene = new THREE.Scene();
+    const bgCss = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#f5f5f3";
+    scene.background = new THREE.Color(bgCss);
+
+    camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
+    camera.position.set(0, 60, 80);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(1, 2, 1);
+    scene.add(sun);
+
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.autoRotate = false;
+    controls.enablePan = false;
+
+    _updateCameraLayout(canvas);
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+
+    window.addEventListener("resize", () => {
+      if (!canvas.clientWidth) return;
+      _updateCameraLayout(canvas);
+    });
+
+    initialized = true;
+    return true;
+  }
+
+  function _buildMesh(data, satUrl) {
+    const THREE = window.__THREE__;
+    const { grid, cols, rows, min_elev, max_elev, context_size_ft, bbox_wgs84 } = data;
+    meshContextFt = context_size_ft || meshContextFt;
+    meshBbox = bbox_wgs84 || null;
+    meshMinElev = min_elev;
+    meshGrid = grid;
+    meshGridCols = cols;
+    meshGridRows = rows;
+    const horizUnitsPerRealUnit = 100 / meshContextFt;
+
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      mesh = null;
+    }
+    for (const m of buildingMeshes) {
+      scene.remove(m);
+      m.geometry.dispose();
+    }
+    buildingMeshes = [];
+    for (const ln of outlineLines) { scene.remove(ln); ln.geometry.dispose(); ln.material.dispose(); }
+    outlineLines = [];
+
+    const geo = new THREE.PlaneGeometry(100, 100, cols - 1, rows - 1);
+    geo.rotateX(-Math.PI / 2);
+
+    const positions = geo.attributes.position;
+
+    for (let i = 0; i < positions.count; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const elev = (grid[row] && grid[row][col] != null) ? grid[row][col] : min_elev;
+      positions.setY(i, (elev - min_elev) * horizUnitsPerRealUnit * VERT_EXAG);
+    }
+
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0x88aa77,
+      emissive: 0x000000,
+      side: THREE.DoubleSide,
+    });
+    if (satUrl) {
+      new THREE.TextureLoader().load(
+        satUrl,
+        (tex) => { mat.map = tex; mat.color.setHex(0xffffff); mat.needsUpdate = true; },
+        undefined,
+        (err) => { console.warn("Satellite texture failed:", satUrl, err); },
+      );
+    }
+    mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+
+    // Store positions buffer for outline redraws without re-fetching
+    meshPositions = positions;
+    meshCols = cols;
+    meshRows = rows;
+
+    // Camera: back far enough to see the full 10k ft context
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const boxSize = box.getSize(new THREE.Vector3());
+    const dist = Math.max(boxSize.x, boxSize.z) * 0.85;
+    controls.target.copy(center);
+    camera.position.set(center.x, center.y + dist * 0.65, center.z + dist);
+    controls.update();
+
+    _drawOutline();
+  }
+
+  function _drawOutline() {
+    const THREE = window.__THREE__;
+    if (!meshPositions || !scene) return;
+
+    for (const ln of outlineLines) { scene.remove(ln); ln.geometry.dispose(); ln.material.dispose(); }
+    outlineLines = [];
+
+    const widthInput = document.querySelector('input[name="width"]');
+    const heightInput = document.querySelector('input[name="height"]');
+    const unitsInput = document.querySelector('select[name="units"]');
+    const rawWidth = widthInput ? parseFloat(widthInput.value) : NaN;
+    const rawHeight = heightInput ? parseFloat(heightInput.value) : NaN;
+    const units = (unitsInput && unitsInput.value) || "feet";
+    if (!Number.isFinite(rawWidth) || rawWidth <= 0 || !Number.isFinite(rawHeight) || rawHeight <= 0) return;
+
+    const toFt = units === "meters" ? 3.28084 : 1;
+    const fracX = Math.min((rawWidth * toFt) / meshContextFt, 1.0);
+    const fracY = Math.min((rawHeight * toFt) / meshContextFt, 1.0);
+
+    const rows = meshRows, cols = meshCols;
+    const rStart = Math.max(0, Math.floor(rows * (1 - fracY) / 2));
+    const rEnd = Math.min(rows - 1, Math.ceil(rows * (1 + fracY) / 2) - 1);
+    const cStart = Math.max(0, Math.floor(cols * (1 - fracX) / 2));
+    const cEnd = Math.min(cols - 1, Math.ceil(cols * (1 + fracX) / 2) - 1);
+    if (rEnd <= rStart || cEnd <= cStart) return;
+
+    function _vtx(r, c) {
+      const idx = r * cols + c;
+      return new THREE.Vector3(meshPositions.getX(idx), meshPositions.getY(idx), meshPositions.getZ(idx));
+    }
+
+    const Line2 = window.__Line2__;
+    const LineGeometry = window.__LineGeometry__;
+    const LineMaterial = window.__LineMaterial__;
+
+    if (!Line2 || !LineGeometry || !LineMaterial) {
+      console.error("Line2 addons not loaded — hard-refresh the page (Cmd+Shift+R)");
+      return;
+    }
+
+    // Use CSS logical pixels, not physical pixels, for LineMaterial resolution
+    const cw = renderer.domElement.clientWidth || renderer.domElement.width;
+    const ch = renderer.domElement.clientHeight || renderer.domElement.height;
+
+    // Four sides as separate lines so each resets dash distance at its corner.
+    // 10 dashes per side (9 gaps), 2:1 dash:gap ratio → d=2L/29, g=L/29.
+    // This guarantees both ends of every side land on a solid dash segment.
+    const sides = [
+      (() => { const p = []; for (let c = cStart; c <= cEnd; c++) p.push(_vtx(rStart, c)); return p; })(),
+      (() => { const p = []; for (let r = rStart; r <= rEnd; r++) p.push(_vtx(r, cEnd));   return p; })(),
+      (() => { const p = []; for (let c = cEnd; c >= cStart; c--) p.push(_vtx(rEnd, c));   return p; })(),
+      (() => { const p = []; for (let r = rEnd; r >= rStart; r--) p.push(_vtx(r, cStart)); return p; })(),
+    ];
+
+    for (const sidePts of sides) {
+      if (sidePts.length < 2) continue;
+      let L = 0;
+      for (let i = 1; i < sidePts.length; i++) L += sidePts[i].distanceTo(sidePts[i - 1]);
+      const g = L / 29;
+      const geo = new LineGeometry();
+      geo.setPositions(sidePts.flatMap(v => [v.x, v.y, v.z]));
+      const mat = new LineMaterial({
+        color: 0x9933ff,
+        linewidth: 6,
+        dashed: true,
+        dashSize: g * 2,
+        gapSize: g,
+        resolution: new THREE.Vector2(cw, ch),
+      });
+      const ln = new Line2(geo, mat);
+      ln.computeLineDistances();
+      ln.renderOrder = 1;
+      scene.add(ln);
+      outlineLines.push(ln);
+    }
+  }
+
+  function _wgs84ToScene(lon, lat, bbox) {
+    const [xmin, ymin, xmax, ymax] = bbox;
+    const sx = ((lon - xmin) / (xmax - xmin) - 0.5) * 100;
+    const sz = ((ymax - lat) / (ymax - ymin) - 0.5) * 100;
+    return [sx, sz];
+  }
+
+  function _sampleTerrainY(lon, lat) {
+    if (!meshBbox || !meshGrid) return 0;
+    const [xmin, ymin, xmax, ymax] = meshBbox;
+    const col = Math.round(((lon - xmin) / (xmax - xmin)) * (meshGridCols - 1));
+    const row = Math.round(((ymax - lat) / (ymax - ymin)) * (meshGridRows - 1));
+    const r = Math.max(0, Math.min(meshGridRows - 1, row));
+    const c = Math.max(0, Math.min(meshGridCols - 1, col));
+    const elev = meshGrid[r] && meshGrid[r][c] != null ? meshGrid[r][c] : meshMinElev;
+    return (elev - meshMinElev) * (100 / meshContextFt) * VERT_EXAG;
+  }
+
+  function _polygonArea(ring) {
+    let area = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      area += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
+    }
+    return Math.abs(area / 2);
+  }
+
+  function _buildBuildings(data) {
+    const THREE = window.__THREE__;
+    if (!scene || !meshBbox) return;
+
+    for (const m of buildingMeshes) {
+      scene.remove(m);
+      m.geometry.dispose();
+    }
+    buildingMeshes = [];
+
+    const { features, bbox } = data;
+    if (!features || !bbox) return;
+
+    const horizUnitsPerRealUnit = 100 / meshContextFt;
+    const FT_PER_M = 3.28084;
+    const MAX_BUILDINGS = 2000;
+
+    const matNormal = new THREE.MeshLambertMaterial({ color: 0xd4c5a9, side: THREE.DoubleSide });
+    const matMissing = new THREE.MeshLambertMaterial({ color: 0xff3333, side: THREE.DoubleSide });
+
+    // Sort largest footprint first, cap count
+    const sorted = [...features]
+      .filter(f => f.geometry && f.geometry.coordinates && f.geometry.coordinates[0])
+      .sort((a, b) => _polygonArea(b.geometry.coordinates[0]) - _polygonArea(a.geometry.coordinates[0]))
+      .slice(0, MAX_BUILDINGS);
+
+    for (const feature of sorted) {
+      const ring = feature.geometry.coordinates[0];
+      if (ring.length < 4) continue;
+
+      const heightM = feature.properties.height_m;
+      const hasHeight = heightM != null && heightM > 0;
+      const effectiveHeightM = hasHeight ? heightM : 5.0;
+      const sceneHeight = effectiveHeightM * FT_PER_M * horizUnitsPerRealUnit * VERT_EXAG;
+
+      // Build THREE.Shape in shape-space where shape_x=scene_x, shape_y=-scene_z
+      // so that rotateX(-π/2) maps it back to world XZ correctly
+      const [sx0, sz0] = _wgs84ToScene(ring[0][0], ring[0][1], bbox);
+      const shape = new THREE.Shape();
+      shape.moveTo(sx0, -sz0);
+      for (let i = 1; i < ring.length - 1; i++) {
+        const [sx, sz] = _wgs84ToScene(ring[i][0], ring[i][1], bbox);
+        shape.lineTo(sx, -sz);
+      }
+      shape.closePath();
+
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: sceneHeight, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+
+      // Sample terrain height at footprint centroid for base Y
+      const centLon = ring.reduce((s, v) => s + v[0], 0) / ring.length;
+      const centLat = ring.reduce((s, v) => s + v[1], 0) / ring.length;
+      const baseY = _sampleTerrainY(centLon, centLat);
+
+      const buildMesh = new THREE.Mesh(geo, hasHeight ? matNormal : matMissing);
+      buildMesh.position.y = baseY;
+      buildMesh.renderOrder = 0;
+      scene.add(buildMesh);
+      buildingMeshes.push(buildMesh);
+    }
+  }
+
+  function setLabel(text) {
+    const label = document.getElementById("terrainPreviewLabel");
+    if (label) {
+      label.textContent = text;
+      label.style.display = text ? "" : "none";
+    }
+  }
+
+  function schedule() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(fetch, 600);
+  }
+
+  async function fetch() {
+    const canvas = document.getElementById("terrainPreviewCanvas");
+    if (!canvas) return;
+
+    if (!initialized) {
+      if (!_initThree(canvas)) return; // Three.js not loaded yet
+    }
+
+    const coordsInput = document.querySelector('input[name="coords"]');
+    const coords = coordsInput ? parseCoords(coordsInput.value) : null;
+
+    if (!coords) {
+      setLabel("Enter coordinates to preview terrain");
+      return;
+    }
+
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+
+    setLabel("Loading terrain…");
+
+    try {
+      const qs = `lat=${coords.lat}&lon=${coords.lon}`;
+      const signal = abortController.signal;
+
+      // Fire terrain and buildings fetches simultaneously
+      const terrainPromise = window.fetch(`/terrain-preview?${qs}`, { signal });
+      const buildingsPromise = window.fetch(`/buildings-preview?${qs}`, { signal });
+
+      const resp = await terrainPromise;
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      _buildMesh(data, `/satellite-preview?${qs}`);
+      setLabel("");
+
+      // Buildings pop in non-blocking after terrain renders
+      buildingsPromise
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d && !d.error) _buildBuildings(d); })
+        .catch(() => {});
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setLabel("Preview unavailable");
+    }
+  }
+
+  return { schedule, fetch, updateOutline: _drawOutline };
+})();
+
 function initInlinePreview() {
+  // COG terrain canvas is now the default right-panel view — don't auto-load
+  // the last job into the iframe on startup. Jobs still load when the user
+  // clicks one in the recent jobs list.
+  return;
   const frame = document.getElementById("inlinePreviewFrame");
   if (!frame) return;
   // Prefer server-injected URL (most recent job from this session), then localStorage
@@ -1843,8 +2251,28 @@ document.addEventListener("DOMContentLoaded", () => {
   if (newJobButton) {
     newJobButton.addEventListener("click", (event) => {
       event.preventDefault();
+      if (!CAN_BUILD) {
+        openAuthModal(window.location.pathname + window.location.search);
+        return;
+      }
       applyNewBuildDefaults();
     });
+  }
+  const unlockBtn = document.getElementById("unlockBtn");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", () => {
+      if (!CAN_BUILD) {
+        openAuthModal(window.location.pathname + window.location.search);
+        return;
+      }
+      setFormRecordMode(false);
+      scheduleCoverageCheck();
+      updateAlerts();
+    });
+  }
+  if (!CAN_BUILD) {
+    setFormRecordMode(true);
+    if (unlockBtn) unlockBtn.textContent = "Sign in to build";
   }
   const jobsPanel = document.getElementById("recentJobsPanel");
   const jobsButton = document.getElementById("menuButton");
@@ -1962,7 +2390,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const xyzMode = document.getElementById("xyz_mode");
   const dxfParcels = document.getElementById("dxf_include_parcels");
   const coords = document.querySelector('input[name="coords"]');
-  const mapSizeInput = document.querySelector('input[name="size"]');
+  const mapWidthInput = document.querySelector('input[name="width"]');
+  const mapHeightInput = document.querySelector('input[name="height"]');
   const units = document.querySelector('select[name="units"]');
   if (contours) contours.addEventListener("change", updateUiToggles);
   if (dxfParcels) dxfParcels.addEventListener("change", updateAlerts);
@@ -1975,17 +2404,17 @@ document.addEventListener("DOMContentLoaded", () => {
     coords.addEventListener("input", () => {
       updateAlerts();
       scheduleCoverageCheck();
+      _terrainPreview.schedule();
     });
-  if (mapSizeInput)
-    mapSizeInput.addEventListener("input", () => {
-      updateAlerts();
-      scheduleCoverageCheck();
-    });
+  const onSizeInput = () => { updateAlerts(); scheduleCoverageCheck(); _terrainPreview.updateOutline(); };
+  if (mapWidthInput) mapWidthInput.addEventListener("input", onSizeInput);
+  if (mapHeightInput) mapHeightInput.addEventListener("input", onSizeInput);
   if (units)
     units.addEventListener("change", () => {
       updateUnitLabels();
       updateAlerts();
       scheduleCoverageCheck();
+      _terrainPreview.updateOutline();
     });
   const form = document.querySelector("form.card");
   if (form) {
@@ -2010,4 +2439,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initPreviewNavButtons();
   initInlinePreview();
   scheduleCoverageCheck();
+  _terrainPreview.schedule();
 });
