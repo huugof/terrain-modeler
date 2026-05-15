@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .config import (
+    DEFAULT_CONTOUR_SAMPLE,
     DEFAULT_DXF_CONTOUR_SPACING,
     DEFAULT_FILL_MAX_DIST,
     DEFAULT_FILL_SMOOTHING,
@@ -19,7 +20,6 @@ from .config import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_RESOLUTION,
     DEFAULT_ROTATE_Z,
-    DEFAULT_CONTOUR_SAMPLE,
     DEFAULT_TERRAIN_SAMPLE,
     DEFAULT_UNITS,
     DEFAULT_XYZ_MODE,

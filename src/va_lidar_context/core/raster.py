@@ -7,7 +7,6 @@ import numpy as np
 import rasterio
 from rasterio.fill import fillnodata
 from rasterio.mask import mask as rio_mask
-from rasterio.warp import Resampling, reproject
 
 from ..util import run_subprocess
 
